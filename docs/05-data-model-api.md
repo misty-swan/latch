@@ -5,7 +5,7 @@
 - プロダクト名: LATCH
 - 作成日: 2026-10-17(v0.3更新: 2026-10-18)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
-- v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)
+- v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - 前提文書: 01 要件定義書 v0.8 / 02 スコープ・受け入れ条件合意書 v0.2 / 04 アーキテクチャ設計書 v0.5
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
@@ -226,7 +226,7 @@ created_at / updated_at
 
 **Vectorizeインデックス**(1本): vector id = intent ULID。metadata = `{form, status, category, user_id}`(インデックス作成時にmetadata indexとしてform・status・categoryを宣言する。07 §1)。検索時のfilterで form一致・status=active を最適化として適用し(01 §12)、取り出し後は**D1の現行status・blocks・提案履歴をコードで再検証する**(metadataの同期遅延に依存しない二重化)。Intentの遷移(pause/resume/matched/expired)ごとにmetadataのstatusを更新し、失敗はCronバックフィルで回収する。照合時にD1行が存在しないベクトルはfail-closeで除外する。次元=1024・距離=cosine(07 v0.1で確定)。削除: Intent削除・期限切れ+7日でベクトル削除(§2.6)。
 
-**KV**: `revocation:{jti}` = 1(TTL=JWT残り寿命)。失効はJWT残寿命(最大1時間)以内の効力とし、権限が関わる操作(チャット送信・回答・退会)はD1のusers.statusとblocksを必ず再検証して補完する。WebSocket接続チケットはKVに置かず、**joseで署名した短期トークン(exp=60秒・user_id/latch_idクレーム)** を使う(結果整合の伝播遅延を回避。§3.4)。
+**KV**: `revocation:{jti}` = 1(TTL=JWT残り寿命)。失効はJWT残寿命(最大1時間)以内の効力とし、権限が関わる操作(チャット送信・回答・退会)はD1のusers.statusとblocksを必ず再検証して補完する。WebSocket接続チケットはKVに置かず、**joseで署名した短期トークン(exp=60秒・user_id/latch_idクレーム)** を使う(結果整合の伝播遅延を回避。§3.4)。回転猶予: `rfg:{旧リフレッシュトークンハッシュ}` = 現行リフレッシュトークン(TTL 120秒・取得後に削除で使い切り。窓外の再提示は再利用検出として族をrevoked。04 §4)
 
 **R2**: バケット1つ(`icons`)。キー=`{user ULID}/{ULID}`。受け付けはPNG/JPEG/WebP・1MBまで。Workersで受けて検証し保存(外部サービス送信なし)。URLは同一オリジンで配信(04 Assets経由ではなくWorkerレスポンスでストリーム)。
 
