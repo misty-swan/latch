@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // コントローラー(メインセッション)の既定モデル。グローバル(flash)をこのプロジェクトだけで上書きする
+  "model": "zai-coding-plan/glm-5.3",
+  "agents": {
+    // 組み込みの調査系サブエージェントも flash に揃える(親セッションのモデルを継承させない)
+    "general": { "model": "zai-coding-plan/glm-5.3-flash" },
+    "explore": { "model": "zai-coding-plan/glm-5.3-flash" }
+  }
+}
