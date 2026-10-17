@@ -16,7 +16,7 @@
 | 02-scope-acceptance.md | スコープ・受け入れ条件合意書 | v0.2 | 作る/作らないの境界・完成条件×検証方法(#1〜#35) |
 | 03-ux-spec.md | UX仕様書 | **未作成(プロトタイプの手配待ち)** | 5画面フロー・通知・状態遷移・スタイリング(D-A-07) |
 | 04-system-architecture.md | アーキテクチャ設計書 | v0.5 | Cloudflare構成・技術スタック・開発規律 |
-| 05-data-model-api.md | データモデル・API仕様書 | v0.2 | D1テーブル・Vectorize/KV/R2・API契約・WebSocket |
+| 05-data-model-api.md | データモデル・API仕様書 | v0.3 | D1テーブル・Vectorize/KV/R2・API契約・WebSocket |
 | 06-matching-pipeline.md | マッチングパイプライン設計書 | v0.2 | 5層・イベント駆動・提案化・縮退 |
 | 07-jev-llm-spec.md | LLM利用仕様書 | v0.2 | Parser/Embedding/Jevの提供元と精度ゲート |
 | 08-privacy-safety.md | プライバシー・安全設計書 | v0.2 | 表示最小化・外部送信・同意・安全機構・法務確認 |

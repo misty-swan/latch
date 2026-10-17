@@ -77,3 +77,27 @@ it("主要UNIQUE INDEXが存在し、想定の列の上に張られている", a
 		}
 	}
 });
+
+it("refresh_families に previous_hash 列と current_hash UNIQUE索引がある(回転猶予・docs/05 §2.2)", async () => {
+	// 列の存在(PRAGMAのテーブル名はバインドできないためリテラルで指定)
+	const columns = await env.DB.prepare(
+		"PRAGMA table_info(refresh_families)",
+	).all<{ name: string }>();
+	const columnNames = columns.results.map((column) => column.name);
+	expect(columnNames, "previous_hash 列が存在すること").toContain(
+		"previous_hash",
+	);
+
+	// UNIQUE索引の存在と対象列
+	const index = await env.DB.prepare(
+		"SELECT name, sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+	)
+		.bind("refresh_families_current_hash_uniq")
+		.first<{ name: string; sql: string | null }>();
+	expect(
+		index,
+		"refresh_families_current_hash_uniq が存在すること",
+	).toBeDefined();
+	expect(index?.sql, "current_hash を含むこと").toContain("current_hash");
+	expect(index?.sql, "UNIQUE索引であること").toContain("UNIQUE");
+});

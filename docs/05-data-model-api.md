@@ -1,10 +1,11 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.2
+- 文書バージョン: v0.3
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.2更新: 同日)
+- 作成日: 2026-10-17(v0.3更新: 2026-10-18)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
+- v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)
 - 前提文書: 01 要件定義書 v0.8 / 02 スコープ・受け入れ条件合意書 v0.2 / 04 アーキテクチャ設計書 v0.5
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
@@ -60,7 +61,8 @@ created_at / updated_at
 ```yaml
 id:            ULID(PK)
 user_id:       FK users
-current_hash:  string   # 現行リフレッシュトークンのハッシュ(SHA-256)
+current_hash:  string   # 現行リフレッシュトークンのハッシュ(SHA-256)。UNIQUE(回転CASの検索引)
+previous_hash: string | null   # 直前の現行トークンハッシュ。再利用検出で族を特定する
 expires_at:    datetime # 30日(回転ごとに延長)
 status:        active | revoked
 created_at / rotated_at

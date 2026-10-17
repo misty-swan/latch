@@ -102,19 +102,25 @@ export const users = sqliteTable(
 );
 
 /** リフレッシュトークン族(回転式)。再利用検出は族revoked+401(docs/04 §4) */
-export const refreshFamilies = sqliteTable("refresh_families", {
-	id: text("id", { length: 26 }).primaryKey(),
-	userId: text("user_id", { length: 26 })
-		.notNull()
-		.references(() => users.id),
-	/** 現行リフレッシュトークンのハッシュ(SHA-256) */
-	currentHash: text("current_hash").notNull(),
-	/** 30日(回転ごとに延長) */
-	expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
-	status: text("status").$type<RefreshFamilyStatus>().notNull(),
-	createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-	rotatedAt: integer("rotated_at", { mode: "timestamp_ms" }).notNull(),
-});
+export const refreshFamilies = sqliteTable(
+	"refresh_families",
+	{
+		id: text("id", { length: 26 }).primaryKey(),
+		userId: text("user_id", { length: 26 })
+			.notNull()
+			.references(() => users.id),
+		/** 現行リフレッシュトークンのハッシュ(SHA-256) */
+		currentHash: text("current_hash").notNull(),
+		/** 直前の現行トークンハッシュ。再利用検出で族を特定する(docs/05 §2.2) */
+		previousHash: text("previous_hash"),
+		/** 30日(回転ごとに延長) */
+		expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+		status: text("status").$type<RefreshFamilyStatus>().notNull(),
+		createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+		rotatedAt: integer("rotated_at", { mode: "timestamp_ms" }).notNull(),
+	},
+	(t) => [uniqueIndex("refresh_families_current_hash_uniq").on(t.currentHash)],
+);
 
 /** Intent(意思本体) */
 export const intents = sqliteTable(
