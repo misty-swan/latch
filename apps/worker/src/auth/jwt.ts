@@ -5,7 +5,7 @@
  * importせず、署名時の現在時刻は引数のclock経由でのみ受け取る。
  */
 
-import type { AuthProvider } from "@latch/shared";
+import { AUTH_PROVIDERS, type AuthProvider } from "@latch/shared";
 import type { JWTPayload } from "jose";
 import { jwtVerify, SignJWT } from "jose";
 import type { Clock } from "../clock/clock";
@@ -42,6 +42,10 @@ export class AccessTokenError extends Error {
 /** カスタムクレームのワイヤ名(TSの型はcamelCase・JWT上はsnake_case) */
 const WIRE_IDP_PROVIDER = "idp_provider";
 const WIRE_IDP_SUBJECT = "idp_subject";
+
+/** 文字列がAuthProvider(google/apple)かの実行時検査(docs/05 §2.2: users.auth_provider) */
+const isAuthProvider = (value: string): value is AuthProvider =>
+	AUTH_PROVIDERS.some((provider) => provider === value);
 
 /**
  * アクセストークンを署名する(HS256・iss="latch"・iat=署名時刻・exp=iat+3600秒)。
@@ -119,7 +123,14 @@ export const verifyAccessToken = async (
 	}
 	const idpProvider = payload[WIRE_IDP_PROVIDER];
 	if (typeof idpProvider === "string") {
-		verified.idpProvider = idpProvider as AuthProvider;
+		// 未知のprovider値は不正なトークンとして扱う(型だけを信用しない・docs/05 §2.2)
+		if (!isAuthProvider(idpProvider)) {
+			throw new AccessTokenError(
+				"invalid",
+				"TOKEN_INVALID: idp_providerが不正な値(docs/05 §2.2: google/appleのみ)",
+			);
+		}
+		verified.idpProvider = idpProvider;
 	}
 	const idpSubject = payload[WIRE_IDP_SUBJECT];
 	if (typeof idpSubject === "string") {

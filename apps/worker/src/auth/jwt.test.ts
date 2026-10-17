@@ -5,6 +5,7 @@
  */
 
 import type { AuthProvider } from "@latch/shared";
+import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { fixedClock } from "../clock/clock";
 import { newUlid } from "../ids";
@@ -140,6 +141,29 @@ describe("verifyAccessTokenの失敗(docs/05 §3.1: TOKEN_EXPIRED/UNAUTHORIZED�
 		let caught: unknown;
 		try {
 			await verifyAccessToken(SECRET, "not-a-jwt");
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).toBeInstanceOf(AccessTokenError);
+		expect((caught as AccessTokenError).kind).toBe("invalid");
+	});
+
+	it("idp_providerが未知の値はAccessTokenError(kind=invalid・型だけを信用しない実行時検査)", async () => {
+		// signAccessTokenはAuthProvider型しか受けないため、未知の値を持つ
+		// トークンを直接署名して作る(改ざんや将来の形式変化への防御の試験)
+		const now = Math.floor(Date.now() / 1000);
+		const token = await new SignJWT({
+			jti: newJti(),
+			idp_provider: "unknown",
+		})
+			.setProtectedHeader({ alg: "HS256" })
+			.setIssuedAt(now)
+			.setIssuer("latch")
+			.setExpirationTime(now + ACCESS_TOKEN_TTL_SECONDS)
+			.sign(new TextEncoder().encode(SECRET));
+		let caught: unknown;
+		try {
+			await verifyAccessToken(SECRET, token);
 		} catch (error) {
 			caught = error;
 		}
