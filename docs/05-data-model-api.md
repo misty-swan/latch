@@ -4,7 +4,7 @@
 - ステータス: Draft
 - プロダクト名: LATCH
 - 作成日: 2026-10-17
-- 前提文書: 01 要件定義書 v0.6 / 02 スコープ・受け入れ条件合意書 v0.1 / 04 アーキテクチャ設計書 v0.2
+- 前提文書: 01 要件定義書 v0.7 / 02 スコープ・受け入れ条件合意書 v0.1 / 04 アーキテクチャ設計書 v0.4
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -94,7 +94,7 @@ notification_level: proposals_only | muted              # 既定前者
 alcohol_involved:   boolean  # 機会formのみtrueになり得る
 # 状態
 status:             draft | active | paused | matched | expired | cancelled
-version:            integer  # 更置ごと+1(旧01 §16規律)
+version:            integer  # 更新ごと+1(01 §16)
 expires_at:         datetime  # つながり=既定30日(7/30/90選択)/機会=既定start+3h
 embedding_model:    string | null   # 埋め込み済みモデル識別子(01 §18)
 embedded_at:        datetime | null
@@ -169,7 +169,7 @@ created_at / updated_at
 
 **latch_members**: `latch_id / user_id — PK(latch_id, user_id)`(latchesの参加者副表。「自分の提案・成立」の一覧取得はこの表経由)。
 
-**latch_status_events**: `id / latch_id / from_status / to_status / created_at`(MLR集計の観測点・踏襲)。
+**latch_status_events**: `id / latch_id / from_status / to_status / created_at`(MLR集計の観測点)。
 
 **messages**(チャットの正。DOは配信のみ)
 

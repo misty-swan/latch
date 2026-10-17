@@ -11,10 +11,10 @@
 | ファイル | 文書 | 状態 | 概要 |
 |---|---|---|---|
 | 00-document-roadmap.md | 本書 | v0.1 | 索引と運用ルール |
-| 01-requirements.md | 要件定義書 | v0.6 | コンセプト・要件・v1.0完成条件・製品の未決(D-xx) |
+| 01-requirements.md | 要件定義書 | v0.7 | コンセプト・要件・v1.0完成条件・製品の未決(D-xx) |
 | 02-scope-acceptance.md | スコープ・受け入れ条件合意書 | v0.1 | 作る/作らないの境界・完成条件×検証方法(#1〜#35) |
 | 03-ux-spec.md | UX仕様書 | **未作成(プロトタイプの手配待ち)** | 5画面フロー・通知・状態遷移・スタイリング(D-A-07) |
-| 04-system-architecture.md | アーキテクチャ設計書 | v0.2 | Cloudflare構成・技術スタック・開発規律 |
+| 04-system-architecture.md | アーキテクチャ設計書 | v0.4 | Cloudflare構成・技術スタック・開発規律 |
 | 05-data-model-api.md | データモデル・API仕様書 | v0.1 | D1テーブル・Vectorize/KV/R2・API契約・WebSocket |
 | 06-matching-pipeline.md | マッチングパイプライン設計書 | v0.1 | 5層・イベント駆動・提案化・縮退 |
 | 07-jev-llm-spec.md | LLM利用仕様書 | v0.1 | Parser/Embedding/Jevの提供元と精度ゲート |
@@ -23,7 +23,7 @@
 | 10-test-env-nfr.md | テスト環境・非機能検証計画書 | v0.1 | 環境・時刻制御・E2Eマトリクス・負荷・縮退 |
 | 11-release-plan.md | リリース計画書 | v0.1 | 公開前提・手順・ロールバック・獲得施策 |
 | 12-development-roadmap.md | 開発ロードマップ | v0.1 | F0〜F10の工程とゲート |
-| reviews/d04-reuse-investigation.md | D-04記録 | v0.2 | 旧実装の扱い・技術選定の確定記録 |
+| reviews/ | レビュー記録 | ― | 多角レビューの指摘票と統合レポート(loop1/等) |
 
 ## 2. 読む順序
 

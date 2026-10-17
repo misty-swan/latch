@@ -4,16 +4,16 @@
 - ステータス: Draft
 - プロダクト名: LATCH
 - 作成日: 2026-10-17
-- 前提文書: 01 要件定義書 v0.6 / 04 アーキテクチャ設計書 v0.2 / 05 データモデル・API仕様書 v0.1 / 06 マッチングパイプライン設計書 v0.1
+- 前提文書: 01 要件定義書 v0.7 / 04 アーキテクチャ設計書 v0.4 / 05 データモデル・API仕様書 v0.1 / 06 マッチングパイプライン設計書 v0.1
 - 本書の位置づけ: LLMを利用する3系統(Intent Parser / Embedding / Jev)の提供元・入出力・timeout・精度ゲート・コスト・同意を確定する。**04の未決D-A-01(Embeddingプロバイダ)を本書が解消する**
 
 ## 1. 提供元の確定
 
 | 系統 | 提供元(第一候補) | フォールバック | 主な根拠 |
 |---|---|---|---|
-| Intent Parser(構造化) | Anthropic Claude(Haikuクラス・構造化出力) | なし(失敗時は構造化フォームへ) | 日本語の構造化精度・JSON出力保証・旧実装のG1実績 |
+| Intent Parser(構造化) | Anthropic Claude(Haikuクラス・構造化出力) | なし(失敗時は構造化フォームへ) | 日本語の構造化精度・JSON出力保証・安定した実績 |
 | Embedding(意味検索) | **Workers AI `@cf/baai/bge-m3`**(1024次元) | なし(バックフィルで回収) | **データがCloudflare内に留まる(外部送信ゼロ・01 §21に最良)**・100言語対応・$0.012/百万トークン級の安価さ(2026-10-17確認) |
-| Jev(成立判定) | TypeSafe(System One・確率のみ返すモデル) | Anthropic Claude(Haikuクラス) | 原子的確率判定・出力スキーマ保証・旧G2実測(型安定で再試行不要) |
+| Jev(成立判定) | TypeSafe(System One・確率のみ返すモデル) | Anthropic Claude(Haikuクラス) | 原子的確率判定・出力スキーマ保証(再試行不要) |
 
 **Vectorizeインデックスの確定(D-A-01解消)。** dimensions=1024・metric=cosine。ダッシュボードのモデル・プリセット一覧に依らず、wranglerで次元と距離を**明示指定**して作成する(プリセット側の対応状況に左右されないため・2026-10-17確認)。
 
@@ -53,7 +53,7 @@
 |---|---|
 | form判定(つながり/機会)の完全一致 | 90%以上 |
 | topic抽出一致(係り受けを除く主題語) | 85%以上 |
-| 機会formのフィールド(旧基準踏襲) | category 85% / time.start 90% / location 90% / participants 80% / budget 90% |
+| 機会formのフィールド(本書の初期基準) | category 85% / time.start 90% / location 90% / participants 80% / budget 90% |
 | alcohol_involved | **recall 100%**(見逃し0)・precision 90%以上。境界表現(「ワイン会」「バーの誕生日会」/負例「コーヒー」)を必ず含める |
 | Jev(a→b・b→aの順序整合) | 双方向のスコアが逆向に大差ないことの sanity check(運用前は傾向確認のみ) |
 
