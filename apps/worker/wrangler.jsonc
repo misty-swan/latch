@@ -14,8 +14,9 @@
 			"binding": "DB",
 			"database_name": "latch-db",
 			// デプロイ時に実IDへ差し替え
-			"database_id": "00000000-0000-0000-0000-000000000000"
-			// migrations_dir(D1マイグレーション)は後続のF0工程で追加する
+			"database_id": "00000000-0000-0000-0000-000000000000",
+			// D1マイグレーション置き場(drizzle-kit生成SQL・docs/04 §3.1)
+			"migrations_dir": "migrations"
 		}
 	],
 

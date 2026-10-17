@@ -1,6 +1,12 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
 	"files": {
-		"includes": ["apps/**", "packages/**", "!**/worker-configuration.d.ts"]
+		"includes": [
+			"apps/**",
+			"packages/**",
+			"!**/worker-configuration.d.ts",
+			// drizzle-kitの生成物(ツールが都度書き換えるため整形対象外)
+			"!apps/worker/migrations"
+		]
 	}
 }
