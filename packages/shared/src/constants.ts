@@ -18,6 +18,10 @@ export const INTENT_STATUSES = [
 ] as const;
 export type IntentStatus = (typeof INTENT_STATUSES)[number];
 
+/** 認証プロバイダ。docs/05 §2.2(users.auth_provider)・04 §5 */
+export const AUTH_PROVIDERS = ["google", "apple"] as const;
+export type AuthProvider = (typeof AUTH_PROVIDERS)[number];
+
 /** 低粒度タグ(カテゴリ)の初期セット。docs/05 §2.2・D-B-01 */
 export const CATEGORIES = [
 	"趣味・娯楽",
@@ -55,6 +59,23 @@ export const ERROR_CODES = [
 	"INTERNAL",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
+
+/** エラーコード対応のHTTPステータス。docs/05 §3.1 */
+export const ERROR_HTTP_STATUS: Record<ErrorCode, number> = {
+	UNAUTHORIZED: 401,
+	TOKEN_EXPIRED: 401,
+	FORBIDDEN: 403,
+	NOT_FOUND: 404,
+	VALIDATION_FAILED: 400,
+	RATE_LIMITED: 429,
+	ACTIVE_INTENT_LIMIT: 422,
+	UNDER_AGE: 422,
+	ALCOHOL_RESTRICTED: 422,
+	FORM_MISMATCH: 400,
+	PARSE_FAILED: 422,
+	EMBEDDING_PENDING: 409,
+	INTERNAL: 500,
+};
 
 /** マッチングイベント種別(Queue/DO間で発行される) */
 export const MATCH_EVENT_TYPES = [
@@ -104,7 +125,7 @@ export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 export const LATCH_RESPONSE_VALUES = ["yes", "no", "defer"] as const;
 export type LatchResponseValue = (typeof LATCH_RESPONSE_VALUES)[number];
 
-/** 各種上限値。docs/04 §5・08 §8・05 §3.1 */
+/** 各種上限値。docs/04 §5・08 §8・05 §3.1・05 §2.3(アイコン) */
 export const LIMITS = {
 	REQUESTS_PER_MINUTE: 60,
 	ACTIVE_INTENTS_PER_USER: 5,
@@ -119,4 +140,5 @@ export const LIMITS = {
 	RAW_TEXT_MAX_LENGTH: 300,
 	DISPLAY_NAME_MAX_LENGTH: 40,
 	BIO_MAX_LENGTH: 200,
+	ICON_MAX_BYTES: 1_048_576,
 } as const;

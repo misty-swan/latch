@@ -12,6 +12,7 @@
  *   (削除は常にアプリ層の明示操作・docs/05 §2.5)
  */
 import type {
+	AuthProvider,
 	Category,
 	CounterScope,
 	IntentForm,
@@ -31,8 +32,8 @@ import {
 	uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-/** 認証プロバイダ */
-export type AuthProvider = "google" | "apple";
+/** 認証プロバイダの正本は@latch/shared。他参照の互換のため再exportする */
+export type { AuthProvider } from "@latch/shared";
 /** ユーザー種別。v1.0はindividual固定(将来business・docs/01 §17) */
 export type UserActorType = "individual";
 /** ユーザーの状態。deleted=退会 */

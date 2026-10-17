@@ -52,6 +52,7 @@ describe("LIMITS", () => {
 			RAW_TEXT_MAX_LENGTH: 300,
 			DISPLAY_NAME_MAX_LENGTH: 40,
 			BIO_MAX_LENGTH: 200,
+			ICON_MAX_BYTES: 1_048_576,
 		});
 	});
 });
