@@ -221,6 +221,12 @@ importers:
       hono:
         specifier: 4.13.13
         version: 4.13.13
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
+      ulid:
+        specifier: 3.0.2
+        version: 3.0.2
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: 0.23.0
@@ -1630,6 +1636,9 @@ packages:
     resolution: {integrity: sha512-CQ46U0ZkAGmbT/4UxdzzGJpacP2IeKgY4a5/tOI9AABbpOMfK739wfDXmv1usCk+3RkKj1hQy4/fjhiwa2xlrA==}
     engines: {node: '>=16.9.0'}
 
+  jose@6.2.12:
+    resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
+
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
 
@@ -1839,6 +1848,10 @@ packages:
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
+    hasBin: true
+
+  ulid@3.0.2:
+    resolution: {integrity: sha512-yu26mwteFYzBAot7KVMqFGCVpsF6g8wXfJzQUHvu1no3+rRRSFcSV2nKeYvNPLD2J4b08jYBDhHUjeH0ygIl9w==}
     hasBin: true
 
   undici-types@6.21.0:
@@ -2897,6 +2910,8 @@ snapshots:
 
   hono@4.13.13: {}
 
+  jose@6.2.12: {}
+
   js-tokens@4.0.0: {}
 
   kleur@4.1.5: {}
@@ -3100,6 +3115,8 @@ snapshots:
       fsevents: 2.3.3
 
   typescript@5.9.3: {}
+
+  ulid@3.0.2: {}
 
   undici-types@6.21.0: {}
 

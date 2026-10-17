@@ -10,7 +10,9 @@
 	"dependencies": {
 		"@latch/shared": "workspace:*",
 		"drizzle-orm": "0.44.7",
-		"hono": "4.13.13"
+		"hono": "4.13.13",
+		"jose": "6.2.12",
+		"ulid": "3.0.2"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "0.23.0",
