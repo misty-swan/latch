@@ -1,0 +1,12 @@
+{
+	"keys": [
+		{
+			"kty": "RSA",
+			"n": "k3hGfODBErpwSHL6zHsUFOzpc0_qJPHFAmIJD4FObYwXVdcHv9GdhLK5Z4zDq0IP-vmaNLxEnAL5h5noWoJCPMefDiZEbsmrqXouNoaB4VOKE_byYPnLDGPjpAxiVu1Ez_B7bsnpDycSdu1RdBLUqQo66GFFqp-H0L9HH3sDH-P1qIb0mRGKADEz_ce90v5DFsMXYZoKZjA9bpraTAIURqmkHwTzWfzG6Siu3kIyUCWrsD3HRDGMyI3ivj0Lvireeu1LcsegQr2P4kd5LdloIIpDmNPEphjKl9o-ukhi0gQcQnvSm0xWOOcYqJSIbek6I8V9tP9gGrfiJOnbURnzkQ",
+			"e": "AQAB",
+			"kid": "test-idp-key-1",
+			"alg": "RS256",
+			"use": "sig"
+		}
+	]
+}
