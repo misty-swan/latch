@@ -151,7 +151,7 @@ created_at
 UNIQUE(user_low, user_high)
 ```
 
-Layer 1は当該ペアの行の存在だけで除外する(outcomeは参照・分析用)。
+Layer 1はoutcomeがmatchedまたはrejectedの行の存在で除外する(deferred・expiredの行は機会Intentの条件付き再提案の参照に使う・01 §8)。
 
 **latches**
 
@@ -283,7 +283,7 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 
 - 主要エラーcode: UNAUTHORIZED / TOKEN_EXPIRED / FORBIDDEN / NOT_FOUND / VALIDATION_FAILED / RATE_LIMITED / ACTIVE_INTENT_LIMIT(422) / UNDER_AGE(422) / ALCOHOL_RESTRICTED(422) / FORM_MISMATCH / PARSE_FAILED / EMBEDDING_PENDING / INTERNAL。本人が所属しないlatch・他人のIntentへのアクセスは、存在を推測させないため一律NOT_FOUNDを返す(FORBIDDENは自己リソースへの操作権限の欠如に限る)
 - ページネーション: 一覧系は `?cursor=<不透明>&limit=1..50(既定20)`。応答は `{items: [...], next_cursor: string|null}`
-- レート制限: API全体60req/分(04 §5)。429には `Retry-After` を付す
+- レート制限: 1ユーザーあたり60req/分(04 §5)。429には `Retry-After`(固定60秒)を付す
 
 ### 3.2 エンドポイント一覧
 
@@ -339,6 +339,8 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 **GET /v1/latches(提案)** — `{id, form, proposal:{…表示要素(成立前の条件サマリは含まない)・必要人数}, score, status, response_deadline, my_response|null, participants_count}`。scoreは応答に含むがUIでは表示しない(01 §10の裁定)。
 
 **POST /v1/latches/{id}/response** — 状態遷移後のlatch。全員YESで matched + チャット解放対象となり、双方の詳細情報(表示名・アイコン・プロフィール)が以降のGETに含まれる(01 §8)。
+
+**回答と取り消しの状態遷移。** defer=[今回は見送る]は提案を即時にrejectedで閉じる(proposal_historyのoutcomeはdeferred)。no=API契約経由の明示の拒否(同rejected・outcome=rejectedで恒久排除)。retract(回答取り消し)は回答期限内・未成立のみ可とし、partial_accept→proposedへ復帰する(双方YES成立後は不可。離脱はleaveを使う)。leave(参加取り消し)はmatchedのLATCHをcancelledとし、チャットを双方読み取り専用にする(02 D-08)。グループで必要人数の下限を割った場合もLATCH全体をcancelledとする。
 
 ### 3.4 WebSocket(リアルタイムチャット)
 
