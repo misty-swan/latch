@@ -90,6 +90,8 @@
 	],
 
 	"vars": {
-		"LATCH_LLM_MODE": "stub"
+		"LATCH_LLM_MODE": "stub",
+		// 実行環境の識別(docs/10 §1)。local既定で、デプロイ時にstaging/productionへ上書き
+		"LATCH_ENV": "local"
 	}
 }
