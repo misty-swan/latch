@@ -30,13 +30,13 @@
 
 - **入力**: 対象ユーザーのraw_textのみ。他ユーザーのデータ・位置・プロフィールは一切送らない
 - **出力**(05 §3.3のスキーマ): form・topic・category・time・geo・participants・budget・expires_at選択肢・alcohol_involved・constraints各種・warnings
-- 曖昧表現の丸め: 「くらい」は確定値へ丸め(「5000円くらい」→5000)。「2〜4人」はmin=2/max=4。form判定は時制・時刻表現の有無で行い、判定自信度が低い場合もformとして返し、**確認UIで必ずユーザーが確認・切替する**(01 §9)
+- 曖昧表現の丸め: 「くらい」は確定値へ丸め(「5000円くらい」→5000)。「2〜4人」はmin=2/max=4。form判定は時制・時刻表現の有無で行い、判定信頼度が低い場合もformとして返し、**確認UIで必ずユーザーが確認・切替する**(01 §9)
 - timeout 10秒・再試行0・失敗時はPARSE_FAILED(再試行ボタン+構造化フォームフォールバック)。性能目標「p95 3秒」は**成功応答について**測定し、失敗率は警報線(09 §6)で監視する
 - stub: 時刻表現・金額・人数の規則ベース抽出+form判定辞書。form=connection既定(より安全な側)
 
 ## 4. Embedding
 
-- **入力**: 正規化テキスト(構造化データから生成。topic+soft_constraints+negative_constraints+participants補足。機会formは時間・地域・予算を含む)。**raw_textは送らない**
+- **入力**: 正規化テキスト(構造化データから生成。topic+soft_constraints+negative_constraints+participants補足。機会Intentは時間・地域・予算を含む)。**raw_textは送らない**
 - 出力1024次元。`intents.embedding_model`にモデル識別子と日時を記録(01 §18)。モデル変更時は全active Intentの一括再エンベディング+再評価をCronジョブで行う
 - timeout 5秒(初期値・実測で確定する。D-D-03)・再試行0。失敗は06 §5のバックフィルで回収
 

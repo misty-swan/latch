@@ -40,7 +40,7 @@ Cron(毎分) → 機会: bucket到来・catch-up / 全Intent: 期限切れ /
 
 **冪等性。** match_eventsのUNIQUE(event_type, source_intent_id, version)が二重投入を許さない。処理済みイベントの再消費はstatus=processedを確認してスキップする。
 
-**Cron(毎分・04 §4)。** (a)機会Intentのbucket到来(starts_atが属する30分Bucket到達の未評価Intent)の再評価、(b)catch-up(expires_atまで2時間以内かつlast_evaluated_atから30分以上経過のactiveな機会Intent)、(c)全active Intentの期限切れバッチ(expired化+ベクトル削除予約)、(d)つながりLATCHのcompleted判定(matchedで最終メッセージ(0件ならmatched時刻)から90日経過)、(e)埋め込み未完のIntentのバックフィル再試行、(f)usage_counters集計とJev予算アラート(80%)、(g)**埋め込み済みかつ未評価(embedded_at NOT NULL かつ last_evaluated_at NULL)のactive Intentの回収再評価**(キュー消失の安全網)、(h)**active化後10分経過のつながりIntentの1回きり遅延再評価**(upsert反映遅延による相互取りこぼしの安全網)、(i)**提案クローズ後続処理**(下記)。
+**Cron(毎分・04 §4)。** (a)機会Intentのbucket到来(starts_atが属する30分Bucket到達の未評価Intent)の再評価、(b)catch-up(expires_atまで2時間以内かつlast_evaluated_atから30分以上経過のactiveな機会Intent)、(c)全active Intentの期限切れバッチ(expired化+ベクトル削除予約)、(d)つながりLATCHのcompleted判定(matchedで最終メッセージ(0件ならmatched時刻)から90日経過)、(e)埋め込み未完了のIntentのバックフィル再試行、(f)usage_counters集計とJev予算アラート(80%)、(g)**埋め込み済みかつ未評価(embedded_at NOT NULL かつ last_evaluated_at NULL)のactive Intentの回収再評価**(キュー消失の安全網)、(h)**active化後10分経過のつながりIntentの1回きり遅延再評価**(upsert反映遅延による相互取りこぼしの安全網)、(i)**提案クローズ後続処理**(下記)。
 
 **提案クローズ後続処理。** 提案がクローズ(matched / expired / rejected / cancelled)した時点で、当該ユーザー(機会Intentは当該Intent)の保留candidateを提示順(機会=対象時刻の近い順/つながり=LATCH Score降順)で通知上限までproposedへ昇格し、回答期限を再計算して通知する。グループの「次集合の評価」もこのトリガーで実行する。
 

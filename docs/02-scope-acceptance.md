@@ -24,7 +24,7 @@
 - 自然言語Intent入力と構造化(両形式のform判定を含む)
 - 下書き保存(status=draftでサーバー保存、再開して「預ける」経路)
 - Active Intent管理(一時停止・再開・削除・期限管理)
-- 5層パイプライン(Hard Filter / Vector Search / Cheap Judge / Jev / LATCH Engine)
+- 5層パイプライン(Hard Filter / Candidate Retrieval / Cheap Judge / Jev / LATCH Engine)
 - 1対1 LATCH、および最大4人のグループLATCH
 - YES / NO回答と双方承認
 - つながりIntentの複数成立(成立後のactive復帰)
@@ -115,7 +115,7 @@
 
 | # | 完了項目 | 検証方法 | 合格証拠 | 依存 |
 |---|---|---|---|---|
-| 16 | 提案を通知できる(Web Push+アプリ内) | 閾値超過候補を発生させる(お知らせ設定proposals_onlyとmutedの双方) | 通知の到達記録。mutedでは通知が出力されず、proposed遷移とホームからの回答可を確認 | Web Pushの実機検証(実機ブラウザ) |
+| 16 | 提案を通知できる(Web Push+アプリ内) | 閾値超過候補を発生させる(notification_level=proposals_onlyとmutedの双方) | 通知の到達記録。mutedでは通知が出力されず、proposed遷移とホームからの回答可を確認 | Web Pushの実機検証(実機ブラウザ) |
 | 17 | yes / deferを回答できる(noはAPI契約経由のみ) | 提案に対して両ユーザーが回答操作する(yes=[参加する]/defer=[今回は見送る]のUI 2択。noはAPI直叩き) | 回答の記録と状態遷移 | — |
 | 18 | 双方YESで成立する | 両者YES後の状態と解放情報を確認する | matched遷移とチャット解放 | — |
 | 19 | 期限切れ処理(両形式) | つながりIntentの回答期限(通知+24時間式)と機会Intentの回答期限式・Intent期限の経過を確認する | 提案・Intentがexpiredで閉じる | 時刻操作は10 |

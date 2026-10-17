@@ -2,7 +2,7 @@
 
 - 対象: docs/00〜12(03は未作成)
 - 実施: 6観点の並列レビュー(glm-5.3-flash)→ 本レポートにて統合・採否
-- 指摘総数: **121件**(Critical 8 / Major 51 / Minor 62)
+- 指摘総数: **121件**(Critical 8 / Major 49 / Minor 64。※初期集計の「Major 51 / Minor 62」は検証フェーズの再集計により訂正・verification.md N-9)
 - 指摘票: [consistency.md](consistency.md) / [completeness.md](completeness.md) / [feasibility.md](feasibility.md) / [product-ux.md](product-ux.md) / [privacy-legal.md](privacy-legal.md) / [wording.md](wording.md)
 
 ## 採否サマリ

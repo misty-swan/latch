@@ -75,7 +75,7 @@ id:                     ULID(PK)
 user_id:                FK users
 form:                   connection | occasion
 topic:                  string(1..40)        # 主題の短句(必須)
-category:               string | null        # 低粒度タグ(D-03)
+category:               string | null        # 低粒度タグ(任意・D-B-01初期セット: 趣味・娯楽/スポーツ・運動/学び・語学/創作・クリエイティブ/テック・開発/食・飲み/旅行・アウトドア/音楽・芸術/読書・文化/仕事・キャリア/子育て・家庭/健康・生活/地域・コミュニティ/ボランティア・社会/その他。ゴールドセット作成時に見直す)
 raw_text:               string(0..300)
 # 添付(任意。機会Intentはtime.start必須)
 starts_at:              datetime | null      # 機会=必須 / つながり=null
@@ -159,7 +159,7 @@ Layer 1はoutcomeがmatchedまたはrejectedの行の存在で除外する(defer
 id:                 ULID(PK)
 form:               connection | occasion
 intent_ids:         json(2..4)   # ULID配列(参加メンバーはlatch_members副表で管理)
-proposal:           json          # 表示要素のみ(01 §10。成立前の条件サマリは含まない)
+proposal:           json          # {form, topic, time_window, region_name, participants, budget}(成立後に表示する上位集合。成立前の応答は旨・回答期限・必要人数のみ・§3.3。UI表示の選択は03)
 score:              real          # 内部利用(順序付け・計測)。UIには表示しない(01 §10裁定)
 status:             candidate | proposed | partial_accept | matched |
                     rejected | expired | cancelled | completed
@@ -218,7 +218,7 @@ created_at / updated_at
 
 **usage_counters**(レート制限・Jev予算の3層保護の実体): `scope(intent_daily|intent_hourly|jev_intent|jev_user|jev_global_daily|jev_global_monthly) / key(user_id|intent_id|'-') / period(日付or時間のバケット文字列) / count — PK(scope, key, period)`。加算は `UPDATE … SET count=count+1 … RETURNING` の原子的1文で行い、Queues consumerはバッチ単位でまとめて加算する(並行消費での取りこぼし防止)。periodが90日より古い行はCronで削除する(API単位のスロットルはWorkers Rate Limitingバインディング(key=user_id)が担い、本表には置かない)。
 
-**geofeatures**: `id / name / municipality / type(city|station|landmark) / lat / lng`(D-A-03で取り込み方法確定)。
+**geofeatures**: `id / name / municipality / type(city|station) / lat / lng / grid_key(約1km=0.01度グリッドのキー・INDEX)`(ソースはISJ+駅データ。取り込みと変換の規定は04 §4)。
 
 ### 2.3 Vectorize・KV・R2
 
@@ -362,7 +362,7 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 
 | ID | 未決事項 | 暫定案 |
 |---|---|---|
-| D-B-01 | category低粒度タグの初期セット値 | Parserゴールドセット作成時に01 D-03と同時確定 |
-| D-B-03 | proposal(条件サマリ)のJSON項目の最終形 | 03(UX仕様)の表示要素確定時に揃える |
+| D-B-01 | category低粒度タグの初期セット値 | 15種の初期セットを暫定確定(§2.2 intents注記)。Parserゴールドセット作成時に見直す |
+| D-B-03 | proposal(条件サマリ)のJSON項目のUI表示の最終形 | API上位集合は§2.2(latches.proposal)で確定済み。画面で表示する項目の選択のみ03で確定 |
 
 (D-B-02 アンケート設問は09 §7で確定し解消)。外部依存の既知未決はD-A-03(地名データ)であり、本書の該当箇所に影響する。
