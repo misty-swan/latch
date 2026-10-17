@@ -2,9 +2,23 @@
   "$schema": "https://opencode.ai/config.json",
   // コントローラー(メインセッション)の既定モデル。グローバル(flash)をこのプロジェクトだけで上書きする
   "model": "zai-coding-plan/glm-5.3",
+  // superpowers(開発手法スキル集)。OpenCode V2(2.0.4+)用の指定
+  "plugins": ["superpowers@git+https://github.com/obra/superpowers.git"],
   "agents": {
     // 組み込みの調査系サブエージェントも flash に揃える(親セッションのモデルを継承させない)
     "general": { "model": "zai-coding-plan/glm-5.3-flash" },
     "explore": { "model": "zai-coding-plan/glm-5.3-flash" }
+  },
+  "mcp": {
+    "servers": {
+      "context7": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "@upstash/context7-mcp"
+        ]
+      }
+    }
   }
 }
