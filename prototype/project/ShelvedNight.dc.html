@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>LATCH 見送った 夜</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./latch.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&amp;family=Shippori+Mincho:wght@400;500;600&amp;family=Zen+Kaku+Gothic+New:wght@300;400;500;700&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="screen shelved" data-theme="{{theme}}" style="width: 390px; height: 844px"><svg class="grain" aria-hidden="true"><defs><filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .10  0 0 0 0 .13  0 0 0 0 .20  1.9 0 0 0 -.86"></feColorMatrix></filter><filter id="grain-d" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .92  0 0 0 0 .94  0 0 0 0 1  1.9 0 0 0 -.86"></feColorMatrix></filter></defs><rect width="100%" height="100%" filter="url(#grain)"></rect></svg>
+<header class="topbar"><div class="topbar__side"><a class="icon-btn" href="HomeNight.dc.html" aria-label="閉じる"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"></path></svg></a></div><span></span><div class="topbar__side topbar__side--end"></div></header>
+<div class="screen__body">
+<div style="position:relative;height:350px">
+<div class="dome-rest" style="--size:150px;position:absolute;left:40px;top:178px" aria-hidden="true"><span class="dome"></span><span class="shelf"></span></div>
+<p class="tategaki reveal" style="position:absolute;right:34px;top:40px;font-size:26px" aria-label="そっと、棚に戻しました。"><span aria-hidden="true"><span class="ch" style="--i:0">そ</span><span class="ch" style="--i:1">っ</span><span class="ch" style="--i:2">と</span><span class="ch" style="--i:3">、</span><br><span class="ch" style="--i:4">棚</span><span class="ch" style="--i:5">に</span><span class="ch" style="--i:6">戻</span><span class="ch" style="--i:7">し</span><span class="ch" style="--i:8">ま</span><span class="ch" style="--i:9">し</span><span class="ch" style="--i:10">た</span><span class="ch" style="--i:11">。</span></span></p>
+</div>
+<div class="pad">
+<p class="t-body rise rise-3" style="color:var(--ink)">今回の提案は見送りました。あなたの意思は、そのまま預けています。</p>
+<div class="rise rise-4"><p class="note" style="margin-top:22px"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11v5.2"></path><circle cx="12" cy="7.9" r=".9" fill="currentColor" stroke="none"></circle></svg><span>この相手との提案は今後届きません。</span></p></div>
+</div>
+</div>
+<div class="screen__foot">
+<a class="btn btn--primary btn--block" href="HomeNight.dc.html">閉じる</a>
+<a class="btn btn--quiet" href="DeferReason.dc.html">見送った理由を残す(任意)</a>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"dark"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'dark' };
+  }
+}
+</script>
+</body>
+</html>

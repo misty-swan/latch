@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>LATCH デザインシステム 部品</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./latch.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&amp;family=Shippori+Mincho:wght@400;500;600&amp;family=Zen+Kaku+Gothic+New:wght@300;400;500;700&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="screen" data-theme="{{theme}}" style="width: 1440px; height: 1300px; padding: 60px 72px; box-sizing: border-box">
+<svg class="grain" aria-hidden="true"><defs><filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .10  0 0 0 0 .13  0 0 0 0 .20  1.9 0 0 0 -.86"></feColorMatrix></filter><filter id="grain-d" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .92  0 0 0 0 .94  0 0 0 0 1  1.9 0 0 0 -.86"></feColorMatrix></filter></defs><rect width="100%" height="100%" filter="url(#grain)"></rect></svg>
+
+<div style="position: relative; display: flex; justify-content: space-between; align-items: flex-end; gap: 48px">
+<div><p class="t-eyebrow">Design system — 04</p><h1 class="t-display" style="font-size: 38px; margin-top: 12px">部品。</h1></div>
+<p class="t-body" style="max-width: 600px; font-size: 14px">押せるものは高さ44px以上。主ボタンは墨の丸い帯、二番手は細い枠、静かな操作は文字だけ。取り返しにくい操作(退会・ブロック)だけ、注意の色を使います。クラス名は project/latch.css と同じです。</p>
+</div>
+
+<div style="position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; margin-top: 36px">
+
+<div style="display: flex; flex-direction: column; gap: 34px">
+<section><p class="t-label">ボタン</p>
+<div style="display: flex; flex-direction: column; gap: 10px; margin-top: 14px">
+<button class="btn btn--primary btn--block" type="button">参加する</button>
+<button class="btn btn--secondary btn--block" type="button">今回は見送る</button>
+<div style="display: flex; gap: 10px; align-items: center"><button class="btn btn--quiet" type="button">あとで</button><button class="btn btn--danger btn--small" type="button">ブロックする</button><button class="btn btn--primary btn--small" type="button" disabled="">預ける</button></div>
+</div>
+<p class="t-meta" style="margin-top: 10px">.btn--primary / --secondary / --quiet / --danger / --small · 押せないときは不透明度32%</p>
+</section>
+<section><p class="t-label">預け方(2択)</p>
+<div class="choice" role="radiogroup" aria-label="預け方" style="margin-top: 14px">
+<label class="choice__opt"><input type="radio" name="dsform" checked=""><span class="choice__card"><svg class="glyph" viewBox="0 0 20 20" aria-hidden="true"><path class="gt" d="M10.9 1.5A8.5 8.5 0 0 1 10.9 18.5"></path><path class="gm" d="M9.1 1.5A8.5 8.5 0 0 0 9.1 18.5Z"></path></svg><span class="choice__name">つながりとして預ける</span><span class="choice__hint">すぐ会う予定はない</span></span></label>
+<label class="choice__opt"><input type="radio" name="dsform"><span class="choice__card"><svg class="glyph" viewBox="0 0 20 20" aria-hidden="true"><path class="gl" d="M11.3 1.5A8.5 8.5 0 0 1 11.3 18.5Z"></path><path class="gm" d="M8.7 1.5A8.5 8.5 0 0 0 8.7 18.5Z"></path></svg><span class="choice__name">機会として預ける</span><span class="choice__hint">日時がある</span></span></label>
+</div>
+</section>
+<section><p class="t-label">期限(つながり)</p>
+<div class="pills" role="radiogroup" aria-label="期限" style="margin-top: 14px"><label class="pill"><input type="radio" name="dsdays"><span><b>7</b>日</span></label><label class="pill"><input type="radio" name="dsdays" checked=""><span><b>30</b>日</span></label><label class="pill"><input type="radio" name="dsdays"><span><b>90</b>日</span></label></div>
+</section>
+<section><p class="t-label">スイッチとラジオ</p>
+<div style="display: flex; align-items: center; gap: 18px; margin-top: 14px"><div class="switch"><input type="checkbox" aria-label="オン" checked=""><span></span></div><div class="switch"><input type="checkbox" aria-label="オフ"><span></span></div><span class="t-caption">つまみも半円。オンで円になる。</span></div>
+<div style="margin-top: 10px"><label class="radio-row"><input type="radio" name="dsr" checked=""><span>端末の設定に合わせる</span></label><label class="radio-row"><input type="radio" name="dsr"><span>夜(暗い紙)</span></label></div>
+</section>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 34px">
+<section><p class="t-label">便箋(主役の入力欄)</p>
+<div style="margin-top: 14px; padding: 18px 20px 14px; border-radius: 20px; box-shadow: inset 0 0 0 1px var(--line)">
+<div class="compose__rule" style="font-family: var(--f-mincho); font-weight: 500; font-size: 19px; line-height: 1.85; letter-spacing: .04em; min-height: 140px; background-size: 100% calc(19px * 1.85); background-position: 0 -3px">イラストを描く人と、月1くらいで雑に絵を見せ合える関係になれたら嬉しい。</div>
+<div style="display: flex; justify-content: space-between; margin-top: 10px"><p class="privacy"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2.4"></rect><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"></path></svg>ほかの人には表示されません。</p><p class="counter"><b>36</b> / 300</p></div>
+</div>
+<div style="display: flex; gap: 22px; margin-top: 12px"><p class="counter"><b>36</b> / 300</p><p class="counter is-near"><b>285</b> / 300</p><p class="counter is-full"><b>300</b> / 300</p></div>
+<p class="t-meta" style="margin-top: 8px">270字から灯りの文字色、300字で注意の色。入力は300字で止まる。</p>
+</section>
+<section><p class="t-label">読み解いた条件</p>
+<dl class="facts" style="margin-top: 10px"><div class="fact"><dt class="fact__key">主題</dt><dd class="fact__val">イラスト仲間</dd><button class="icon-btn" type="button" aria-label="主題を直す"><svg class="ic ic--s" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19h3.6L18.3 9.3a2 2 0 0 0 0-2.8l-.8-.8a2 2 0 0 0-2.8 0L5 15.4z"></path><path d="M13.4 7l3.6 3.6"></path></svg></button></div><div class="fact fact--chips"><dt class="fact__key">条件</dt><dd class="chips"><button class="chip" type="button">初心者歓迎<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"></path></svg></button><button class="chip" type="button">月1回くらい<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"></path></svg></button><button class="chip chip--add" type="button"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"></path></svg>条件を足す</button></dd><span></span></div><div class="fact"><dt class="fact__key">地域</dt><dd class="fact__val fact__val--muted">指定なし(全国)</dd><button class="icon-btn" type="button" aria-label="地域を直す"><svg class="ic ic--s" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19h3.6L18.3 9.3a2 2 0 0 0 0-2.8l-.8-.8a2 2 0 0 0-2.8 0L5 15.4z"></path><path d="M13.4 7l3.6 3.6"></path></svg></button></div></dl>
+</section>
+<section><p class="t-label">知らせ</p>
+<div style="display: flex; flex-direction: column; gap: 10px; margin-top: 14px">
+<p class="banner" style="margin: 0"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4l16 16"></path><path d="M8.6 15.9a4.8 4.8 0 0 1 5.6-.6"></path><path d="M5.2 12.4a9.6 9.6 0 0 1 3.6-2.3M12.4 9.3a9.6 9.6 0 0 1 6.4 3.1"></path><path d="M2.4 9.2a14 14 0 0 1 3.1-2.3M10 5.6a14 14 0 0 1 11.6 3.6"></path><circle cx="12" cy="19" r=".9" fill="currentColor" stroke="none"></circle></svg><span>オフラインです。最後に確かめた内容を表示しています。</span></p>
+<p class="note"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11v5.2"></path><circle cx="12" cy="7.9" r=".9" fill="currentColor" stroke="none"></circle></svg><span>この相手との提案は今後届きません。</span></p>
+<p class="note note--lamp"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11v5.2"></path><circle cx="12" cy="7.9" r=".9" fill="currentColor" stroke="none"></circle></svg><span><b>お酒を含む機会は、20歳以上の方が預けられます。</b></span></p>
+<p class="toast" style="position: relative; left: auto; bottom: auto; transform: none; animation: none; align-self: flex-start">下書きに残しました。</p>
+</div>
+</section>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 34px">
+<section><p class="t-label">届いた知らせ・一覧の行</p>
+<a class="arrival" href="#" style="margin: 14px 0 0"><div class="latch is-arrived" style="--size:40px;--gap:5px;" aria-hidden="true"><span class="latch__light"></span><span class="latch__mine"></span><span class="latch__theirs"><span class="latch__ink"></span></span></div><span class="stack" style="gap:2px"><span class="arrival__title">提案が届いています</span><span class="t-meta">回答期限 明日 18:12 まで</span></span><svg class="ic ic--s" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6"></path></svg></a>
+<a class="intent" href="#" style="padding-left: 0; padding-right: 0"><span class="intent__glyph"><svg class="glyph glyph--l" viewBox="0 0 20 20" aria-hidden="true"><path class="gt" d="M10.9 1.5A8.5 8.5 0 0 1 10.9 18.5"></path><path class="gm" d="M9.1 1.5A8.5 8.5 0 0 0 9.1 18.5Z"></path></svg></span><span class="stack"><span class="intent__words clamp-2">子育て中の親と、子どもが寝たあとに少しだけ話せる関係が欲しい。</span><span class="intent__meta"><span class="t-label">つながり</span><span class="status"><svg class="glyph" viewBox="0 0 20 20" aria-hidden="true"><path class="gt" d="M10.9 1.5A8.5 8.5 0 0 1 10.9 18.5"></path><path class="gm" d="M9.1 1.5A8.5 8.5 0 0 0 9.1 18.5Z"></path></svg>預けている</span></span><span class="intent__time"><span class="timeline" aria-hidden="true"><span class="timeline__done" style="width:22%"></span><span class="timeline__now" style="left:22%"></span></span><span class="timeline__labels t-meta"><span>預けて7日</span><span>あと23日</span></span></span></span></a>
+<p class="t-meta">経過・期限・これまでのつながりは、細い線と等幅の数字で、そっと。</p>
+</section>
+<section><p class="t-label">吹き出し(テキストのみ)</p>
+<div class="chat" style="padding: 14px 0 0">
+<div class="msg msg--theirs"><p class="msg__bubble">今月は何を描きましたか?</p><span class="msg__time">17:54</span></div>
+<div class="msg msg--mine"><p class="msg__bubble">窓から見える木を描きました。</p><span class="msg__time">21:40</span></div>
+</div>
+<div class="ended-bar" style="padding: 14px 0; border-top: 1px solid var(--line); margin-top: 10px"><svg class="glyph" viewBox="0 0 20 20" aria-hidden="true"><circle class="go" cx="10" cy="10" r="7.6"></circle><path class="go" d="M10 2.4V17.6"></path></svg>このつながりは終了しました</div>
+</section>
+<section><p class="t-label">下部タブ</p>
+<nav class="tabbar" aria-label="メイン(見本)" style="position: relative; margin-top: 14px; padding: 10px 0; border-radius: 22px; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line); grid-template-columns: 1fr 120px 1fr">
+<a class="tab" href="#" aria-current="page"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M11.2 3.8a8.2 8.2 0 0 0 0 16.4z" fill="currentColor"></path><path d="M13.2 3.9a8.2 8.2 0 0 1 0 16.2" stroke-dasharray="2.2 2.4"></path></svg><span>預けている</span></a>
+<a class="tab__put" href="#" style="box-shadow: 0 16px 30px -16px rgba(16, 22, 36, .8)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"></path></svg><span>置く</span></a>
+<a class="tab" href="#"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"></circle><path d="M12 3.8v16.4"></path></svg><span>つながり</span></a>
+</nav>
+<p class="t-meta" style="margin-top: 10px">入口は3つだけ。検索・一覧・おすすめのタブは持たない。</p>
+</section>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'light' };
+  }
+}
+</script>
+</body>
+</html>

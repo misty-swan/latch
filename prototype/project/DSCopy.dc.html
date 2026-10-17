@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>LATCH デザインシステム 言葉と表示の段階</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./latch.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&amp;family=Shippori+Mincho:wght@400;500;600&amp;family=Zen+Kaku+Gothic+New:wght@300;400;500;700&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="screen" data-theme="{{theme}}" style="width: 1440px; height: 1100px; padding: 60px 72px; box-sizing: border-box">
+<svg class="grain" aria-hidden="true"><defs><filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .10  0 0 0 0 .13  0 0 0 0 .20  1.9 0 0 0 -.86"></feColorMatrix></filter><filter id="grain-d" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .92  0 0 0 0 .94  0 0 0 0 1  1.9 0 0 0 -.86"></feColorMatrix></filter></defs><rect width="100%" height="100%" filter="url(#grain)"></rect></svg>
+
+<div style="position: relative; display: flex; justify-content: space-between; align-items: flex-end; gap: 48px">
+<div><p class="t-eyebrow">Design system — 06</p><h1 class="t-display" style="font-size: 38px; margin-top: 12px">言葉の決まりと、表示の段階。</h1></div>
+<p class="t-body" style="max-width: 520px; font-size: 14px">押しの強さは、色より言葉で生まれます。動詞は5つ(置く・預ける・待つ・届く・つながる)に絞り、断る・断られるを連想させる言葉は使いません。</p>
+</div>
+
+<div style="position: relative; display: grid; grid-template-columns: 300px minmax(0, 1fr) minmax(0, 1.15fr); gap: 40px; margin-top: 34px">
+
+<section>
+<p class="t-label">使う言葉</p>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px">
+<span class="chip" style="cursor: default">置く</span><span class="chip" style="cursor: default">預ける</span><span class="chip" style="cursor: default">待つ</span><span class="chip" style="cursor: default">届く</span><span class="chip" style="cursor: default">つながる</span><span class="chip" style="cursor: default">見送る</span><span class="chip" style="cursor: default">棚に戻す</span><span class="chip" style="cursor: default">提案</span><span class="chip" style="cursor: default">預けた意思</span>
+</div>
+<p class="t-label" style="margin-top: 30px">使わない言葉</p>
+<ul style="margin-top: 12px; display: flex; flex-direction: column; border-top: 1px solid var(--line)">
+<li style="display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px"><span style="text-decoration: line-through; text-decoration-color: var(--danger); color: var(--ink-2)">探す・検索・見つかる</span><span class="t-meta">探す画面は無い</span></li>
+<li style="display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px"><span style="text-decoration: line-through; text-decoration-color: var(--danger); color: var(--ink-2)">断る・拒否・不一致</span><span class="t-meta">拒絶は存在しない</span></li>
+<li style="display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px"><span style="text-decoration: line-through; text-decoration-color: var(--danger); color: var(--ink-2)">申し込む・応募・募集</span><span class="t-meta">押しが強い</span></li>
+<li style="display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px"><span style="text-decoration: line-through; text-decoration-color: var(--danger); color: var(--ink-2)">マッチ・出会い</span><span class="t-meta">交際を連想させる</span></li>
+<li style="display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px"><span style="text-decoration: line-through; text-decoration-color: var(--danger); color: var(--ink-2)">一致度・スコア・Intent</span><span class="t-meta">見せない内部の値</span></li>
+<li style="display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 14px"><span style="text-decoration: line-through; text-decoration-color: var(--danger); color: var(--ink-2)">見つかりません・失敗</span><span class="t-meta">待つことは正常</span></li>
+</ul>
+</section>
+
+<section>
+<p class="t-label">決まった言い回し</p>
+<dl style="margin-top: 12px; border-top: 1px solid var(--line)">
+<div style="padding: 12px 0; border-bottom: 1px solid var(--line)"><dt class="t-meta">提案</dt><dd class="t-words" style="margin-top: 2px">条件が合う候補があります。</dd></div>
+<div style="padding: 12px 0; border-bottom: 1px solid var(--line)"><dt class="t-meta">回答(2択のみ)</dt><dd style="margin-top: 2px; font-size: 15px; font-weight: 500">参加する<span style="color: var(--line-2); padding: 0 10px">/</span>今回は見送る</dd></div>
+<div style="padding: 12px 0; border-bottom: 1px solid var(--line)"><dt class="t-meta">参加したあと</dt><dd class="t-words" style="margin-top: 2px">相手の回答を待っています。<span class="t-caption" style="font-family: var(--f-gothic); margin-left: 6px">+回答期限だけ</span></dd></div>
+<div style="padding: 12px 0; border-bottom: 1px solid var(--line)"><dt class="t-meta">見送ったあと・つながり(一度だけ)</dt><dd class="t-words" style="margin-top: 2px">この相手との提案は今後届きません。</dd></div>
+<div style="padding: 12px 0; border-bottom: 1px solid var(--line)"><dt class="t-meta">見送ったあと・機会</dt><dd class="t-words" style="margin-top: 2px">条件が変われば、また届くことがあります。</dd></div>
+<div style="padding: 12px 0; border-bottom: 1px solid var(--line)"><dt class="t-meta">成立しなかった</dt><dd class="t-words" style="margin-top: 2px">この提案は成立しませんでした。</dd></div>
+<div style="padding: 12px 0; border-bottom: 1px solid var(--line)"><dt class="t-meta">相手の離脱・ブロック・退会(区別しない)</dt><dd class="t-words" style="margin-top: 2px">このつながりは終了しました</dd></div>
+<div style="padding: 12px 0; border-bottom: 1px solid var(--line)"><dt class="t-meta">期限切れ(アプリ内のお知らせ・1回)</dt><dd class="t-words" style="margin-top: 2px">預けていた意思の期限が切れました</dd></div>
+<div style="padding: 12px 0; border-bottom: 1px solid var(--line)"><dt class="t-meta">プッシュ通知(本文は汎用文だけ)</dt><dd class="t-words" style="margin-top: 2px">LATCH候補があります。詳細はアプリでご確認ください。</dd></div>
+</dl>
+</section>
+
+<section>
+<p class="t-label">表示の段階 — いつ、何が見えるか</p>
+<div style="margin-top: 12px; border-top: 1px solid var(--ink)">
+<div style="display: grid; grid-template-columns: 112px minmax(0, 1fr) minmax(0, 1fr); gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--line)"><span class="t-meta">段階</span><span class="t-meta">見せる</span><span class="t-meta">見せない</span></div>
+<div style="display: grid; grid-template-columns: 112px minmax(0, 1fr) minmax(0, 1fr); gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; line-height: 1.7"><span style="display: flex; gap: 8px; align-items: flex-start; font-weight: 500"><svg class="glyph" viewBox="0 0 20 20" aria-hidden="true" style="margin-top: 3px; width: 16px; height: 16px"><path class="gl" d="M11.3 1.5A8.5 8.5 0 0 1 11.3 18.5Z"></path><path class="gm" d="M8.7 1.5A8.5 8.5 0 0 0 8.7 18.5Z"></path></svg>提案</span><span>候補があること・回答期限・必要人数</span><span style="color: var(--ink-3)">一致度・名前・アイコン・プロフィール・主題などの条件</span></div>
+<div style="display: grid; grid-template-columns: 112px minmax(0, 1fr) minmax(0, 1fr); gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; line-height: 1.7"><span style="display: flex; gap: 8px; align-items: flex-start; font-weight: 500"><svg class="glyph" viewBox="0 0 20 20" aria-hidden="true" style="margin-top: 3px; width: 16px; height: 16px"><path class="gm" d="M10 1.5A8.5 8.5 0 0 0 10 18.5Z"></path><path class="gf" d="M10 1.5A8.5 8.5 0 0 1 10 18.5Z"></path></svg>成立後</span><span>表示名・アイコン・ひとこと・重なった条件(主題・日時・地域名・人数・予算・預け方)</span><span style="color: var(--ink-3)">預けた文章そのもの・生年月日・正確な位置・距離</span></div>
+<div style="display: grid; grid-template-columns: 112px minmax(0, 1fr) minmax(0, 1fr); gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; line-height: 1.7"><span style="display: flex; gap: 8px; align-items: flex-start; font-weight: 500"><svg class="ic ic--xs" viewBox="0 0 24 24" aria-hidden="true" style="margin-top: 3px"><path d="M12 18.5V6M6.8 11L12 5.8 17.2 11"></path></svg>チャット</span><span>本人が送ったテキストだけ</span><span style="color: var(--ink-3)">画像・スタンプ・通話</span></div>
+<div style="display: grid; grid-template-columns: 112px minmax(0, 1fr) minmax(0, 1fr); gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; line-height: 1.7"><span style="display: flex; gap: 8px; align-items: flex-start; font-weight: 500"><svg class="glyph" viewBox="0 0 20 20" aria-hidden="true" style="margin-top: 3px; width: 16px; height: 16px"><circle class="go" cx="10" cy="10" r="7.6"></circle><path class="go" d="M10 2.4V17.6"></path></svg>終了後</span><span>「このつながりは終了しました」と、読み取り専用の履歴。相手は「つながっていた相手」と表示</span><span style="color: var(--ink-3)">終了の理由(離脱・ブロック・退会の区別)</span></div>
+<div style="display: grid; grid-template-columns: 112px minmax(0, 1fr) minmax(0, 1fr); gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; line-height: 1.7"><span style="display: flex; gap: 8px; align-items: flex-start; font-weight: 500"><svg class="ic ic--xs" viewBox="0 0 24 24" aria-hidden="true" style="margin-top: 3px"><path d="M6.5 16.5v-5.2a5.5 5.5 0 0 1 11 0v5.2l1.6 1.9H4.9z"></path><path d="M10 20.6a2.1 2.1 0 0 0 4 0"></path></svg>通知</span><span>提案・成立の2種だけ。本文は汎用文</span><span style="color: var(--ink-3)">意思の内容・相手のこと・不成立や期限切れのプッシュ</span></div>
+</div>
+<p class="t-caption" style="margin-top: 16px">預けた文章は、本人の一覧と詳細にだけ表示する(相手には成立後も見せない)。</p>
+</section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'light' };
+  }
+}
+</script>
+</body>
+</html>

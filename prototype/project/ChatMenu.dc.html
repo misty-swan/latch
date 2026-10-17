@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>LATCH つながりの操作</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./latch.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&amp;family=Shippori+Mincho:wght@400;500;600&amp;family=Zen+Kaku+Gothic+New:wght@300;400;500;700&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="screen chat-screen" data-theme="{{theme}}" style="width: 390px; height: 844px"><svg class="grain" aria-hidden="true"><defs><filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .10  0 0 0 0 .13  0 0 0 0 .20  1.9 0 0 0 -.86"></feColorMatrix></filter><filter id="grain-d" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .92  0 0 0 0 .94  0 0 0 0 1  1.9 0 0 0 -.86"></feColorMatrix></filter></defs><rect width="100%" height="100%" filter="url(#grain)"></rect></svg>
+<header class="topbar"><div class="topbar__side"><a class="icon-btn" href="Connections.dc.html" aria-label="戻る"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5L8 12l6.5 6.5"></path></svg></a></div><div class="topbar__title"><div class="chat-head"><span class="avatar avatar--c avatar--s" aria-hidden="true"></span><div class="stack" style="min-width:0"><p class="chat-head__name">あお</p><p class="chat-head__sub">イラスト仲間<span class="sep">·</span>つながり</p></div></div></div><div class="topbar__side topbar__side--end"><a class="icon-btn" href="#" aria-label="このつながりについて"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="12" r="1.25" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1.25" fill="currentColor" stroke="none"></circle><circle cx="18.5" cy="12" r="1.25" fill="currentColor" stroke="none"></circle></svg></a></div></header>
+<div class="screen__body" style="display:flex;flex-direction:column;justify-content:flex-end">
+<div class="chat">
+<div class="chat__origin">
+<div class="latch is-latched" style="--size:30px;--gap:0px;--theirs-fill:#2F5A55" aria-hidden="true"><span class="latch__light"></span><span class="latch__mine"></span><span class="latch__theirs"><span class="latch__ink"></span></span></div>
+<p class="t-meta">10月9日 16:20 につながりました</p>
+<p class="t-caption">イラスト仲間<span class="sep">·</span>2人</p>
+</div>
+<p class="chat__day t-meta">10月9日</p><div class="msg msg--theirs"><p class="msg__bubble">はじめまして、あおです。月1くらいで絵を見せ合える人がいたらいいなと思っていました。</p><span class="msg__time">16:23</span></div><div class="msg msg--mine"><p class="msg__bubble">はじめまして。わたしも同じです。最近は鉛筆でスケッチばかりしています。</p><span class="msg__time">16:29</span></div><div class="msg msg--theirs"><p class="msg__bubble">いいですね。わたしは水彩です。月末に、今月描いたものをお互い1枚ずつ送りませんか。</p><span class="msg__time">17:20</span></div><div class="msg msg--mine"><p class="msg__bubble">ぜひ。締め切りがあると描ける気がします。</p><span class="msg__time">22:20</span></div><p class="chat__day t-meta">今日</p><div class="msg msg--theirs"><p class="msg__bubble">今月は何を描きましたか?</p><span class="msg__time">17:54</span></div>
+</div>
+</div>
+<form class="composer">
+<label class="sr-only" for="m-text">メッセージ</label>
+<textarea class="composer__field" id="m-text" rows="1" maxlength="1000" placeholder="メッセージ"></textarea>
+<button class="composer__send" type="submit" aria-label="送る" disabled=""><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 18.5V6M6.8 11L12 5.8 17.2 11"></path></svg></button>
+</form>
+<div class="backdrop"></div><div class="sheet-layer" role="dialog" aria-modal="true" aria-label="このつながりについて"><div class="sheet"><span class="sheet__grab" aria-hidden="true"></span>
+<h2 class="sheet__title" style="font-size:19px">このつながりについて</h2>
+<div class="list" style="margin:0 calc(var(--gutter) * -1)">
+<a class="list-row" href="Report.dc.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 20.5V4.5"></path><path d="M6 5h11.2l-2.2 4 2.2 4H6"></path></svg><span>通報する</span><svg class="ic list-row__chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6"></path></svg></a>
+<a class="list-row" href="Block.dc.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M6 18L18 6"></path></svg><span>ブロックする</span><svg class="ic list-row__chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6l6 6-6 6"></path></svg></a>
+<a class="list-row" href="ChatEnded.dc.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4.5h4.5v15H14"></path><path d="M10 8l-4 4 4 4M6 12h9.5"></path></svg><span class="stack"><span>参加を取り消す</span><span class="list-row__sub">このつながりを終えます。チャットはお互いに読み取り専用になります。</span></span><span></span></a>
+<a class="list-row" href="Connections.dc.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14.5L4.5 10 9 5.5"></path><path d="M4.5 10H14a5.5 5.5 0 0 1 0 11h-2.5"></path></svg><span class="stack"><span>表示から消す</span><span class="list-row__sub">自分の一覧から消します。相手の側には残ります。</span></span><span></span></a>
+</div>
+<div class="sheet__actions"><a class="btn btn--quiet btn--block" href="Chat.dc.html">閉じる</a></div></div></div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'light' };
+  }
+}
+</script>
+</body>
+</html>

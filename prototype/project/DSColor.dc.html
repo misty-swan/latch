@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>LATCH デザインシステム 色</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./latch.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&amp;family=Shippori+Mincho:wght@400;500;600&amp;family=Zen+Kaku+Gothic+New:wght@300;400;500;700&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="screen" data-theme="{{theme}}" style="width: 1440px; height: 1000px; padding: 60px 72px; box-sizing: border-box">
+<svg class="grain" aria-hidden="true"><defs><filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .10  0 0 0 0 .13  0 0 0 0 .20  1.9 0 0 0 -.86"></feColorMatrix></filter><filter id="grain-d" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .92  0 0 0 0 .94  0 0 0 0 1  1.9 0 0 0 -.86"></feColorMatrix></filter></defs><rect width="100%" height="100%" filter="url(#grain)"></rect></svg>
+
+<div style="position: relative; display: flex; justify-content: space-between; align-items: flex-end; gap: 48px">
+<div><p class="t-eyebrow">Design system — 01</p><h1 class="t-display" style="font-size: 38px; margin-top: 12px">色 — 紙と、墨と、灯り。</h1></div>
+<p class="t-body" style="max-width: 560px; font-size: 14px">色は「紙」「墨」「灯り」の3系統だけです。灯り(琥珀)は提案が届いたときにしか使いません。夜は紙と墨の明暗を入れ替え、墨は月明かりの白になります。文字はすべて背景に対して4.5:1以上です。</p>
+</div>
+
+<div style="position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; margin-top: 36px">
+<section data-theme="light" style="background: var(--paper); color: var(--ink); border-radius: 24px; padding: 28px 30px; box-shadow: inset 0 0 0 1px var(--line)">
+<div style="display: flex; justify-content: space-between; align-items: baseline"><h2 class="t-display" style="font-size: 22px">昼の紙</h2><span class="t-meta">data-theme="light"</span></div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; margin-top: 20px">
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #EEF0F2; box-shadow: inset 0 0 0 1px rgba(22,30,48,.1)"></span><span><span class="t-head" style="display: block; font-size: 14.5px">紙</span><span class="t-meta" style="display: block">--paper · #EEF0F2</span><span class="t-caption" style="display: block; font-size: 12px">地。わずかに青みのある白</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #F8F9FA; box-shadow: inset 0 0 0 1px rgba(22,30,48,.1)"></span><span><span class="t-head" style="display: block; font-size: 14.5px">面</span><span class="t-meta" style="display: block">--surface · #F8F9FA</span><span class="t-caption" style="display: block; font-size: 12px">入力欄・シート・届いた知らせ</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #1A2030"></span><span><span class="t-head" style="display: block; font-size: 14.5px">墨</span><span class="t-meta" style="display: block">--ink · #1A2030</span><span class="t-caption" style="display: block; font-size: 12px">本文・自分の半円 · 14.2:1</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #4A5366"></span><span><span class="t-head" style="display: block; font-size: 14.5px">墨・補</span><span class="t-meta" style="display: block">--ink-2 · #4A5366</span><span class="t-caption" style="display: block; font-size: 12px">説明文 · 6.8:1</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #5F677A"></span><span><span class="t-head" style="display: block; font-size: 14.5px">墨・注</span><span class="t-meta" style="display: block">--ink-3 · #5F677A</span><span class="t-caption" style="display: block; font-size: 12px">注記・時間 · 5.0:1</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #D6DBE2"></span><span><span class="t-head" style="display: block; font-size: 14.5px">罫</span><span class="t-meta" style="display: block">--line · #D6DBE2</span><span class="t-caption" style="display: block; font-size: 12px">区切り線・枠</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #E9A23B; box-shadow: 0 10px 24px -10px rgba(233,162,59,.9)"></span><span><span class="t-head" style="display: block; font-size: 14.5px">灯り</span><span class="t-meta" style="display: block">--lamp · #E9A23B</span><span class="t-caption" style="display: block; font-size: 12px">提案が届いたときだけ灯る</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #8A5200"></span><span><span class="t-head" style="display: block; font-size: 14.5px">灯りの文字</span><span class="t-meta" style="display: block">--lamp-ink · #8A5200</span><span class="t-caption" style="display: block; font-size: 12px">「回答を待っています」· 5.6:1</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #A33A30"></span><span><span class="t-head" style="display: block; font-size: 14.5px">注意</span><span class="t-meta" style="display: block">--danger · #A33A30</span><span class="t-caption" style="display: block; font-size: 12px">退会・ブロックのみ · 5.7:1</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 50%; background: #EEF0F2; box-shadow: inset 3px 3px 7px rgba(22,30,48,.17), inset -3px -3px 6px rgba(255,255,255,.96)"></span><span><span class="t-head" style="display: block; font-size: 14.5px">空押し</span><span class="t-meta" style="display: block">--emb-dark / --emb-light</span><span class="t-caption" style="display: block; font-size: 12px">色を使わず、凹みだけで形を示す</span></span></div>
+</div>
+</section>
+
+<section data-theme="dark" style="background: var(--paper); color: var(--ink); border-radius: 24px; padding: 28px 30px; box-shadow: inset 0 0 0 1px var(--line)">
+<div style="display: flex; justify-content: space-between; align-items: baseline"><h2 class="t-display" style="font-size: 22px">夜の紙</h2><span class="t-meta">data-theme="dark"</span></div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; margin-top: 20px">
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #0F1420; box-shadow: inset 0 0 0 1px rgba(255,255,255,.1)"></span><span><span class="t-head" style="display: block; font-size: 14.5px">紙</span><span class="t-meta" style="display: block">--paper · #0F1420</span><span class="t-caption" style="display: block; font-size: 12px">夜の地。藍を含んだ黒</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #161D2B; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08)"></span><span><span class="t-head" style="display: block; font-size: 14.5px">面</span><span class="t-meta" style="display: block">--surface · #161D2B</span><span class="t-caption" style="display: block; font-size: 12px">入力欄・シート・相手の吹き出し</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #E6EAF0"></span><span><span class="t-head" style="display: block; font-size: 14.5px">墨(月明かり)</span><span class="t-meta" style="display: block">--ink · #E6EAF0</span><span class="t-caption" style="display: block; font-size: 12px">本文・自分の半円 · 15.2:1</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #A8B0BF"></span><span><span class="t-head" style="display: block; font-size: 14.5px">墨・補</span><span class="t-meta" style="display: block">--ink-2 · #A8B0BF</span><span class="t-caption" style="display: block; font-size: 12px">説明文 · 8.4:1</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #8790A1"></span><span><span class="t-head" style="display: block; font-size: 14.5px">墨・注</span><span class="t-meta" style="display: block">--ink-3 · #8790A1</span><span class="t-caption" style="display: block; font-size: 12px">注記・時間 · 5.7:1</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #252E40"></span><span><span class="t-head" style="display: block; font-size: 14.5px">罫</span><span class="t-meta" style="display: block">--line · #252E40</span><span class="t-caption" style="display: block; font-size: 12px">区切り線・枠</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #F0B24E; box-shadow: 0 10px 24px -10px rgba(240,178,78,.8)"></span><span><span class="t-head" style="display: block; font-size: 14.5px">灯り</span><span class="t-meta" style="display: block">--lamp · #F0B24E</span><span class="t-caption" style="display: block; font-size: 12px">提案が届いたときだけ灯る</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #F3BE66"></span><span><span class="t-head" style="display: block; font-size: 14.5px">灯りの文字</span><span class="t-meta" style="display: block">--lamp-ink · #F3BE66</span><span class="t-caption" style="display: block; font-size: 12px">「回答を待っています」· 10.8:1</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 16px; background: #EF8F86"></span><span><span class="t-head" style="display: block; font-size: 14.5px">注意</span><span class="t-meta" style="display: block">--danger · #EF8F86</span><span class="t-caption" style="display: block; font-size: 12px">退会・ブロックのみ · 7.8:1</span></span></div>
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 0 14px; align-items: center"><span style="width: 52px; height: 52px; border-radius: 50%; background: #121827; box-shadow: inset 3px 3px 7px rgba(0,0,0,.55), inset -3px -3px 6px rgba(255,255,255,.075)"></span><span><span class="t-head" style="display: block; font-size: 14.5px">空押し</span><span class="t-meta" style="display: block">--blank · #121827</span><span class="t-caption" style="display: block; font-size: 12px">夜は、月の影のような凹み</span></span></div>
+</div>
+</section>
+</div>
+
+<div style="position: relative; display: flex; align-items: center; gap: 28px; margin-top: 30px; padding-top: 24px; border-top: 1px solid var(--line)">
+<div style="max-width: 360px"><p class="t-head" style="font-size: 15px">相手の色(既定のアイコン)</p><p class="t-caption" style="margin-top: 4px">アイコン未設定のときの模様。成立した瞬間、この濃い色が相手の半円ににじみます。</p></div>
+<div style="display: flex; gap: 22px">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 8px"><span class="avatar avatar--a avatar--m" aria-hidden="true"></span><span class="t-meta">a #3F4D69</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 8px"><span class="avatar avatar--b avatar--m" aria-hidden="true"></span><span class="t-meta">b #6B4E2E</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 8px"><span class="avatar avatar--c avatar--m" aria-hidden="true"></span><span class="t-meta">c #2F5A55</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 8px"><span class="avatar avatar--d avatar--m" aria-hidden="true"></span><span class="t-meta">d #5B3F5E</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 8px"><span class="avatar avatar--e avatar--m" aria-hidden="true"></span><span class="t-meta">e #48552F</span></div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'light' };
+  }
+}
+</script>
+</body>
+</html>

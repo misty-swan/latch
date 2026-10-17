@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>LATCH 3つの流れ 2 待つ</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./latch.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&amp;family=Shippori+Mincho:wght@400;500;600&amp;family=Zen+Kaku+Gothic+New:wght@300;400;500;700&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="screen intro intro--2" data-theme="{{theme}}" style="width: 390px; height: 844px"><svg class="grain" aria-hidden="true"><defs><filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .10  0 0 0 0 .13  0 0 0 0 .20  1.9 0 0 0 -.86"></feColorMatrix></filter><filter id="grain-d" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .92  0 0 0 0 .94  0 0 0 0 1  1.9 0 0 0 -.86"></feColorMatrix></filter></defs><rect width="100%" height="100%" filter="url(#grain)"></rect></svg>
+<header class="topbar"><div class="topbar__side"><a class="icon-btn" href="Intro1.dc.html" aria-label="戻る"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5L8 12l6.5 6.5"></path></svg></a></div><span></span><div class="topbar__side topbar__side--end"><a class="btn btn--quiet btn--small" href="SignIn.dc.html">スキップ</a></div></header>
+<div class="screen__body">
+<div class="intro__art" style="height:330px;display:grid;place-items:center"><div class="latch is-waiting" style="--size:200px;--gap:18px;" aria-hidden="true"><span class="latch__light"></span><span class="latch__mine"></span><span class="latch__theirs"><span class="latch__ink"></span></span></div></div>
+<div class="pad">
+<p class="t-eyebrow rise">02 — 待つ</p>
+<h1 class="t-display t-display--s rise rise-1" style="margin-top:12px">あとは、待つだけ。</h1>
+<p class="t-body rise rise-2" style="margin-top:14px">届かない日は、まだ時機ではないだけ。預けた意思は、期限まで静かに置かれています。</p>
+</div>
+</div>
+<div class="screen__foot">
+<div class="dots" aria-label="2 / 3"><span class="dots__d"></span><span class="dots__d is-on"></span><span class="dots__d"></span></div>
+<a class="btn btn--primary btn--block" href="Intro3.dc.html">次へ</a>
+</div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'light' };
+  }
+}
+</script>
+</body>
+</html>

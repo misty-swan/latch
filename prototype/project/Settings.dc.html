@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>LATCH 通知と表示</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./latch.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&amp;family=Shippori+Mincho:wght@400;500;600&amp;family=Zen+Kaku+Gothic+New:wght@300;400;500;700&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="screen settings" data-theme="{{theme}}" style="width: 390px; height: 844px"><svg class="grain" aria-hidden="true"><defs><filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .10  0 0 0 0 .13  0 0 0 0 .20  1.9 0 0 0 -.86"></feColorMatrix></filter><filter id="grain-d" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .92  0 0 0 0 .94  0 0 0 0 1  1.9 0 0 0 -.86"></feColorMatrix></filter></defs><rect width="100%" height="100%" filter="url(#grain)"></rect></svg>
+<header class="topbar"><div class="topbar__side"><a class="icon-btn" href="Me.dc.html" aria-label="戻る"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5L8 12l6.5 6.5"></path></svg></a></div><div class="topbar__title">通知と表示</div><div class="topbar__side topbar__side--end"></div></header>
+<div class="screen__body" style="padding-bottom:28px">
+<h2 class="list__head t-label" style="padding-top:12px">通知</h2>
+<div class="pad">
+<div class="setting-row">
+<div><p class="t-head">プッシュ通知</p><p class="t-caption">提案と、つながったときだけ届きます。本文に内容は表示されません。</p></div>
+<div class="switch"><input type="checkbox" aria-label="プッシュ通知" checked=""><span></span></div>
+</div>
+<p class="t-caption" style="margin-top:14px">意思ごとのお知らせは、それぞれの意思の画面で切り替えられます。</p>
+</div>
+<h2 class="list__head t-label" style="margin-top:12px">表示</h2>
+<div class="pad">
+<label class="radio-row"><input type="radio" name="theme" value="auto" checked=""><span>端末の設定に合わせる</span></label><label class="radio-row"><input type="radio" name="theme" value="light"><span>昼(明るい紙)</span></label><label class="radio-row"><input type="radio" name="theme" value="dark"><span>夜(暗い紙)</span></label>
+</div>
+</div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'light' };
+  }
+}
+</script>
+</body>
+</html>

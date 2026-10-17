@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>LATCH お知らせ</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./latch.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&amp;family=Shippori+Mincho:wght@400;500;600&amp;family=Zen+Kaku+Gothic+New:wght@300;400;500;700&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="screen notices" data-theme="{{theme}}" style="width: 390px; height: 844px"><svg class="grain" aria-hidden="true"><defs><filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .10  0 0 0 0 .13  0 0 0 0 .20  1.9 0 0 0 -.86"></feColorMatrix></filter><filter id="grain-d" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .92  0 0 0 0 .94  0 0 0 0 1  1.9 0 0 0 -.86"></feColorMatrix></filter></defs><rect width="100%" height="100%" filter="url(#grain)"></rect></svg>
+<header class="topbar"><div class="topbar__side"><a class="icon-btn" href="Home.dc.html" aria-label="戻る"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5L8 12l6.5 6.5"></path></svg></a></div><div class="topbar__title">お知らせ</div><div class="topbar__side topbar__side--end"></div></header>
+<div class="screen__body" style="padding-bottom:24px">
+<ul class="rise"><li><a class="notice is-unread" href="Proposal.dc.html"><svg class="glyph" viewBox="0 0 20 20" aria-hidden="true"><path class="gl" d="M11.3 1.5A8.5 8.5 0 0 1 11.3 18.5Z"></path><path class="gm" d="M8.7 1.5A8.5 8.5 0 0 0 8.7 18.5Z"></path></svg><span><span class="notice__text">提案が届いています</span><span class="notice__sub t-meta">回答期限 明日 18:12 まで<span class="sep">·</span>8分前</span></span></a></li><li><div class="notice"><svg class="glyph" viewBox="0 0 20 20" aria-hidden="true"><path class="go" d="M9.4 2.4A7.6 7.6 0 0 0 9.4 17.6Z"></path></svg><span><span class="notice__text">預けていた意思の期限が切れました</span><span class="notice__quote clamp-1">鹿児島でサイクリングする人と繋がりたい。週末に桜島をまわれたら。</span><span class="notice__sub"><span class="t-meta">3日前</span><a class="btn btn--secondary btn--small" href="ConfirmConnection.dc.html" style="min-height:44px;padding:0 16px;font-size:13px">もう一度預ける</a></span></span></div></li><li><div class="notice"><svg class="glyph" viewBox="0 0 20 20" aria-hidden="true"><path class="gp" d="M9.1 1.5A8.5 8.5 0 0 0 9.1 18.5Z"></path></svg><span><span class="notice__text">この提案は成立しませんでした</span><span class="notice__sub t-meta">4日前</span></span></div></li><li><a class="notice" href="Chat.dc.html"><svg class="glyph" viewBox="0 0 20 20" aria-hidden="true"><path class="gm" d="M10 1.5A8.5 8.5 0 0 0 10 18.5Z"></path><path class="gf" d="M10 1.5A8.5 8.5 0 0 1 10 18.5Z"></path></svg><span><span class="notice__text">あおさんとつながりました</span><span class="notice__sub t-meta">10月9日</span></span></a></li></ul>
+</div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'light' };
+  }
+}
+</script>
+</body>
+</html>

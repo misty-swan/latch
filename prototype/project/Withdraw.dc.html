@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>LATCH 退会</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./latch.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&amp;family=Shippori+Mincho:wght@400;500;600&amp;family=Zen+Kaku+Gothic+New:wght@300;400;500;700&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="screen withdraw" data-theme="{{theme}}" style="width: 390px; height: 844px"><svg class="grain" aria-hidden="true"><defs><filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .10  0 0 0 0 .13  0 0 0 0 .20  1.9 0 0 0 -.86"></feColorMatrix></filter><filter id="grain-d" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .92  0 0 0 0 .94  0 0 0 0 1  1.9 0 0 0 -.86"></feColorMatrix></filter></defs><rect width="100%" height="100%" filter="url(#grain)"></rect></svg>
+<header class="topbar"><div class="topbar__side"><a class="icon-btn" href="Me.dc.html" aria-label="戻る"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5L8 12l6.5 6.5"></path></svg></a></div><div class="topbar__title">退会</div><div class="topbar__side topbar__side--end"></div></header>
+<div class="screen__body pad" style="padding-top:8px;padding-bottom:24px">
+<h1 class="t-display t-display--s">退会の前に。</h1>
+<p class="t-body" style="margin-top:12px">退会すると、次のものが削除されます。元には戻せません。</p>
+<ul class="bullets" style="margin-top:18px">
+<li><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.6 4.6L19 7.6"></path></svg><span>預けた意思と、その読み解き結果</span></li>
+<li><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.6 4.6L19 7.6"></path></svg><span>プロフィールとアイコン</span></li>
+<li><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.6 4.6L19 7.6"></path></svg><span>提案の履歴</span></li>
+</ul>
+<p class="note" style="margin-top:22px"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 11v5.2"></path><circle cx="12" cy="7.9" r=".9" fill="currentColor" stroke="none"></circle></svg><span>つながりのメッセージは、相手の側に残ります。あなたの名前とアイコンは、相手の側にも表示されなくなります。</span></p>
+<p class="t-caption" style="margin-top:18px">退会の前に、もう一度ログインして本人であることを確かめます。</p>
+</div>
+<div class="screen__foot">
+<button class="btn btn--danger btn--block" type="button"><svg class="ic ic--fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.6 12.2c0-.6-.1-1.1-.2-1.6H12v3.1h4.3a3.7 3.7 0 0 1-1.6 2.4v2h2.6c1.5-1.4 2.3-3.4 2.3-5.9z"></path><path d="M12 20c2.2 0 4-.7 5.3-1.9l-2.6-2a4.8 4.8 0 0 1-7.2-2.5H4.8v2.1A8 8 0 0 0 12 20z"></path><path d="M7.5 13.6a4.8 4.8 0 0 1 0-3.2V8.3H4.8a8 8 0 0 0 0 7.4z"></path><path d="M12 7.2c1.2 0 2.3.4 3.2 1.2l2.3-2.3A8 8 0 0 0 4.8 8.3l2.7 2.1A4.8 4.8 0 0 1 12 7.2z"></path></svg>Googleで確かめて退会する</button>
+<a class="btn btn--quiet" href="Me.dc.html">やめる</a>
+</div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'light' };
+  }
+}
+</script>
+</body>
+</html>

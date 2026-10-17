@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>LATCH つながり 空</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./latch.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&amp;family=Shippori+Mincho:wght@400;500;600&amp;family=Zen+Kaku+Gothic+New:wght@300;400;500;700&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="screen connections connections--empty" data-theme="{{theme}}" style="width: 390px; height: 844px"><svg class="grain" aria-hidden="true"><defs><filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .10  0 0 0 0 .13  0 0 0 0 .20  1.9 0 0 0 -.86"></feColorMatrix></filter><filter id="grain-d" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .92  0 0 0 0 .94  0 0 0 0 1  1.9 0 0 0 -.86"></feColorMatrix></filter></defs><rect width="100%" height="100%" filter="url(#grain)"></rect></svg>
+<header class="topbar"><div class="topbar__side"><a class="brand" href="HomeEmpty.dc.html" aria-label="LATCH 預けている一覧へ"><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><path class="mark__mine" d="M11.1 3.2a8.8 8.8 0 0 0 0 17.6z"></path><path class="mark__theirs" d="M12.9 3.2a8.8 8.8 0 0 1 0 17.6z"></path></svg><span class="brand__word">LATCH</span></a></div><span></span><div class="topbar__side topbar__side--end"><a class="icon-btn" href="NoticesEmpty.dc.html" aria-label="お知らせ"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 16.5v-5.2a5.5 5.5 0 0 1 11 0v5.2l1.6 1.9H4.9z"></path><path d="M10 20.6a2.1 2.1 0 0 0 4 0"></path></svg></a><a class="icon-btn" href="Me.dc.html" aria-label="自分"><span class="avatar avatar--a avatar--s" aria-hidden="true"></span></a></div></header>
+<div class="screen__body pad" style="display:flex;flex-direction:column;padding-bottom:140px">
+<div style="padding-top:6px"><h1 class="t-display">つながり</h1></div>
+<div style="flex:1"></div>
+<div style="align-self:center" class="rise"><div class="latch is-ended" style="--size:168px;--gap:0px;" aria-hidden="true"><span class="latch__light"></span><span class="latch__mine"></span><span class="latch__theirs"><span class="latch__ink"></span></span></div></div>
+<div style="flex:1"></div>
+<h2 class="t-display t-display--s rise rise-1">まだ、つながりはありません。</h2>
+<p class="t-body rise rise-2" style="margin-top:10px">提案にお互いが参加すると、ここに並びます。それまでは、預けて待つだけです。</p>
+</div>
+<nav class="tabbar" aria-label="メイン">
+<a class="tab" href="HomeEmpty.dc.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M11.2 3.8a8.2 8.2 0 0 0 0 16.4z" fill="currentColor"></path><path d="M13.2 3.9a8.2 8.2 0 0 1 0 16.2" stroke-dasharray="2.2 2.4"></path></svg><span>預けている</span></a>
+<a class="tab__put" href="Compose.dc.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"></path></svg><span>置く</span></a>
+<a class="tab" href="#" aria-current="page"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"></circle><path d="M12 3.8v16.4"></path></svg><span>つながり</span></a>
+</nav></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'light' };
+  }
+}
+</script>
+</body>
+</html>

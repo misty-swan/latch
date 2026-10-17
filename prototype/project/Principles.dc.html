@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>LATCH 体験の柱とデザインの答え</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./latch.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&amp;family=Shippori+Mincho:wght@400;500;600&amp;family=Zen+Kaku+Gothic+New:wght@300;400;500;700&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="screen" data-theme="{{theme}}" style="width: 1440px; height: 900px; padding: 72px 72px 64px; box-sizing: border-box; display: flex; flex-direction: column">
+<svg class="grain" aria-hidden="true"><defs><filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .10  0 0 0 0 .13  0 0 0 0 .20  1.9 0 0 0 -.86"></feColorMatrix></filter><filter id="grain-d" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .92  0 0 0 0 .94  0 0 0 0 1  1.9 0 0 0 -.86"></feColorMatrix></filter></defs><rect width="100%" height="100%" filter="url(#grain)"></rect></svg>
+
+<div style="position: relative; display: flex; justify-content: space-between; align-items: flex-end; gap: 40px">
+<div>
+<p class="t-eyebrow">体験の柱 → デザインの答え</p>
+<h1 class="t-display" style="font-size: 40px; margin-top: 14px">4つの柱を、かたちにする。</h1>
+</div>
+<p class="t-body" style="max-width: 460px; font-size: 14.5px">ブリーフの「体験の柱」を、形(半円)・動き・言葉の3つで支えます。どの画面も、この4つの約束から外れないように設計しています。</p>
+</div>
+
+<div style="position: relative; margin-top: 52px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; flex: 1">
+
+<section style="display: flex; flex-direction: column; border-top: 1.5px solid var(--ink); padding-top: 18px">
+<p class="t-meta">01</p>
+<h2 class="t-display" style="font-size: 22px; line-height: 1.6; margin-top: 6px">待つことは、<br>正常な状態。</h2>
+<div style="height: 210px; display: grid; place-items: center">
+<div class="latch is-waiting" style="--size: 132px; --gap: 12px; --depth: .9" aria-hidden="true"><span class="latch__light"></span><span class="latch__mine"></span><span class="latch__theirs"><span class="latch__ink"></span></span></div>
+</div>
+<p class="t-head" style="font-size: 15px">ゆっくり呼吸する半円</p>
+<p class="t-body" style="font-size: 13.5px; margin-top: 8px">待っている半円は、6.4秒でかすかに呼吸するだけ。空の画面は失敗ではなく「器」として描き、「見つかりません」のような言葉は使いません。経過日数・期限・これまでのつながりは、等幅の小さな数字でそっと添えます。</p>
+</section>
+
+<section style="display: flex; flex-direction: column; border-top: 1.5px solid var(--ink); padding-top: 18px">
+<p class="t-meta">02</p>
+<h2 class="t-display" style="font-size: 22px; line-height: 1.6; margin-top: 6px">拒絶が、<br>存在しない。</h2>
+<div style="height: 210px; display: grid; place-items: center">
+<div class="dome-rest" style="--size: 128px" aria-hidden="true"><span class="dome"></span><span class="shelf"></span></div>
+</div>
+<p class="t-head" style="font-size: 15px">棚に戻す、という動き</p>
+<p class="t-body" style="font-size: 13.5px; margin-top: 8px">「今回は見送る」を押すと、半円は回転して棚に横たわります。画面の言葉は「そっと、棚に戻しました。」。相手の側には、通知なしで「この提案は成立しませんでした」の一文だけが残ります。</p>
+</section>
+
+<section style="display: flex; flex-direction: column; border-top: 1.5px solid var(--ink); padding-top: 18px">
+<p class="t-meta">03</p>
+<h2 class="t-display" style="font-size: 22px; line-height: 1.6; margin-top: 6px">成立前は、<br>相手が見えない。</h2>
+<div style="height: 210px; display: grid; place-items: center">
+<div class="latch is-arrived" style="--size: 132px; --gap: 12px; --depth: .9" aria-hidden="true"><span class="latch__light"></span><span class="latch__mine"></span><span class="latch__theirs"><span class="latch__ink"></span></span></div>
+</div>
+<p class="t-head" style="font-size: 15px">空押しと、隙間の灯り</p>
+<p class="t-body" style="font-size: 13.5px; margin-top: 8px">相手の半円は、インクのない凹み(空押し)。提案が届くと、隙間から灯りが漏れるだけです。提案に出るのは「候補がある」「回答期限」「必要人数」の3つだけ。名前・アイコン・一致度・主題は出しません。</p>
+</section>
+
+<section style="display: flex; flex-direction: column; border-top: 1.5px solid var(--ink); padding-top: 18px">
+<p class="t-meta">04</p>
+<h2 class="t-display" style="font-size: 22px; line-height: 1.6; margin-top: 6px">探す画面が、<br>そもそも無い。</h2>
+<div style="height: 210px; display: grid; place-items: center">
+<div style="display: grid; grid-template-columns: 1fr 112px 1fr; align-items: center; width: 300px; padding: 10px 8px; border-radius: 28px; box-shadow: inset 0 0 0 1px var(--line)" aria-hidden="true">
+<span class="tab" style="min-height: 48px; font-size: 11px"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M11.2 3.8a8.2 8.2 0 0 0 0 16.4z" fill="currentColor"></path><path d="M13.2 3.9a8.2 8.2 0 0 1 0 16.2" stroke-dasharray="2.2 2.4"></path></svg><span>預けている</span></span>
+<span class="tab__put" style="height: 48px; padding: 0 18px 0 14px; font-size: 14px; box-shadow: none"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"></path></svg><span>置く</span></span>
+<span class="tab" style="min-height: 48px; font-size: 11px"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"></circle><path d="M12 3.8v16.4"></path></svg><span>つながり</span></span>
+</div>
+</div>
+<p class="t-head" style="font-size: 15px">入口は3つだけ</p>
+<p class="t-body" style="font-size: 13.5px; margin-top: 8px">画面の入口は「預けている」「置く」「つながり」だけ。検索欄・一覧・トレンド・おすすめは存在しません。画面の言葉にも「探す」は使わず、置く・預ける・待つ・届く・つながる、の5つの動詞で語ります。</p>
+</section>
+</div>
+
+<div style="position: relative; margin-top: 36px; padding-top: 22px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: baseline; gap: 24px">
+<p class="t-display" style="font-size: 20px">ゆっくり、そして一度だけ、かちっ。</p>
+<p class="t-caption" style="max-width: 640px; text-align: right">ふだんの動きは遅く、静かに。お互いが「参加する」を選んで成立する瞬間だけ、0.3秒で半円が噛み合い、墨がにじんで相手が現れます。</p>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'light' };
+  }
+}
+</script>
+</body>
+</html>

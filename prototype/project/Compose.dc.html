@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>LATCH 預ける</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./latch.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&amp;family=Shippori+Mincho:wght@400;500;600&amp;family=Zen+Kaku+Gothic+New:wght@300;400;500;700&amp;display=swap">
+<style>body{margin:0}</style>
+</helmet>
+<div class="screen compose-screen" data-theme="{{theme}}" style="width: 390px; height: 844px"><svg class="grain" aria-hidden="true"><defs><filter id="grain" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .10  0 0 0 0 .13  0 0 0 0 .20  1.9 0 0 0 -.86"></feColorMatrix></filter><filter id="grain-d" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"></feTurbulence><feColorMatrix type="matrix" values="0 0 0 0 .92  0 0 0 0 .94  0 0 0 0 1  1.9 0 0 0 -.86"></feColorMatrix></filter></defs><rect width="100%" height="100%" filter="url(#grain)"></rect></svg>
+<header class="topbar"><div class="topbar__side"><a class="icon-btn" href="Home.dc.html" aria-label="閉じる"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"></path></svg></a></div><span></span><div class="topbar__side topbar__side--end"><a class="btn btn--quiet btn--small" href="Home.dc.html">下書きに残す</a></div></header>
+<div class="screen__body pad compose-body" style="padding-top:4px">
+<p class="t-eyebrow">置く</p>
+<h1 class="t-display t-display--s" style="margin-top:10px">どんな人と、どんなふうに繋がりたいですか。</h1>
+<p class="t-caption" id="c-hint" style="margin-top:6px">日時や場所が決まっているなら、そのまま書いてください。</p>
+<div class="compose">
+<label class="sr-only" for="c-text">繋がりたいこと(300字まで)</label>
+<textarea class="compose__area compose__rule" id="c-text" maxlength="300" placeholder="例: イラストを描く人と、月1くらいで雑に絵を見せ合える関係になれたら嬉しい。">イラストを描く人と、月1くらいで雑に絵を見せ合える関係になれたら嬉しい。初心者です。</textarea>
+</div>
+</div>
+<div class="screen__foot">
+<div class="row" style="justify-content:space-between;gap:12px">
+<p class="privacy"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2.4"></rect><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"></path></svg>ほかの人には表示されません。</p>
+<p class="counter" id="c-count" aria-live="polite"><b>42</b> / 300</p>
+</div>
+<a class="btn btn--primary btn--block" href="Reading.dc.html">読み解く</a>
+</div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'light' };
+  }
+}
+</script>
+</body>
+</html>
