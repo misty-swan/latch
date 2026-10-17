@@ -12,6 +12,7 @@
  *   (削除は常にアプリ層の明示操作・docs/05 §2.5)
  */
 import type {
+	Category,
 	CounterScope,
 	IntentForm,
 	IntentStatus,
@@ -128,7 +129,7 @@ export const intents = sqliteTable(
 		/** 主題の短句(1..40)。draft保存ではnull許容 */
 		topic: text("topic"),
 		/** 低粒度タグ(任意・D-B-01初期セット) */
-		category: text("category"),
+		category: text("category").$type<Category>(),
 		/** 入力文(0..300) */
 		rawText: text("raw_text").notNull(),
 		/** 機会Intent=必須 / つながりIntent=null */
@@ -255,7 +256,7 @@ export const groupCandidates = sqliteTable(
 	{
 		id: text("id", { length: 26 }).primaryKey(),
 		/** 参加Intent(3..4)の配列。UNIQUE(intent_ids正規化文字列, 各version)の素材 */
-		intentIds: text("intent_ids", { mode: "json" }).notNull(),
+		intentIds: text("intent_ids", { mode: "json" }).$type<string[]>().notNull(),
 		/**
 		 * intent_ids正規化文字列: intent_idsをID順ソートし `${id}@${version}` を
 		 * カンマ結合した文字列。同ペア集合の再評価を排他するUNIQUE列

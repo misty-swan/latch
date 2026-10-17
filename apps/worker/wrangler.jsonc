@@ -20,7 +20,7 @@
 		}
 	],
 
-	// トークン失効用KV(docs/04 §3.1)
+	// トークン失効用KV(docs/04 §4・05 §2.3)
 	"kv_namespaces": [
 		{
 			"binding": "REVOCATION_KV",
@@ -37,7 +37,7 @@
 		}
 	],
 
-	// Layer 2 Candidate Retrieval用ベクトルインデックス。作成コマンド(docs/07 §1):
+	// Layer 2 Candidate Retrieval用ベクトルインデックス。作成コマンド(07 §1の指定値に基づく):
 	//   wrangler vectorize create latch-intents --dimensions 1024 --metric cosine --metadata-index form,status,category
 	"vectorize": [
 		{

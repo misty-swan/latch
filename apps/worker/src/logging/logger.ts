@@ -38,20 +38,22 @@ type LogLevel = (typeof LOG_LEVELS)[number];
 /**
  * 許可フィールドだけを残す実行時フィルタ(08 §6: Serializer段で強制)。
  * 許可リスト外のキーは警告・例外なしで黙って破棄する。
- * 値が欠落している(undefined・null)許可フィールドはキーごと落とす。
+ * 値が文字列でも数値でもない許可フィールド(undefined・null・ネストした
+ * オブジェクト・boolean等)はキーごと落とす。user_idが値の奥に隠れていても
+ * 出力行に現れない。
  */
 const serializeFields = (
 	fields: LogFields | undefined,
 ): Record<string, string | number> => {
 	const allowed: Record<string, string | number> = {};
-	if (fields === undefined) {
+	if (fields === undefined || fields === null) {
 		return allowed;
 	}
 	for (const [key, value] of Object.entries(fields)) {
 		if (!allowedFieldSet.has(key)) {
 			continue;
 		}
-		if (value === undefined || value === null) {
+		if (typeof value !== "string" && typeof value !== "number") {
 			continue;
 		}
 		allowed[key] = value;

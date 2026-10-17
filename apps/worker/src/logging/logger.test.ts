@@ -70,6 +70,29 @@ describe("createLogger(08 §6: 許可リスト方式の構造化ログ)", () => 
 		expect(parsed.status).toBe("matched");
 	});
 
+	it("オブジェクトの値は出力されず・ネスト先のuser_idも漏れない", () => {
+		const { lines, sink } = captureSink();
+		const logger = createLogger(sink);
+		// 型では防げない経路で許可キーにオブジェクト値が紛れ込んだ場合・
+		// Serializer段で値ごと破棄する(user_idが奥に隠れても出力されない)
+		const objectValue = {
+			count: { user_id: "01HXXXXXXXXXXXXXXXXXXXXXXX" },
+		} as unknown as LogFields;
+		logger.info("x", objectValue);
+		const parsed = parseSingleLine(lines);
+		expect(parsed).not.toHaveProperty("count");
+		expect(lines[0]).not.toContain("user_id");
+		expect(Object.keys(parsed).sort()).toEqual(["event", "level"]);
+	});
+
+	it("fieldsにnullを渡しても例外にならず・level・eventのみの1行を出力する", () => {
+		const { lines, sink } = captureSink();
+		const logger = createLogger(sink);
+		expect(() => logger.info("x", null as unknown as LogFields)).not.toThrow();
+		const parsed = parseSingleLine(lines);
+		expect(Object.keys(parsed).sort()).toEqual(["event", "level"]);
+	});
+
 	it("fields省略時はlevel・eventのみの1行JSON", () => {
 		const { lines, sink } = captureSink();
 		createLogger(sink).error("unexpected_failure");
