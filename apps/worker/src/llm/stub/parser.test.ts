@@ -1,0 +1,107 @@
+import { describe, expect, it } from "vitest";
+import { fixedClock } from "../../clock/clock";
+import { stubParse } from "./parser";
+
+// 全ケース共通の基準時刻(JST 2026-10-17 09:00)。翌日は2026-10-18
+const fixed = fixedClock(new Date("2026-10-17T00:00:00Z"));
+
+describe("stubParseのform判定(07 §3: 時制語の有無・既定は安全側のconnection)", () => {
+	it("時制語のない文章はつながりIntent・時刻null・既定人数{2,2}", () => {
+		const out = stubParse("個人開発仲間が欲しい", fixed);
+		expect(out.form).toBe("connection");
+		expect(out.time).toBeNull();
+		expect(out.participants).toEqual({ min: 2, max: 2 });
+		expect(out.budget).toBeNull();
+		expect(out.alcohol_involved).toBe(false);
+	});
+
+	it("時刻語(日曜17時)は機会Intentで基準日のJST翌日のstartを持つ", () => {
+		const out = stubParse("日曜17時にカレー会", fixed);
+		expect(out.form).toBe("occasion");
+		expect(out.time).toEqual({ start: "2026-10-18T17:00:00+09:00", end: null });
+	});
+
+	it("日付語のみ(時刻なし)は機会Intent・時刻null", () => {
+		const out = stubParse("明日ランチしよう", fixed);
+		expect(out.form).toBe("occasion");
+		expect(out.time).toBeNull();
+	});
+
+	it("時刻語の「半」は30分として解釈する", () => {
+		const out = stubParse("19時半に集まろう", fixed);
+		expect(out.form).toBe("occasion");
+		expect(out.time?.start).toBe("2026-10-18T19:30:00+09:00");
+	});
+});
+
+describe("stubParseの抽出規則(07 §3: 金額・人数)", () => {
+	it("「5000円くらい」は確定値5000に丸めてmin=max", () => {
+		const out = stubParse("5000円くらいでランチ", fixed);
+		expect(out.budget).toEqual({ min: 5000, max: 5000 });
+		expect(out.form).toBe("connection");
+	});
+
+	it("「2〜4人」はmin=2/max=4", () => {
+		const out = stubParse("2〜4人でボードゲーム", fixed);
+		expect(out.participants).toEqual({ min: 2, max: 4 });
+	});
+
+	it("単独の「3人で」はmin=max=3", () => {
+		const out = stubParse("3人でカフェ", fixed);
+		expect(out.participants).toEqual({ min: 3, max: 3 });
+	});
+});
+
+describe("stubParseの飲酒判定(07 §3の辞書・部分一致)", () => {
+	it("「銀座でワイン会」は飲酒あり", () => {
+		expect(stubParse("銀座でワイン会", fixed).alcohol_involved).toBe(true);
+	});
+
+	it("「コーヒー好き集まれ」は飲酒なし", () => {
+		expect(stubParse("コーヒー好き集まれ", fixed).alcohol_involved).toBe(false);
+	});
+
+	it("「飲み会」は飲酒あり", () => {
+		expect(stubParse("渋谷で飲み会", fixed).alcohol_involved).toBe(true);
+	});
+});
+
+describe("stubParseのtopicと固定フィールド(07 §3・04 §5の上限)", () => {
+	it("topicは最初の句点まで", () => {
+		expect(
+			stubParse("カレー会をします。的心理テストもします", fixed).topic,
+		).toBe("カレー会をします");
+	});
+
+	it("topicは最初の改行まで", () => {
+		expect(stubParse("ボードゲーム会\n詳しくはDMで", fixed).topic).toBe(
+			"ボードゲーム会",
+		);
+	});
+
+	it("topicは40字で切り詰める", () => {
+		const out = stubParse("あ".repeat(50), fixed);
+		expect(out.topic).toHaveLength(40);
+	});
+
+	it("categoryとwarningsはstubでは固定値", () => {
+		const out = stubParse("カレー会", fixed);
+		expect(out.category).toBeNull();
+		expect(out.warnings).toEqual([]);
+	});
+});
+
+describe("stubParseの決定性(07 §2: stubは同一入力→同一出力)", () => {
+	it("同一(input, clock)で2回呼ぶとdeep equal", () => {
+		const input = "日曜17時に銀座でワイン会 5000円くらい 2〜4人";
+		const first = stubParse(input, fixed);
+		const second = stubParse(input, fixed);
+		expect(second).toEqual(first);
+		// 併せて全規則が同時に効くことも確認する
+		expect(first.form).toBe("occasion");
+		expect(first.time?.start).toBe("2026-10-18T17:00:00+09:00");
+		expect(first.participants).toEqual({ min: 2, max: 4 });
+		expect(first.budget).toEqual({ min: 5000, max: 5000 });
+		expect(first.alcohol_involved).toBe(true);
+	});
+});
