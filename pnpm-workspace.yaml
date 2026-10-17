@@ -1,3 +1,11 @@
 packages:
   - "apps/*"
   - "packages/*"
+# workerd・esbuildのpostinstall(プラットフォームバイナリの準備)を許可する
+allowBuilds:
+  esbuild: true
+  workerd: true
+# vitest-pool-workers 0.23.0が内蔵する旧miniflare(2026-08-15版)を、
+# wrangler 4.151.1と同一のランタイムに統一する(compatibility_date 2026-10-17を本地実行するため)
+overrides:
+  miniflare: 5.20261012.1-beta

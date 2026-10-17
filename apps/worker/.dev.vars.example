@@ -1,0 +1,3 @@
+# ローカル開発用の環境変数見本(.dev.vars にコピーして使う)
+# LLMモード: stub は決定的な出力を返す。real は精度ゲート(docs/07 §6)合格後に接続する
+LATCH_LLM_MODE=stub

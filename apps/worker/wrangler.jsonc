@@ -1,0 +1,94 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "latch-worker",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-10-17",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"enabled": true
+	},
+
+	// D1(リレーショナルDB・docs/04 §2)
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "latch-db",
+			// デプロイ時に実IDへ差し替え
+			"database_id": "00000000-0000-0000-0000-000000000000"
+			// migrations_dir(D1マイグレーション)は後続のF0工程で追加する
+		}
+	],
+
+	// トークン失効用KV(docs/04 §3.1)
+	"kv_namespaces": [
+		{
+			"binding": "REVOCATION_KV",
+			// デプロイ時に実IDへ差し替え
+			"id": "00000000000000000000000000000000"
+		}
+	],
+
+	// ユーザーアイコン保存(docs/04 §3.1)
+	"r2_buckets": [
+		{
+			"binding": "ICONS",
+			"bucket_name": "icons"
+		}
+	],
+
+	// Layer 2 Candidate Retrieval用ベクトルインデックス。作成コマンド(docs/07 §1):
+	//   wrangler vectorize create latch-intents --dimensions 1024 --metric cosine --metadata-index form,status,category
+	"vectorize": [
+		{
+			"binding": "VECTORS",
+			"index_name": "latch-intents"
+		}
+	],
+
+	// Workers AI(Embedding=bge-m3・docs/07 §1)
+	"ai": {
+		"binding": "AI"
+	},
+
+	// マッチングパイプラインのイベントキュー(docs/04 §2)
+	"queues": {
+		"producers": [
+			{
+				"binding": "MATCH_QUEUE",
+				"queue": "match-events"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "match-events",
+				"max_retries": 3,
+				"dead_letter_queue": "match-events-dlq"
+			}
+		]
+	},
+
+	// 毎分Cron(bucket走査・期限切れバッチ等・docs/04 §2)
+	"triggers": {
+		"crons": ["* * * * *"]
+	},
+
+	// チャット用Durable Objects(成立LATCHごとに1DO・docs/04 §2)
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "CHAT_DO",
+				"class_name": "ChatRoomDO"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["ChatRoomDO"]
+		}
+	],
+
+	"vars": {
+		"LATCH_LLM_MODE": "stub"
+	}
+}
