@@ -215,7 +215,7 @@ created_at / updated_at
 
 ### 2.3 Vectorize・KV・R2
 
-**Vectorizeインデックス**(1本): vector id = intent ULID。metadata = `{form, status, category, user_id}`。検索時のfilterで form一致・status=active を強制し(01 §12)、取得後のコードで自己ペア・ブロック・提案履歴を判定する。次元・距離計算はD-A-01(07)の確定後に固定する。削除: Intent削除・期限切れ+7日でベクトル削除(§2.6)。
+**Vectorizeインデックス**(1本): vector id = intent ULID。metadata = `{form, status, category, user_id}`。検索時のfilterで form一致・status=active を強制し(01 §12)、取得後のコードで自己ペア・ブロック・提案履歴を判定する。次元=1024・距離=cosine(07 v0.1で確定)。削除: Intent削除・期限切れ+7日でベクトル削除(§2.6)。
 
 **KV**: (a)`revocation:{jti}` = 1(TTL=JWT残り寿命)、(b)`ws-ticket:{ticket}` = `{user_id, latch_id}`(TTL 60秒・使用時に削除=一回限り)。
 
@@ -339,7 +339,6 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 | ID | 未決事項 | 暫定案 |
 |---|---|---|
 | D-B-01 | category低粒度タグの初期セット値 | Parserゴールドセット作成時に01 D-03と同時確定 |
-| D-B-02 | アンケート・feedbackの設問文言 | 09(検証・評価)が確定 |
 | D-B-03 | proposal(条件サマリ)のJSON項目の最終形 | 03(UX仕様)の表示要素確定時に揃える |
 
-外部依存の既知未決はD-A-01(Embedding次元)/D-A-03(地名データ)であり、本書の該当箇所に影響する。
+(D-B-02 アンケート設問は09 §7で確定し解消)。外部依存の既知未決はD-A-03(地名データ)であり、本書の該当箇所に影響する。

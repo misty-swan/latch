@@ -1,0 +1,75 @@
+# LATCH LLM利用仕様書
+
+- 文書バージョン: v0.1
+- ステータス: Draft
+- プロダクト名: LATCH
+- 作成日: 2026-10-17
+- 前提文書: 01 要件定義書 v0.6 / 04 アーキテクチャ設計書 v0.2 / 05 データモデル・API仕様書 v0.1 / 06 マッチングパイプライン設計書 v0.1
+- 本書の位置づけ: LLMを利用する3系統(Intent Parser / Embedding / Jev)の提供元・入出力・timeout・精度ゲート・コスト・同意を確定する。**04の未決D-A-01(Embeddingプロバイダ)を本書が解消する**
+
+## 1. 提供元の確定
+
+| 系統 | 提供元(第一候補) | フォールバック | 主な根拠 |
+|---|---|---|---|
+| Intent Parser(構造化) | Anthropic Claude(Haikuクラス・構造化出力) | なし(失敗時は構造化フォームへ) | 日本語の構造化精度・JSON出力保証・旧実装のG1実績 |
+| Embedding(意味検索) | **Workers AI `@cf/baai/bge-m3`**(1024次元) | なし(バックフィルで回収) | **データがCloudflare内に留まる(外部送信ゼロ・01 §21に最良)**・100言語対応・$0.012/百万トークン級の安価さ(2026-10-17確認) |
+| Jev(成立判定) | TypeSafe(System One・確率のみ返すモデル) | Anthropic Claude(Haikuクラス) | 原子的確率判定・出力スキーマ保証・旧G2実測(型安定で再試行不要) |
+
+**Vectorizeインデックスの確定(D-A-01解消)。** dimensions=1024・metric=cosine。ダッシュボードのモデル・プリセット一覧に依らず、wranglerで次元と距離を**明示指定**して作成する(プリセット側の対応状況に左右されないため・2026-10-17確認)。
+
+外部送信の所在: Parser(→Anthropic)とJev(→TypeSafe/Anthropic)のみ。**Embeddingは外部送信が発生しない**(Workers AIはCloudflareプラットフォーム内。学習利用なしの契約条件は08 §5)。
+
+## 2. 動作モード
+
+`LATCH_LLM_MODE=stub | real`。既定stub。stubは決定的(同一入力→同一出力)でCI・E2Eを課金なしで完結させる。real適用は精度ゲート(§6)通過が条件。環境ごとの切替はwrangler vars(04 §6)。
+
+## 3. Intent Parser
+
+- **入力**: 対象ユーザーのraw_textのみ。他ユーザーのデータ・位置・プロフィールは一切送らない
+- **出力**(05 §3.3のスキーマ): form・topic・category・time・geo・participants・budget・expires_at選択肢・alcohol_involved・constraints各種・warnings
+- 曖昧表現の丸め: 「くらい」は確定値へ丸め(「5000円くらい」→5000)。「2〜4人」はmin=2/max=4。form判定は時制・時刻表現の有無で行い、判定自信度が低い場合もformとして返し、**確認UIで必ずユーザーが確認・切替する**(01 §9)
+- timeout 10秒・再試行0・失敗時はPARSE_FAILED(再試行ボタン+構造化フォームフォールバック)
+- stub: 時刻表現・金額・人数の規則ベース抽出+form判定辞書。form=connection既定(より安全な側)
+
+## 4. Embedding
+
+- **入力**: 正規化テキスト(構造化データから生成。topic+soft_constraints+negative_constraints+participants補足。機会formは時間・地域・予算を含む)。**raw_textは送らない**
+- 出力1024次元。`intents.embedding_model`にモデル識別子と日時を記録(01 §18)。モデル変更時は全active Intentの一括再エンベディング+再評価をCronジョブで行う
+- timeout 2秒・再試行0。失敗は06 §5のバックフィルで回収
+
+## 5. Jev
+
+- **入力**: 両Intentの正規化テキストのみ(raw_text不送・01 §13)
+- **質問群(7軸・1リクエストで並列)**: would_a_accept_b / would_b_accept_a / purpose_fit / mood_fit / timing_fit / social_fit / latent_yes。System Oneの確率(noul)形式
+- timing_fitの解釈: 機会=日時の一致、つながり=関係の温度・開始時機の一致(01 §13)
+- 出力は**数値のみ**保存(jev_result・05 §2.2)。理由文の生成は行わない
+- timeout 6秒。429/529/timeout時はフォールバックLLM(同7軸・JSON確定出力)。フォールバック失敗は保留(06 §5)
+
+## 6. 精度ゲート(Offline・real適用の前提)
+
+ゴールドセット(日本語・両形式混在・YAML管理・レビュー制)で次を測定する。**未合格のreal適用は禁止**する。
+
+| 項目 | 合格基準 |
+|---|---|
+| form判定(つながり/機会)の完全一致 | 90%以上 |
+| topic抽出一致(係り受けを除く主題語) | 85%以上 |
+| 機会formのフィールド(旧基準踏襲) | category 85% / time.start 90% / location 90% / participants 80% / budget 90% |
+| alcohol_involved | **recall 100%**(見逃し0)・precision 90%以上。境界表現(「ワイン会」「バーの誕生日会」/負例「コーヒー」)を必ず含める |
+| Jev(a→b・b→aの順序整合) | 双方向のスコアが逆向に大差ないことの sanity check(運用前は傾向確認のみ) |
+
+ゴールドセットの初期規模は両形式各40件以上+境界20件以上とし、四半期ごとに追加する。
+
+## 7. コスト見積と計上
+
+1Intentあたりの標準消費: Parser 1回 + Embedding 1回 + Jev評価α回(平均2〜4回を想定)。月次Intent作成10,000件・Jev 30,000回の想定で、LLM合計は**月数十ドル規模**(詳細は運用開始後に実測で更新・D-A-04と連動)。計上規則は06 §6(実呼び出いすべて計上)。
+
+## 8. 同意と送信記録(08 §5と整合)
+
+オンボーディングで「意思の解析のためにテキストを外部AI事業者(Anthropic・TypeSafe)へ送信すること・送るのは解析に必要な最小限・学習利用なし」を明示して同意を取得する。送信先・データ種別・件数の集計を記録し、問い合わせ時に開示できる状態を保つ。Embeddingの外部送信はない旨も表示する。
+
+## 9. 未決事項(本書ローカル)
+
+| ID | 未決事項 | 暫定案 |
+|---|---|---|
+| D-D-01 | Parser/Jevのプロンプト最終文面 | 実装時にゴールドセットで調整し、リポジトリ内でバージョン管理 |
+| D-D-02 | Jev軸の重み付け・connection_fit相当の軸追加 | 運用データ蓄積後(C係数再計算と同じタイミング・01 §24) |
