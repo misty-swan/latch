@@ -1,9 +1,10 @@
 # LATCH アーキテクチャ設計書
 
-- 文書バージョン: v0.1
+- 文書バージョン: v0.2
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17
+- 作成日: 2026-10-17(v0.2更新: 同日)
+- v0.2の変更点: §3を全面改訂し、スタックを「バックエンド・フロントエンドの構成部品」(DBアクセス・マイグレーション・入力検証・プッシュ実装・フォーム等)まで確定した。D-A-06(Biome)を解消し、D-A-07(スタイリング=03で確定)を新設した
 - 前提文書: 01 要件定義書 v0.6 / 02 スコープ・受け入れ条件合意書 v0.1 / docs/reviews/d04-reuse-investigation.md v0.2(以下、D-04記録)
 - 本書の位置づけ: 01第19節「具体的な技術スタックは04がゼロベースで新規に選定する」とD-04記録§4(技術選定の論点)を解消する文書。03(UX仕様)はプロトタイプの配置を待つため後追いとなり、本書がdocs/の3冊目となる
 
@@ -11,11 +12,13 @@
 
 - **インフラはCloudflareをベースとすることを確定する。** 根拠は信頼性とコストである(オーナー決定)。補足として、旧実装(latch-legacy)にCloudflare Workersでの実配備・実運用の実績データがあり、参照アーカイブとして選定の根拠に使える
 - **言語はTypeScriptに確定する**(オーナー選定。対抗案=Python)。**DBはD1(Cloudflare内蔵)に確定する**(オーナー選定。対抗案=外部PostgreSQL)。**チャットはリアルタイム(WebSocket)に確定する**(オーナー選定。推奨していたポーリング案から変更)
-- 残りの技術選定(ベクトル検索・フレームワーク・CI等)は本書の比較のとおり確定する(D-04記録§4の論点を解消)
+- 残りの技術選定(構成部品を含む全部)は本書§3の比較のとおり確定する(D-04記録§4の論点を解消)。ただしLLMプロバイダ(Embedding・Jev)は07の所管、スタイリング手法は03(プロトタイプ基準)の所管とする
 
 ## 1. 本書の目的と位置づけ
 
 本書はv1.0完成形(01)を実装するための技術構成を確定させる。旧実装の技術スタック(Python/FastAPI・PostgreSQL・Redis・Pub/Sub)は継承しない(D-04記録v0.2)。ただし旧実装で証明された設計知見(イベント駆動・段階的絞り込み・コスト保護3層・Clock抽象・ログ許可リスト)は**規律として**本書が引き継ぎ、コードとしては移植しない。
+
+**バージョン規律。** 本書はライブラリのバージョン番号を書かない。バージョンの正は `package.json`(pnpmの完全固定)+ lockfileであり、骨組み作成時に固定する。文書にバージョンを書くと陳腐化するためである。
 
 ## 2. 全体アーキテクチャ — Cloudflare製品へのマッピング
 
@@ -53,44 +56,70 @@
 
 ## 3. 技術スタック選定(確定)
 
-### 3.1 選定結果一覧
+### 3.1 バックエンド(apps/worker)
 
-| 領域 | 選定 | 備考 |
+| 用途 | 選定 | 理由・備考 |
 |---|---|---|
-| インフラ | Cloudflare(確定・オーナー決定) | 信頼性・コスト。旧実装に実配備実績データあり |
-| 言語 | **TypeScript**(strict) | フロント・バック同一言語。型を `packages/shared` で共有 |
-| 実行基盤 | Cloudflare Workers | 単一Worker(api+pipeline出口分岐) |
-| APIフレームワーク | Hono | Workers標準の軽量ルータ。ミドルウェア(認証・レート制限・ログ)を装備 |
-| リレーショナルDB | D1(SQLite) | users・intents・latches・messages・提案履歴等 |
-| ベクトル検索 | Vectorize | metadata filter(form・status・category)でLayer 2の絞り込みを実現 |
-| キュー | Queues | match_events。DLQ(デッドレターキュー)で失敗の隔離(01 §16) |
-| 定時処理 | Cron Triggers(毎分) | 時間Bucket・catch-up・期限切れ・completed判定・アラート |
-| 静的配信/PWA | Workers Assets | フロントとAPIが同一オリジン(CORS不要) |
-| フロントエンド | React + Vite + vite-plugin-pwa | SPA。SSR不要(検索機能なし・認証後APIのみのため) |
-| 認証 | IdPトークン検証+JWT(jose)・回転式リフレッシュ | 失効リストはKV(TTL≥トークン寿命) |
-| プッシュ通知 | Web Push(VAPID) | 購読はD1保存。ES256鍵はWorkersシークレット |
-| チャット配信 | Durable Objects + WebSocket(オーナー確定) | 成立LATCHごとに1DO。メッセージの正はD1(§4) |
-| レート制限 | Workers Rate Limiting + D1カウンタ | §5の3層保護の実装要素 |
-| LLM統合 | 07が確定(Embedding第一候補=Workers AI、Jev=TypeSafe+フォールバック) | 送信記録・同意(01 §21)は本書の枠で実装 |
-| 観測 | Workers Logs + Analytics Engine + wrangler tail | 構造化ログは許可リスト方式(踏襲) |
-| リント/整形 | Biome(案・D-A-06) | 単一ツールで高速。毎コミット実行 |
-| テスト | vitest + @cloudflare/vitest-pool-workers / Playwright | D1・Queues・Vectorizeのローカルエミュレートで単体試験、E2Eは実環境 |
-| CI/CD | GitHub Actions + wrangler | §6 |
-| パッケージ管理 | pnpm workspaces(モノレポ) | apps/web・apps/worker・packages/shared |
+| 言語・型 | TypeScript(strict)+ @cloudflare/workers-types | オーナー確定。フロントと同一言語 |
+| 実行基盤 | Cloudflare Workers(単一Worker=api+pipeline出口分岐) | インフラ確定の中心。Durable Objects・Queues・Cronを1デプロイで持つ |
+| Webフレームワーク | Hono | Workers標準。ルーティング・ミドルウェア・エラーハンドラ |
+| リクエスト検証 | Zod + @hono/zod-validator | スキーマは `packages/shared` に置きフロントと共有 |
+| DBアクセス | Drizzle ORM(D1ドライバ) | D1公式対応(2026-10-17確認)。型安全なクエリビルダ |
+| マイグレーション | drizzle-kit(スキーマ差分からSQL生成)+ `wrangler d1 migrations apply`(適用) | 生成SQLをリポジトリ管理。適用は明示実行のみ(旧規律と同じ) |
+| 認証 | jose(JWT署名/検証・createRemoteJWKSet) | §4の認証設計に対応 |
+| Web Push送信 | web-push(公式ライブラリ)+ nodejs_compatフラグ | §3.4の検証結果参照 |
+| WebSocketチャット | Durable Objects(Hibernation API)を直接使用 | 追加ライブラリなし。 WorkersネイティブのAPIで足りる |
+| キュー/定時処理 | Queues(consumer)+ Cron Triggers | Workersネイティブ。DLQで失敗隔離(01 §16) |
+| ベクトル検索 | Vectorize | metadata filter(form・status・category)=Layer 2の絞り込み |
+| レート制限 | Workers Rate Limiting binding + D1カウンタ(Drizzle) | §5の3層保護の実装要素 |
+| 設定・シークレット | wrangler vars / Workers Secrets(ローカルは .dev.vars) | 環境ごとに分離(§6) |
+| 観測 | Workers Logs + Analytics Engine + 構造化JSONログ | ログは許可リスト方式(踏襲)。tailはwrangler |
 
-### 3.2 対抗案と選定理由
+### 3.2 フロントエンド(apps/web)
+
+| 用途 | 選定 | 理由・備考 |
+|---|---|---|
+| UI | React | SPA。SSR不要(検索機能なし・認証後API描画のみ) |
+| ビルド・PWA | Vite + vite-plugin-pwa | マニフェスト・Service Worker・オフラインキャッシュの生成 |
+| ルーティング | React Router(library mode) | 5画面フロー+一覧(01 §10) |
+| サーバー状態 | TanStack Query | 一覧・提案・履歴の取得キャッシュと再検証を標準化 |
+| チャット受信 | WebSocket(DOへ直結) | 受信メッセージはTanStack Queryのキャッシュへ書き込み |
+| フォーム | react-hook-form + @hookform/resolvers(zod) | 読み解き確認の修正UI・Parser失敗時の構造化フォールバック。zodスキーマはsharedから流用 |
+| スタイリング | **03(プロトタイプ基準)で確定(D-A-07)** | UIの実装基準がプロトタイプであるため、ここだけ意図的に先送りとする |
+| 単体試験 | vitest + Testing Library(happy-dom) | fetchはモック(旧実装と同じ規律) |
+| E2E | Playwright(chromium) | 02の対応表#34の社内クローズドテストに使用 |
+
+### 3.3 共有・品質・CI
+
+| 用途 | 選定 | 理由・備考 |
+|---|---|---|
+| 共有パッケージ | packages/shared(Zodスキーマ・TS型・定数) | APIリクエスト/レスポンス・Intent構造を前後面で一字共有 |
+| モノレポ | pnpm workspaces + corepack | apps/web・apps/worker・packages/shared |
+| 開発用Node | Node 22 LTS | ビルド・試験ツールのためのみ(実行はWorkers) |
+| リント/整形 | Biome(確定・D-A-06解消) | 単一ツール・高速。毎コミット実行 |
+| 型チェック | tsc --noEmit | Biomeと分離(型はtscが正) |
+| バックエンド試験 | vitest + @cloudflare/vitest-pool-workers | D1・Queues・Vectorize・DOのローカル実行で単体・統合試験 |
+| CI/CD | GitHub Actions + wrangler | §6(品質ゲート→staging自動→prod手動) |
+
+### 3.4 対抗案と選定理由
 
 **言語 — TypeScriptを採用(2026-10-17オーナー選定)、Python Workers・Go不採用。** Workersの機能(Durable Objects・Queues consumer・Cron・Rate Limitingバインディング・Assets)はすべてTypeScriptファーストで提供され、ドキュメント・サンプル・AIによるコード生成の品質も最も高い。フロントエンドとバックエンドが同一言語になり、Intentの型・APIスキーマを `packages/shared` で文字どおり共有できる(旧実装はPython/TypeScriptの二言語で契約試験が必要だった。単一実装化により契約試験は不要になる)。Python WorkersはローカルMLライブラリを使う場合の選択肢だが、本サービスのLLM利用は外部API呼び出しのみで、この利点が生きない。
 
 **DB — D1を採用(2026-10-17オーナー選定)、外部PostgreSQL(Hyperdrive経由)不採用。** オーナー決定の「信頼とコスト」に対し、プラットフォーム外のDB(Neon・Supabase等)は通信遅延・別課金・別障害点を追加する。D1は旧実装での実配備実績がある。**PostGISを失う**ため地理判定は「SQLでバウンディングボックス事前絞り+TypeScriptでヒベルサイン(距離計算)」に置き換える。対象は地域添付Intent同士の重なり判定のみで(01 §12)、全国規模でも前段のVectorizeメタデータフィルタで評価対象は小さい。geo検索の複雑さが必要になった時点で再評価する(D-A-05と同じトリガー)。
 
+**DBアクセス — Drizzle ORM(D1ドライバ)を採用、生SQL・Kysely・Prisma不採用。** DrizzleはD1公式ドキュメントに接続方法が掲載され(2026-10-17確認)、型安全なクエリビルダとスキーマからのマイグレーション生成(drizzle-kit)を備える。生SQLは型の保証が弱く、PrismaはWorkers上で動くもののクエリエンジン分がヘビーである。注意点として、drizzle-kitの新版(RC)で `wrangler d1 migrations apply` との非互換が報告されているため、**安定版にバージョン固定**して使う(§1のバージョン規律)。
+
+**Web Push送信 — 公式web-pushライブラリ+nodejs_compatフラグを採用、純edge実装ライブラリ不採用。** Node向けの定番ライブラリ(web-push)はWorkersでは素では動かない(Node API依存のため)が、Cloudflare公式ドキュメントが **nodejs_compat互換フラグでの使用**を案内しており(2026-10-17確認)、最も実績のある実装をそのまま使える。フラグはwrangler設定で有効化する。ゼロ依存のedge向け代替実装は、nodejs_compatを避けたい場合の予備として記録するに留める。
+
+**WebSocketチャット — リアルタイム(Durable Objects+WebSocket)を採用(2026-10-17オーナー選定)、ポーリング不採用。** 成立後の対話そのものが主目的のつながりIntentでは、表示の即時性が体験の中心になる。DOのHibernation APIで接続維持のコストを抑え、メッセージの正はD1に置くことでDOの障害・再起動でも履歴を失わない構造とする(詳細は§4)。追加ライブラリは使わない(WorkersネイティブのWebSocket APIで足りる)。
+
 **ベクトル検索 — Vectorizeを採用、D1内自前実装・外部ベクトルDB不採用。** マネージドのANN検索とmetadata filterを持ち、プラットフォーム内で完結する。filterでform(つながり/機会)・status(active)・categoryを縛れるため、「つながり×機会を候補化しない」(01 §12)と「expiredを候補化しない」を検索段階で強制できる。次元・距離計算は07がEmbeddingプロバイダを確定した時点で固定する(D-A-01)。
 
 **フロントエンド — React+Vite SPAを採用、Next/Remix不採用。** 本サービスはSSRの利益(SEO・初期表示)を得られない(検索エンジンに載せるページがなく、体験は認証後のAPI描画だから)。静的Assets配信が最も安く・速い。
 
-**配備 — Cloudflare単一構成を採用、複数事業者混在不採用。** オーナー決定どおり。DNS・CDN・Workers・D1・Queues・Vectorize・KV・Assets・観測を1アカウントで運用し、障害点と請求を1本化する。
+**フロントの状態管理 — TanStack Query+react-hook-formを採用、グローバル状態ライブラリ(Zustand等)は持たない。** 本アプリの状態のほとんどはサーバー由来(提案・Intent・履歴)とフォームであり、どちらも専用の標準ライブラリがカバーする。グローバル単一ストアは、必要性が生じた時点で導入する(最初から持たない=前提: 画面間で共有する純クライアント状態がほぼない)。
 
-**チャット — リアルタイム(Durable Objects+WebSocket)を採用(2026-10-17オーナー選定)、ポーリング不採用。** 成立後の対話そのものが主目的のつながりIntentでは、表示の即時性が体験の中心になる。DOのHibernation APIで接続維持のコストを抑え、メッセージの正はD1に置くことでDOの障害・再起動でも履歴を失わない構造とする(詳細は§4)。
+**配備 — Cloudflare単一構成を採用、複数事業者混在不採用。** オーナー決定どおり。DNS・CDN・Workers・D1・Queues・Vectorize・KV・Assets・観測を1アカウントで運用し、障害点と請求を1本化する。
 
 ## 4. 主要設計
 
@@ -151,7 +180,9 @@ Workers Paid(月$5基礎料金)を前提とする。小規模(登録数百人・
 | D-A-03 | 地名データのソースとD1への取り込み方法(市区町村・駅の代表点) | 公開データ(国土数値情報等)から必要最小を抽出し、wrangler d1で一括ロード |
 | D-A-04 | 課金プランの確定とコストアラートの閾値・通知先 | Workers Paid前提。リリース計画(11相当)で確定 |
 | D-A-05 | D1読み取りスケーリング(Sessions/レプリカ)の導入基準 | p95劣化または読み取りスロットリングの検知をトリガーとする |
-| D-A-06 | リント/整形ツールの最終選定(Biome想定) | Biome単一ツール。frontend骨組み作成時に確認 |
+| D-A-07 | フロントのスタイリング手法(CSSの書き方・UI部品の枠組み) | 03(UX仕様=プロトタイプ基準)で確定 |
+
+(D-A-06 リント/整形ツールはv0.2でBiomeに確定し解消)
 
 ## 10. 01への反映
 

@@ -52,6 +52,6 @@
 - 言語: **TypeScript**(オーナー選定。対抗案=Python)
 - DB: **D1**(オーナー選定。対抗案=外部PostgreSQL)
 - チャット: **リアルタイム WebSocket(Durable Objects)**(オーナー選定。推奨案のポーリングから変更)
-- その他(Vectorize・React+Vite・Hono・GitHub Actions等): 04 §3の比較のとおり確定
+- その他(Vectorize・Hono・Drizzle ORM・Zod・web-push+nodejs_compat・Biome・TanStack Query・GitHub Actions等、**構成部品を含む全部**): 04 §3(v0.2)の比較のとおり確定
 
 §2の本体決定(旧実装からのコード移植は行わない)は不変である。
