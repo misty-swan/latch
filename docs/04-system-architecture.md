@@ -1,14 +1,15 @@
 # LATCH アーキテクチャ設計書
 
-- 文書バージョン: v0.4
+- 文書バージョン: v0.5
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.2〜v0.4更新: 同日)
+- 作成日: 2026-10-17(v0.2〜v0.5更新: 同日)
 - v0.2の変更点: §3を全面改訂し、スタックを「バックエンド・フロントエンドの構成部品」(DBアクセス・マイグレーション・入力検証・プッシュ実装・フォーム等)まで確定した。D-A-06(Biome)を解消し、D-A-07(スタイリング=03で確定)を新設した
 - v0.3の変更点: 07(LLM利用仕様書)の策定に伴いD-A-01(Embedding)を解消した(Workers AI bge-m3・1024次元・cosine)。R2(ユーザーアイコン)をスタックへ追加した
 - v0.4の変更点: 本書が単体で完結するよう記述を整理した(変更の経緯はgit履歴を参照)
-- 前提文書: 01 要件定義書 v0.7 / 02 スコープ・受け入れ条件合意書 v0.1
-- 本書の位置づけ: 01第19節の技術スタック選定を確定させる文書。03(UX仕様)はプロトタイプの配置を待つため後追いとなり、本書がdocs/の3冊目となる
+- v0.5の変更点: 多角レビュー(loop1)の指摘を反映。Web Push送信を自前実装(WebCrypto/jose+fetch)に変更、レート制限をユーザー単位に確定、イベント投入の即時/遅延を明確化、DLQ運用を追記した
+- 前提文書: 01 要件定義書 v0.8 / 02 スコープ・受け入れ条件合意書 v0.2
+- 本書の位置づけ: 01第19節の技術スタック選定を確定させる文書。03(UX仕様)はプロトタイプの配置待ちのため本書が先行する
 
 **決定記録(2026-10-17・プロダクトオーナー)**
 
@@ -69,7 +70,7 @@
 | DBアクセス | Drizzle ORM(D1ドライバ) | D1公式対応(2026-10-17確認)。型安全なクエリビルダ |
 | マイグレーション | drizzle-kit(スキーマ差分からSQL生成)+ `wrangler d1 migrations apply`(適用) | 生成SQLをリポジトリ管理。適用は明示実行のみ |
 | 認証 | jose(JWT署名/検証・createRemoteJWKSet) | §4の認証設計に対応 |
-| Web Push送信 | web-push(公式ライブラリ)+ nodejs_compatフラグ | §3.4の検証結果参照 |
+| Web Push送信 | 自前実装(VAPID署名=jose/WebCrypto・aes128gcm暗号化=WebCrypto・送信=fetch) | web-push公式ライブラリは参考実装とする(§3.4)。F7で実機検証 |
 | WebSocketチャット | Durable Objects(Hibernation API)を直接使用 | 追加ライブラリなし。 WorkersネイティブのAPIで足りる |
 | キュー/定時処理 | Queues(consumer)+ Cron Triggers | Workersネイティブ。DLQで失敗隔離(01 §16) |
 | ベクトル検索 | Vectorize | metadata filter(form・status・category)=Layer 2の絞り込み |
@@ -109,11 +110,11 @@
 
 **言語 — TypeScriptを採用(2026-10-17オーナー選定)、Python Workers・Go不採用。** Workersの機能(Durable Objects・Queues consumer・Cron・Rate Limitingバインディング・Assets)はすべてTypeScriptファーストで提供され、ドキュメント・サンプル・AIによるコード生成の品質も最も高い。フロントエンドとバックエンドが同一言語になり、Intentの型・APIスキーマを `packages/shared` で文字どおり共有できる(単一実装のため、前後面の契約は型共有で賄い、契約試験は不要になる)。Python WorkersはローカルMLライブラリを使う場合の選択肢だが、本サービスのLLM利用は外部API呼び出しのみで、この利点が生きない。
 
-**DB — D1を採用(2026-10-17オーナー選定)、外部PostgreSQL(Hyperdrive経由)不採用。** オーナー決定の「信頼とコスト」に対し、プラットフォーム外のDB(Neon・Supabase等)は通信遅延・別課金・別障害点を追加する。**地理情報の専門機能(PostGIS相当)を持たない**ため地理判定は「SQLでバウンディングボックス事前絞り+TypeScriptでヒベルサイン(距離計算)」に置き換える。対象は地域添付Intent同士の重なり判定のみで(01 §12)、全国規模でも前段のVectorizeメタデータフィルタで評価対象は小さい。geo検索の複雑さが必要になった時点で再評価する(D-A-05と同じトリガー)。
+**DB — D1を採用(2026-10-17オーナー選定)、外部PostgreSQL(Hyperdrive経由)不採用。** オーナー決定の「信頼とコスト」に対し、プラットフォーム外のDB(Neon・Supabase等)は通信遅延・別課金・別障害点を追加する。**地理情報の専門機能(PostGIS相当)を持たない**ため地理判定は「SQLでバウンディングボックス事前絞り+TypeScriptでハバーサイン(距離計算)」に置き換える。対象は地域添付Intent同士の重なり判定のみで(01 §12)、全国規模でも前段のVectorizeメタデータフィルタで評価対象は小さい。geo検索の複雑さが必要になった時点で再評価する(D-A-05と同じトリガー)。
 
 **DBアクセス — Drizzle ORM(D1ドライバ)を採用、生SQL・Kysely・Prisma不採用。** DrizzleはD1公式ドキュメントに接続方法が掲載され(2026-10-17確認)、型安全なクエリビルダとスキーマからのマイグレーション生成(drizzle-kit)を備える。生SQLは型の保証が弱く、PrismaはWorkers上で動くもののクエリエンジン分がヘビーである。注意点として、drizzle-kitの新版(RC)で `wrangler d1 migrations apply` との非互換が報告されているため、**安定版にバージョン固定**して使う(§1のバージョン規律)。
 
-**Web Push送信 — 公式web-pushライブラリ+nodejs_compatフラグを採用、純edge実装ライブラリ不採用。** Node向けの定番ライブラリ(web-push)はWorkersでは素では動かない(Node API依存のため)が、Cloudflare公式ドキュメントが **nodejs_compat互換フラグでの使用**を案内しており(2026-10-17確認)、最も実績のある実装をそのまま使える。フラグはwrangler設定で有効化する。ゼロ依存のedge向け代替実装は、nodejs_compatを避けたい場合の予備として記録するに留める。
+**Web Push送信 — 自前実装を採用、web-pushライブラリ直接利用は不採用(loop1裁定)。** VAPID署名はjose(WebCrypto)で、メッセージ暗号化(aes128gcm・RFC8291)はWebCryptoで行い、送信はfetchで直接行う。定番ライブラリ(web-push)は通知送信にNodeのHTTPクライアントを使いWorkers上の動作が保証されないため、参考実装(署名生成の検証用)と位置づける。実装と実機検証(iOS/Android/デスクトップ各ブラウザ)はF7(12)に明示的に計上する。
 
 **WebSocketチャット — リアルタイム(Durable Objects+WebSocket)を採用(2026-10-17オーナー選定)、ポーリング不採用。** 成立後の対話そのものが主目的のつながりIntentでは、表示の即時性が体験の中心になる。DOのHibernation APIで接続維持のコストを抑え、メッセージの正はD1に置くことでDOの障害・再起動でも履歴を失わない構造とする(詳細は§4)。追加ライブラリは使わない(WorkersネイティブのWebSocket APIで足りる)。
 
@@ -129,7 +130,7 @@
 
 **認証・セッション。** Google・AppleのIdPトークンを検証し(joseのリモートJWKS)、独自JWT(有効期限1時間)を発行する。リフレッシュトークンは回転式(30日)でD1に族IDごと管理し、再利用を検出したら族失効+401。ログアウト・ブロック・退会の即時反映はKVの失効リスト(JWTのjtiをTTL=残り寿命で格納)。prodでテスト鍵が残存する場合の起動ガードも設ける。
 
-**イベント駆動(01 §16の実装)。** Intentの作成・更新はapi出口でQueuesへ送信(第1段=Embedding要求)。Embedding完了時に派生イベント(embedding_completed)を再送し(第2段=Layer 1〜5)。消費側でバージョン比較により古いメッセージを破棄し(idempotency)、更新のdebounce(10秒窓)はQueuesの遅延配信+消費時の最新バージョン確認で実現する。失敗は再試行上限ののちDLQへ隔離し、誤った提案より提示の見送りを優先する方針である。
+**イベント駆動(01 §16の実装)。** Intentの作成はapi出口で即時にQueuesへ送信(第1段=Embedding要求。draft→active化も即時とし、初回提案のレイテンシを守る)。Embedding完了時に派生イベント(embedding_completed)を再送し(第2段=Layer 1〜5)。**更新のみ**10秒の遅延配信とし、消費側で現行versionと突き合わせて古ければ破棄する(idempotency。match_eventsのUNIQUE制約が二重投入も許さない)。失敗は再試行上限(max_retries=3初期値)ののちDLQへ隔離し、DLQを見る最小のconsumerがmatch_eventsのstatusをdeadへ反映して警報する。誤った提案より提示の見送りを優先する方針である。deadの再処理は、UNIQUE衝突を避けるため新規イベントとして再発行する(手動)。
 
 **Cron(毎分)。** (a)機会Intentの時間Bucket到来の再評価と期限前catch-up走査(01 §16)、(b)全Intentの期限切れバッチ、(c)つながりLATCHのチャット非活動90日判定(completed)、(d)Jev予算の80%到達検知とアラート。毎分1回のCron Trigger内で走査対象をインデックス(status・starts_at・expires_at)で最小化する。
 
@@ -147,8 +148,8 @@
 
 | 層 | 要件(01 §20) | 実装 |
 |---|---|---|
-| 源流レート制限 | API全体60req/分・Active Intent 5件/ユーザー・作成20件/日・更新6回/時間 | Workers Rate Limitingバインディング(API全体)+D1カウンタ(ユーザー単位・日次/時間窓) |
-| Jev予算 | 1Intent日次40回・1ユーザー日次120回・再評価30分抑制 | D1カウンタ(日次バケット keyed by intent/user)+最終評価時刻チェック |
+| 源流レート制限 | 1ユーザーあたり60req/分・Active Intent 5件/ユーザー・作成20件/日・更新6回/時間 | Workers Rate Limitingバインディング(key=user_id・60req/60秒・ユーザー単位。グローバル制限は設けない。429のRetry-Afterは固定60秒)+D1カウンタ(ユーザー単位・日次/時間窓) |
+| Jev予算 | 1Intentあたり1日40回・1ユーザーあたり1日120回・再評価30分抑制 | D1カウンタ(日次バケット keyed by intent/user)+最終評価時刻チェック |
 | 実行回数上限 | 日次30,000回・月次600,000回・80%でalert | D1のグローバルカウンタ+Cronでの検知・Analytics Engineでの傾向記録 |
 
 上限到達・LLM API障害時はJev未判定として候補を保留し、提案しない(circuit breaker)。Embedding失敗はバックフィルで回収する。
@@ -181,11 +182,11 @@ Workers Paid(月$5基礎料金)を前提とする。小規模(登録数百人・
 | ID | 未決事項 | 暫定案 |
 |---|---|---|
 | D-A-03 | 地名データのソースとD1への取り込み方法(市区町村・駅の代表点) | 公開データ(国土数値情報等)から必要最小を抽出し、wrangler d1で一括ロード |
-| D-A-04 | 課金プランの確定とコストアラートの閾値・通知先 | Workers Paid前提。リリース計画(11相当)で確定 |
+| D-A-04 | 課金プランの確定とコストアラートの閾値・通知先 | Workers Paid前提。リリース計画(11)で確定 |
 | D-A-05 | D1読み取りスケーリング(Sessions/レプリカ)の導入基準 | p95劣化または読み取りスロットリングの検知をトリガーとする |
 | D-A-07 | フロントのスタイリング手法(CSSの書き方・UI部品の枠組み) | 03(UX仕様=プロトタイプ基準)で確定 |
 
-(D-A-01 Embeddingプロバイダは07 v0.1で確定し解消: Workers AI bge-m3・1024次元・cosine。D-A-06 リント/整形ツールはv0.2でBiomeに確定し解消)
+(D-A-01 Embeddingプロバイダは07 v0.1で確定し解消: Workers AI bge-m3・1024次元・cosine。D-A-02 チャットのリアルタイム化はオーナー選定で確定し解消。D-A-06 リント/整形ツールはv0.2でBiomeに確定し解消。欠番IDは再利用しない)
 
 ## 10. 01への反映
 
