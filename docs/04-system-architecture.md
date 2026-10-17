@@ -73,6 +73,7 @@
 | ベクトル検索 | Vectorize | metadata filter(form・status・category)=Layer 2の絞り込み |
 | レート制限 | Workers Rate Limiting binding + D1カウンタ(Drizzle) | §5の3層保護の実装要素 |
 | 設定・シークレット | wrangler vars / Workers Secrets(ローカルは .dev.vars) | 環境ごとに分離(§6) |
+| 画像保存 | R2(ユーザーアイコンのみ) | v1.0で扱う画像はアイコンのみ(05 §2.3)。チャット画像はなし(02 D-06) |
 | 観測 | Workers Logs + Analytics Engine + 構造化JSONログ | ログは許可リスト方式(踏襲)。tailはwrangler |
 
 ### 3.2 フロントエンド(apps/web)
