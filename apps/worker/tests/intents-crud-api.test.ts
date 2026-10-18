@@ -15,8 +15,9 @@ import { importJWK, SignJWT } from "jose";
 import { ulid } from "ulid";
 import { describe, expect, it } from "vitest";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
-import { intents } from "../src/db/schema";
+import { intents, users } from "../src/db/schema";
 import { MS_PER_DAY } from "../src/intents/expiry";
+import { updateWithOptimisticLock } from "../src/routes/intents";
 import privateJwkText from "./fixtures/test-idp-private.jwk?raw";
 
 const testEnv = env as unknown as Env;
@@ -728,6 +729,94 @@ describe("PATCH /v1/intents/{id}・更新できない状態(docs/05 §3.2)", () 
 		expect(res.status).toBe(400);
 		const body = (await res.json()) as ErrorResponse;
 		expect(body.error.code).toBe("VALIDATION_FAILED");
+	});
+});
+
+describe("PATCH・pause・resume共通のversion楽観ロック(docs/01 §16・05 §3.3)", () => {
+	/** Intent行とその所有者ユーザー行を読み出す(楽観ロック試験の下準備) */
+	const readRowAndOwner = async (
+		intentId: string,
+	): Promise<{
+		row: typeof intents.$inferSelect;
+		ownerId: string;
+	}> => {
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		if (row === undefined) {
+			throw new Error("作成直後のIntentが読み出せない");
+		}
+		const [owner] = await db
+			.select()
+			.from(users)
+			.where(eq(users.id, row.userId));
+		if (owner === undefined) {
+			throw new Error("Intentの所有者が読み出せない");
+		}
+		return { row, ownerId: owner.id };
+	};
+
+	it("期待versionより行が新しい(並行更新済み)場合はversion_conflict・行は並行側の値のまま", async () => {
+		const accessToken = await registerUser("optimistic-conflict");
+		const created = await createActiveConnection(
+			accessToken,
+			"競合する学習仲間",
+		);
+		const { row, ownerId } = await readRowAndOwner(created.id);
+		// ルートの「読み出し→更新」の間に並行更新が入った状態を直接DB操作で模擬する
+		const concurrentVersion = row.version + 1;
+		await db
+			.update(intents)
+			.set({ version: concurrentVersion, topic: "並行側の主題変更" })
+			.where(eq(intents.id, created.id));
+		// 古いversion(row)を持ったまま更新を試みる→0行→1回だけ再読込→version_conflict
+		const result = await updateWithOptimisticLock(db, row, ownerId, {
+			topic: "遅れた側の主題変更",
+			version: concurrentVersion,
+			updatedAt: new Date(),
+		});
+		expect(result.kind).toBe("version_conflict");
+		// 行は並行側の値のまま(後勝ち上書きが起こらない・docs/01 §16)
+		const [after] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, created.id));
+		expect(after?.version).toBe(concurrentVersion);
+		expect(after?.topic).toBe("並行側の主題変更");
+	});
+
+	it("読み出し後に並行削除された場合はnot_found", async () => {
+		const accessToken = await registerUser("optimistic-deleted");
+		const created = await createActiveConnection(accessToken, "消える学習仲間");
+		const { row, ownerId } = await readRowAndOwner(created.id);
+		await db.delete(intents).where(eq(intents.id, created.id));
+		const result = await updateWithOptimisticLock(db, row, ownerId, {
+			topic: "反映されない主題変更",
+			version: row.version + 1,
+			updatedAt: new Date(),
+		});
+		expect(result.kind).toBe("not_found");
+	});
+
+	it("期待versionが一致する更新はok・version+1の行を返す(通常経路)", async () => {
+		const accessToken = await registerUser("optimistic-ok");
+		const created = await createActiveConnection(
+			accessToken,
+			"通常更新の学習仲間",
+		);
+		const { row, ownerId } = await readRowAndOwner(created.id);
+		const result = await updateWithOptimisticLock(db, row, ownerId, {
+			topic: "通常更新後の学習仲間",
+			version: row.version + 1,
+			updatedAt: new Date(),
+		});
+		expect(result.kind).toBe("ok");
+		if (result.kind !== "ok") {
+			throw new Error("通常更新が失敗した");
+		}
+		expect(result.row.version).toBe(row.version + 1);
+		expect(result.row.topic).toBe("通常更新後の学習仲間");
 	});
 });
 

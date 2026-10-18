@@ -7,7 +7,7 @@
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
-- v0.5の変更点: F2実装に伴い§3.3にIntent系API(parse・作成・一覧・PATCH・pause/resume)の確定レスポンス形状と理由コードの一覧を追記し、§3.2のPATCH可変フィールドと§2.2のactive化検証の記載を実装確定値に精緻化
+- v0.5の変更点: F2実装に伴い§3.3にIntent系API(parse・作成・一覧・PATCH・pause/resume)の確定レスポンス形状と理由コードの一覧を追記し、§3.2のPATCH可変フィールドと§2.2のactive化検証の記載を実装確定値に精緻化。§3.3にPATCH・pause・resumeのversion楽観ロック(競合時は400 version_conflict・行消滅時は一律404)を追記
 - 前提文書: 01 要件定義書 v0.8 / 02 スコープ・受け入れ条件合意書 v0.2 / 04 アーキテクチャ設計書 v0.6
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
@@ -358,7 +358,7 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 
 **GET /v1/intents** — 200 `{items: IntentDTO[], next_cursor: string|null}`。自Intentのみ・順序はid降順(ULID=新着順)。`?status=<単一値>`で絞り込み(不明な値は400)。limit=1..50(既定20・範囲外は400)。cursorは不透明(直前ページ最終idのbase64url化・復号できない値は400)
 
-**GET・PATCH・DELETE /v1/intents/{id}** — 200 IntentDTO / 200 IntentDTO(version+1) / 204。他人の・存在しないは一律404(§3.1)。PATCHの可変フィールド: draft=全項目+status:"active"(active化)・active=topic・time・geo・participants・budget・constraints(3種)・notification_levelのみ(他のフィールド指定は400 field_not_allowed)。draft・active以外(paused/matched/expired/cancelled)へのPATCHは400 invalid_status。draft宛のexpires_in_daysは同一リクエストがstatus:"active"を伴う場合を除き400 expires_choice_on_draft。active機会Intentのtime変更は範囲を再検証し、現在のexpires_at以降へは変更できない(400 starts_at_after_expires)
+**GET・PATCH・DELETE /v1/intents/{id}** — 200 IntentDTO / 200 IntentDTO(version+1) / 204。他人の・存在しないは一律404(§3.1)。PATCHの可変フィールド: draft=全項目+status:"active"(active化)・active=topic・time・geo・participants・budget・constraints(3種)・notification_levelのみ(他のフィールド指定は400 field_not_allowed)。draft・active以外(paused/matched/expired/cancelled)へのPATCHは400 invalid_status。draft宛のexpires_in_daysは同一リクエストがstatus:"active"を伴う場合を除き400 expires_choice_on_draft。active機会Intentのtime変更は範囲を再検証し、現在のexpires_at以降へは変更できない(400 starts_at_after_expires)。PATCH・pause・resumeのUPDATEは**version楽観ロック**(01 §16)を持ち、読み出し時のversionと一致する行のみ更新する(並行更新の後勝ち上書きを防止)。競合で更新が0行だった場合は1回だけ再読込して判定し、行が残っていれば400 VALIDATION_FAILED(理由コードversion_conflict)・消えていれば一律404(§3.1)を返す
 
 **POST /v1/intents/{id}/pause・resume** — 200 IntentDTO(version+1)。pauseはactiveのみ実行可(他は400 invalid_status)・status=paused・期限は不変。resumeはpausedのみ実行可(他は400 invalid_status)・期限切れ(expires_at<=now)は400(理由コードexpired)・status=active・期限は据え置き(再計算しない)。参加中active数の上限5件は作成・draft→active化・resumeの3経路で検証し、超過は422 ACTIVE_INTENT_LIMIT(§3.1)
 

@@ -45,7 +45,7 @@ import { type AppEnv, requireRegistered } from "../auth/middleware";
 import { systemClock } from "../clock/clock";
 import { intents } from "../db/schema";
 import type { Env } from "../env";
-import { errorJson } from "../http/errors";
+import { type ErrorResult, errorJson } from "../http/errors";
 import { newUlid } from "../ids";
 import { MS_PER_DAY } from "../intents/expiry";
 import { validateIntentForActive } from "../intents/validation";
@@ -87,6 +87,66 @@ const unauthorizedForRegistered = () =>
 
 /** 404 NOT_FOUND。他人の・存在しないIntentは区別せず存在を隠す(docs/05 §3.1) */
 const notFound = () => errorJson("NOT_FOUND", "Intentが見つかりません");
+
+/**
+ * 楽観ロック付きUPDATEの結果。ok時は更新後の行・失敗時は原因
+ * (version_conflict=並行更新でversionが進んだ・not_found=並行削除で消えた)
+ */
+export type GuardedUpdate =
+	| { kind: "ok"; row: typeof intents.$inferSelect }
+	| { kind: "version_conflict" }
+	| { kind: "not_found" };
+
+/**
+ * version楽観ロック付きUPDATE(PATCH・pause・resume共通・docs/01 §16・05 §3.3)。
+ * 読み出し時のversion(row.version)と一致する行のみ更新するため、並行更新が
+ * 両方成功して後勝ち上書きになることはない。更新が0行だった場合は1回だけ再読込して
+ * 原因を確定し、行が残っていればversion_conflict・消えていればnot_foundを返す。
+ * valuesにはversion(row.version+1)とupdatedAtを含めた更新内容を呼び出し側で組みて渡す
+ */
+export const updateWithOptimisticLock = async (
+	db: DrizzleD1Database,
+	row: typeof intents.$inferSelect,
+	userId: string,
+	values: Partial<typeof intents.$inferInsert>,
+): Promise<GuardedUpdate> => {
+	const [updated] = await db
+		.update(intents)
+		.set(values)
+		.where(
+			and(
+				eq(intents.id, row.id),
+				eq(intents.userId, userId),
+				// 読み出し時のversionとの一致を更新条件に含める(楽観ロック・docs/01 §16)
+				eq(intents.version, row.version),
+			),
+		)
+		.returning();
+	if (updated !== undefined) {
+		return { kind: "ok", row: updated };
+	}
+	// 0行: 1回だけ再読込して原因を確定する(行消滅→not_found・残存→version衝突)
+	const [current] = await db
+		.select()
+		.from(intents)
+		.where(and(eq(intents.id, row.id), eq(intents.userId, userId)));
+	if (current === undefined) {
+		return { kind: "not_found" };
+	}
+	return { kind: "version_conflict" };
+};
+
+/** 楽観ロック失敗時のエラー応答。version衝突は400(version_conflict)・行消滅は一律404 */
+const guardedUpdateFailure = (
+	kind: "version_conflict" | "not_found",
+): ErrorResult =>
+	kind === "version_conflict"
+		? errorJson(
+				"VALIDATION_FAILED",
+				"他の操作と競合しました。最新の状態を読み込み直してやり直してください",
+				{ reasons: ["version_conflict"] },
+			)
+		: notFound();
 
 /** 一覧cursorの不透明化(docs/05 §3.1): ページの最終idをbase64url化する */
 const encodeCursor = (id: string): string =>
@@ -645,54 +705,53 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 	}
 
 	// TODO(F3): topic等の意味フィールド変更時のEmbedding再計算イベント発行
-	const [updated] = await db
-		.update(intents)
-		.set({
-			form: d.form ?? row.form,
-			topic: d.topic ?? row.topic,
-			category: d.category === undefined ? row.category : d.category,
-			rawText: d.raw_text ?? row.rawText,
-			startsAt: mergedStartsAt,
-			endsAt: mergedEndsAt,
-			geoCenterLat:
-				d.geo === undefined ? row.geoCenterLat : (d.geo?.center.lat ?? null),
-			geoCenterLng:
-				d.geo === undefined ? row.geoCenterLng : (d.geo?.center.lng ?? null),
-			geoRadiusM:
-				d.geo === undefined ? row.geoRadiusM : (d.geo?.radius_m ?? null),
-			participantsMin: d.participants?.min ?? row.participantsMin,
-			participantsMax: d.participants?.max ?? row.participantsMax,
-			participantsIncludesOwner:
-				d.participants?.includes_owner ?? row.participantsIncludesOwner,
-			budgetMin:
-				d.budget === undefined ? row.budgetMin : (d.budget?.min ?? null),
-			budgetMax:
-				d.budget === undefined ? row.budgetMax : (d.budget?.max ?? null),
-			currency:
-				d.budget === undefined ? row.currency : (d.budget?.currency ?? null),
-			hardConstraints: d.hard_constraints ?? row.hardConstraints,
-			softConstraints: d.soft_constraints ?? row.softConstraints,
-			negativeConstraints: d.negative_constraints ?? row.negativeConstraints,
-			notificationLevel: d.notification_level ?? row.notificationLevel,
-			alcoholInvolved: d.alcohol_involved ?? row.alcoholInvolved,
-			status: nextStatus,
-			// 更新ごとにversion+1(docs/01 §16)
-			version: row.version + 1,
-			expiresAt,
-			updatedAt: now,
-		})
-		.where(and(eq(intents.id, row.id), eq(intents.userId, sub)))
-		.returning();
-	if (updated === undefined) {
-		const r = errorJson("INTERNAL", "Intentの更新に失敗しました");
+	const result = await updateWithOptimisticLock(db, row, sub, {
+		form: d.form ?? row.form,
+		topic: d.topic ?? row.topic,
+		category: d.category === undefined ? row.category : d.category,
+		rawText: d.raw_text ?? row.rawText,
+		startsAt: mergedStartsAt,
+		endsAt: mergedEndsAt,
+		geoCenterLat:
+			d.geo === undefined ? row.geoCenterLat : (d.geo?.center.lat ?? null),
+		geoCenterLng:
+			d.geo === undefined ? row.geoCenterLng : (d.geo?.center.lng ?? null),
+		geoRadiusM:
+			d.geo === undefined ? row.geoRadiusM : (d.geo?.radius_m ?? null),
+		participantsMin: d.participants?.min ?? row.participantsMin,
+		participantsMax: d.participants?.max ?? row.participantsMax,
+		participantsIncludesOwner:
+			d.participants?.includes_owner ?? row.participantsIncludesOwner,
+		budgetMin: d.budget === undefined ? row.budgetMin : (d.budget?.min ?? null),
+		budgetMax: d.budget === undefined ? row.budgetMax : (d.budget?.max ?? null),
+		currency:
+			d.budget === undefined ? row.currency : (d.budget?.currency ?? null),
+		hardConstraints: d.hard_constraints ?? row.hardConstraints,
+		softConstraints: d.soft_constraints ?? row.softConstraints,
+		negativeConstraints: d.negative_constraints ?? row.negativeConstraints,
+		notificationLevel: d.notification_level ?? row.notificationLevel,
+		alcoholInvolved: d.alcohol_involved ?? row.alcoholInvolved,
+		status: nextStatus,
+		// 更新ごとにversion+1(docs/01 §16)
+		version: row.version + 1,
+		expiresAt,
+		updatedAt: now,
+	});
+	if (result.kind !== "ok") {
+		if (result.kind === "version_conflict") {
+			logger.warn("intents.update.conflict", {
+				error_code: "VALIDATION_FAILED",
+			});
+		}
+		const r = guardedUpdateFailure(result.kind);
 		return c.json(r.body, r.status);
 	}
 	logger.info("intents.updated", {
-		intent_id: updated.id,
-		status: updated.status,
-		version: updated.version,
+		intent_id: result.row.id,
+		status: result.row.status,
+		version: result.row.version,
 	});
-	return c.json(toIntentDto(updated), 200);
+	return c.json(toIntentDto(result.row), 200);
 });
 
 /**
@@ -751,27 +810,28 @@ intentRoutes.post("/:id/pause", requireRegistered, async (c) => {
 		);
 		return c.json(r.body, r.status);
 	}
-	const [updated] = await db
-		.update(intents)
-		.set({
-			status: "paused",
-			// 遷移ごとにversion+1(docs/01 §16)
-			version: row.version + 1,
-			updatedAt: systemClock.now(),
-		})
-		.where(and(eq(intents.id, row.id), eq(intents.userId, sub)))
-		.returning();
-	if (updated === undefined) {
-		const r = errorJson("INTERNAL", "Intentの一時停止に失敗しました");
+	const result = await updateWithOptimisticLock(db, row, sub, {
+		status: "paused",
+		// 遷移ごとにversion+1(docs/01 §16)
+		version: row.version + 1,
+		updatedAt: systemClock.now(),
+	});
+	if (result.kind !== "ok") {
+		if (result.kind === "version_conflict") {
+			logger.warn("intents.pause.conflict", {
+				error_code: "VALIDATION_FAILED",
+			});
+		}
+		const r = guardedUpdateFailure(result.kind);
 		return c.json(r.body, r.status);
 	}
 	// TODO(F3): Vectorize metadataのstatus更新はイベント発行側で行う(docs/05 §2.3)
 	logger.info("intents.paused", {
-		intent_id: updated.id,
-		status: updated.status,
-		version: updated.version,
+		intent_id: result.row.id,
+		status: result.row.status,
+		version: result.row.version,
 	});
-	return c.json(toIntentDto(updated), 200);
+	return c.json(toIntentDto(result.row), 200);
 });
 
 /**
@@ -833,25 +893,26 @@ intentRoutes.post("/:id/resume", requireRegistered, async (c) => {
 		);
 		return c.json(r.body, r.status);
 	}
-	const [updated] = await db
-		.update(intents)
-		.set({
-			status: "active",
-			// 遷移ごとにversion+1(docs/01 §16)
-			version: row.version + 1,
-			updatedAt: now,
-		})
-		.where(and(eq(intents.id, row.id), eq(intents.userId, sub)))
-		.returning();
-	if (updated === undefined) {
-		const r = errorJson("INTERNAL", "Intentの再開に失敗しました");
+	const result = await updateWithOptimisticLock(db, row, sub, {
+		status: "active",
+		// 遷移ごとにversion+1(docs/01 §16)
+		version: row.version + 1,
+		updatedAt: now,
+	});
+	if (result.kind !== "ok") {
+		if (result.kind === "version_conflict") {
+			logger.warn("intents.resume.conflict", {
+				error_code: "VALIDATION_FAILED",
+			});
+		}
+		const r = guardedUpdateFailure(result.kind);
 		return c.json(r.body, r.status);
 	}
 	// TODO(F3): intent_updatedイベント発行(Vectorize metadata更新はイベント発行側・docs/06)
 	logger.info("intents.resumed", {
-		intent_id: updated.id,
-		status: updated.status,
-		version: updated.version,
+		intent_id: result.row.id,
+		status: result.row.status,
+		version: result.row.version,
 	});
-	return c.json(toIntentDto(updated), 200);
+	return c.json(toIntentDto(result.row), 200);
 });
