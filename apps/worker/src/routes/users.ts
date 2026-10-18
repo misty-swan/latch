@@ -58,8 +58,8 @@ const readJsonBody = async (c: Context<AppEnv>): Promise<unknown> => {
 const validationFailed = () =>
 	errorJson("VALIDATION_FAILED", "リクエストボディが不正です");
 
-/** users行→UserDTO(docs/05 §3.3: has_icon=icon_keyの有無・URL生成はAPIが担う) */
-const toUserDto = (user: typeof users.$inferSelect): UserDTO => ({
+/** users行→UserDTO(docs/05 §3.3: has_icon=icon_keyの有無・URL生成はAPIが担う)。アイコンAPI(routes/icons.ts)でも使う */
+export const toUserDto = (user: typeof users.$inferSelect): UserDTO => ({
 	id: user.id,
 	display_name: user.displayName,
 	bio: user.bio,

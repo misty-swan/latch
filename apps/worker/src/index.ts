@@ -3,6 +3,7 @@ import type { AppEnv } from "./auth/middleware";
 import { ChatRoomDO } from "./do/chat";
 import { assertEnvSafety, type Env } from "./env";
 import { authRoutes } from "./routes/auth";
+import { iconRoutes } from "./routes/icons";
 import { userRoutes } from "./routes/users";
 
 // 各ルートがBindingsにEnv・Variablesにauthクレームを期待する(docs/05 §3.1)
@@ -11,8 +12,12 @@ const app = new Hono<AppEnv>();
 app.get("/healthz", (c) => c.json({ status: "ok" }));
 // 認証API(docs/05 §3.2)
 app.route("/v1/auth", authRoutes);
-// ユーザーAPI(登録・me。Task 10でアイコン /v1/users/me/icon もこのサブアプリ配下に追加する・docs/05 §3.2)
+// ユーザーAPI(登録・me・docs/05 §3.2)
 app.route("/v1/users", userRoutes);
+// アイコンAPI(POST/DELETE /v1/users/me/icon・GET /v1/users/{user_id}/icon・docs/05 §3.2)。
+// userRoutesと同じ /v1/users にマウントする(userRoutes側に /me/icon と
+// /:user_id/icon の形のルートは無いため競合しない)
+app.route("/v1/users", iconRoutes);
 
 // prod起動ガードはisolateごとに1回だけ(docs/04 §4・docs/10 §2)。
 // Workersに起動フックはないため、モジュール変数フラグでfetchの先頭から1回だけ呼ぶ
