@@ -79,14 +79,12 @@ describe("signAccessToken→verifyAccessToken(docs/04 §4: アクセストーク
 
 	it("expはclock+3600秒(ACCESS_TOKEN_TTL_SECONDS)", async () => {
 		expect(ACCESS_TOKEN_TTL_SECONDS).toBe(3600);
-		const issuedAtMs = Date.parse("2026-10-18T00:00:00.000Z");
-		const token = await signAccessToken(
-			SECRET,
-			fixedClock(new Date(issuedAtMs)),
-			makeClaims(),
-		);
+		// joseの検証は実現在基準でexpを見るため、基準時刻は試験開始時の実現在に一度だけ
+		// 固定する(署名と検証で同一のclock値を使うため試験内は決定的・expは常に約1時間後)
+		const clock = fixedClock(new Date());
+		const token = await signAccessToken(SECRET, clock, makeClaims());
 		const verified = await verifyAccessToken(SECRET, token);
-		expect(verified.exp).toBe(Math.floor(issuedAtMs / 1000) + 3600);
+		expect(verified.exp).toBe(Math.floor(clock.now().getTime() / 1000) + 3600);
 	});
 
 	it("iatはclockの時刻(joseの既定の実時間を使わない)", async () => {
