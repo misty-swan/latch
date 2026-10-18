@@ -4,12 +4,22 @@ import {
 	authProviderSchema,
 	authTokenRequestSchema,
 	birthDateSchema,
+	budgetSchema,
 	categorySchema,
+	constraintsSchema,
+	createIntentRequestSchema,
+	intentDtoSchema,
 	intentFormSchema,
+	isoDateTimeSchema,
 	logoutRequestSchema,
+	parseIntentRequestSchema,
+	parseResponseSchema,
+	participantsSchema,
+	patchIntentRequestSchema,
 	patchMeRequestSchema,
 	refreshRequestSchema,
 	registerUserRequestSchema,
+	timeSchema,
 	userDtoSchema,
 } from "./schema";
 
@@ -195,6 +205,246 @@ describe("userDtoSchema", () => {
 		expect(
 			userDtoSchema.safeParse({ ...dto, id: "A".repeat(25) }).success,
 		).toBe(false);
+	});
+});
+
+describe("isoDateTimeSchema", () => {
+	it("オフセット付きISO 8601を受理する(Z・+09:00の両方)", () => {
+		expect(
+			isoDateTimeSchema.safeParse("2026-10-18T09:00:00+09:00").success,
+		).toBe(true);
+		expect(isoDateTimeSchema.safeParse("2026-10-18T00:00:00Z").success).toBe(
+			true,
+		);
+	});
+
+	it("空白区切り・オフセット無しを拒否する", () => {
+		expect(isoDateTimeSchema.safeParse("2026-10-18 09:00:00").success).toBe(
+			false,
+		);
+		expect(isoDateTimeSchema.safeParse("2026-10-18T09:00:00").success).toBe(
+			false,
+		);
+	});
+});
+
+describe("participantsSchema", () => {
+	const base = { includes_owner: true };
+
+	it("min=2・max=4を受理する", () => {
+		expect(
+			participantsSchema.safeParse({ min: 2, max: 4, ...base }).success,
+		).toBe(true);
+	});
+
+	it("min=1・min=5は拒否する(2〜4人)", () => {
+		expect(
+			participantsSchema.safeParse({ min: 1, max: 2, ...base }).success,
+		).toBe(false);
+		expect(
+			participantsSchema.safeParse({ min: 5, max: 5, ...base }).success,
+		).toBe(false);
+	});
+
+	it("min>maxは拒否する", () => {
+		expect(
+			participantsSchema.safeParse({ min: 3, max: 2, ...base }).success,
+		).toBe(false);
+	});
+});
+
+describe("budgetSchema", () => {
+	it("min>maxは拒否する", () => {
+		expect(budgetSchema.safeParse({ min: 5000, max: 3000 }).success).toBe(
+			false,
+		);
+	});
+
+	it("currency未指定はJPYに既定化する", () => {
+		expect(budgetSchema.parse({ min: 0, max: 5000 }).currency).toBe("JPY");
+	});
+});
+
+describe("constraintsSchema", () => {
+	it("10項目まで受理し11項目は拒否する", () => {
+		expect(constraintsSchema.safeParse(Array(10).fill("条件")).success).toBe(
+			true,
+		);
+		expect(constraintsSchema.safeParse(Array(11).fill("条件")).success).toBe(
+			false,
+		);
+	});
+
+	it("1項目は40字まで・41字は拒否する", () => {
+		expect(constraintsSchema.safeParse(["あ".repeat(40)]).success).toBe(true);
+		expect(constraintsSchema.safeParse(["あ".repeat(41)]).success).toBe(false);
+	});
+});
+
+describe("timeSchema", () => {
+	it("endがstartより前なら拒否する", () => {
+		expect(
+			timeSchema.safeParse({
+				start: "2026-10-18T19:00:00+09:00",
+				end: "2026-10-18T18:00:00+09:00",
+			}).success,
+		).toBe(false);
+	});
+
+	it("end省略時はnullに既定化する", () => {
+		expect(timeSchema.parse({ start: "2026-10-18T19:00:00+09:00" }).end).toBe(
+			null,
+		);
+	});
+});
+
+describe("parseIntentRequestSchema", () => {
+	it("raw_textは1〜300字(空・301字は拒否)", () => {
+		expect(parseIntentRequestSchema.safeParse({ raw_text: "" }).success).toBe(
+			false,
+		);
+		expect(
+			parseIntentRequestSchema.safeParse({ raw_text: "あ".repeat(301) })
+				.success,
+		).toBe(false);
+		expect(
+			parseIntentRequestSchema.safeParse({ raw_text: "飲みに行きたい" })
+				.success,
+		).toBe(true);
+	});
+});
+
+describe("createIntentRequestSchema", () => {
+	const base = { raw_text: "飲みに行きたい" };
+
+	it("raw_textは0〜300字(301字は拒否・draft用の空文字は受理)", () => {
+		expect(
+			createIntentRequestSchema.safeParse({ raw_text: "あ".repeat(301) })
+				.success,
+		).toBe(false);
+		expect(createIntentRequestSchema.safeParse({ raw_text: "" }).success).toBe(
+			true,
+		);
+	});
+
+	it("status未指定はactiveに既定化する", () => {
+		expect(createIntentRequestSchema.parse({ ...base }).status).toBe("active");
+	});
+
+	it("topicはtrim後1字以上必須", () => {
+		expect(
+			createIntentRequestSchema.safeParse({ ...base, topic: "　" }).success,
+		).toBe(false);
+	});
+
+	it("participants未指定は{min:2,max:2,includes_owner:true}", () => {
+		expect(createIntentRequestSchema.parse({ ...base }).participants).toEqual({
+			min: 2,
+			max: 2,
+			includes_owner: true,
+		});
+	});
+
+	it("expires_in_daysは7・30・90のみ受理する(31は拒否)", () => {
+		expect(
+			createIntentRequestSchema.safeParse({ ...base, expires_in_days: 30 })
+				.success,
+		).toBe(true);
+		expect(
+			createIntentRequestSchema.safeParse({ ...base, expires_in_days: 31 })
+				.success,
+		).toBe(false);
+	});
+});
+
+describe("patchIntentRequestSchema", () => {
+	it("空オブジェクトは拒否する(1フィールド必須)", () => {
+		expect(patchIntentRequestSchema.safeParse({}).success).toBe(false);
+	});
+
+	it("statusのみの指定を受理する", () => {
+		expect(
+			patchIntentRequestSchema.safeParse({ status: "active" }).success,
+		).toBe(true);
+	});
+
+	it("既定値を埋めない(指定しないフィールドはundefinedのまま)", () => {
+		const parsed = patchIntentRequestSchema.parse({ topic: "test" });
+		expect(parsed.participants).toBeUndefined();
+		expect(parsed.status).toBeUndefined();
+	});
+});
+
+describe("parseResponseSchema", () => {
+	const response = {
+		form: "occasion",
+		topic: "天文館で飲みに行く",
+		category: "食・飲み",
+		time: { start: "2026-10-18T20:00:00+09:00", end: null },
+		geo: { center: { lat: 31.59, lng: 130.55 }, radius_m: 500 },
+		participants: { min: 2, max: 4, includes_owner: true },
+		budget: { min: 0, max: 5000, currency: "JPY" },
+		expires_at_options: ["2026-10-25T20:00:00+09:00"],
+		alcohol_involved: true,
+		warnings: [
+			{ field: "time", note: "終了時刻が不明のため既定値を当てはめました" },
+		],
+	};
+
+	it("docs/05 §3.3の構造化プレビュー形状を受理する", () => {
+		expect(parseResponseSchema.parse(response)).toEqual(response);
+	});
+
+	it("time・geo・budgetはnullを許す", () => {
+		expect(
+			parseResponseSchema.safeParse({
+				...response,
+				time: null,
+				geo: null,
+				budget: null,
+			}).success,
+		).toBe(true);
+	});
+});
+
+describe("intentDtoSchema", () => {
+	const dto = {
+		id: "A".repeat(26),
+		form: "occasion",
+		topic: "天文館で飲みに行く",
+		category: "食・飲み",
+		raw_text: "今日20時以降、天文館周辺で飲みに行きたい",
+		time: {
+			start: "2026-10-18T20:00:00+09:00",
+			end: "2026-10-18T22:00:00+09:00",
+		},
+		geo: null,
+		participants: { min: 2, max: 4, includes_owner: true },
+		budget: { min: 0, max: 5000, currency: "JPY" },
+		hard_constraints: [],
+		soft_constraints: [],
+		negative_constraints: [],
+		visibility: "hidden_until_match",
+		notification_level: "proposals_only",
+		alcohol_involved: true,
+		status: "active",
+		version: 1,
+		expires_at: "2026-10-18T23:00:00+09:00",
+		created_at: "2026-10-18T12:00:00+09:00",
+		updated_at: "2026-10-18T12:00:00+09:00",
+	};
+
+	it("docs/05 §2.2のIntent DTOを受理する", () => {
+		expect(intentDtoSchema.parse(dto)).toEqual(dto);
+	});
+
+	it("visibilityはhidden_until_matchのみ・versionは1以上", () => {
+		expect(
+			intentDtoSchema.safeParse({ ...dto, visibility: "public" }).success,
+		).toBe(false);
+		expect(intentDtoSchema.safeParse({ ...dto, version: 0 }).success).toBe(
+			false,
+		);
 	});
 });
 

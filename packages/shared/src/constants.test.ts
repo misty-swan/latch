@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { CATEGORIES, ERROR_CODES, INTENT_FORMS, LIMITS } from "./constants";
+import {
+	BUDGET_MAX,
+	CATEGORIES,
+	CONNECTION_DEFAULT_EXPIRY_DAYS,
+	CONSTRAINT_ITEM_MAX_LENGTH,
+	CONSTRAINT_MAX_ITEMS,
+	ERROR_CODES,
+	EXPIRY_CHOICES_DAYS,
+	GEO_RADIUS_MAX_M,
+	GEO_RADIUS_MIN_M,
+	INTENT_FORMS,
+	LIMITS,
+	OCCASION_DEFAULT_TTL_HOURS,
+	OCCASION_STARTS_AT_MAX_DAYS_AHEAD,
+	PARTICIPANTS_MAX,
+	PARTICIPANTS_MIN,
+} from "./constants";
 
 describe("INTENT_FORMS", () => {
 	it("つながり・機会の2フォームをこの順で定義する", () => {
@@ -33,6 +49,22 @@ describe("ERROR_CODES", () => {
 				"INTERNAL",
 			].sort(),
 		);
+	});
+});
+
+describe("Intent定数", () => {
+	it("docs/05 §2.2の期限・人数・添付まわりの値と等しい", () => {
+		expect(EXPIRY_CHOICES_DAYS).toEqual([7, 30, 90]);
+		expect(CONNECTION_DEFAULT_EXPIRY_DAYS).toBe(30);
+		expect(OCCASION_DEFAULT_TTL_HOURS).toBe(3);
+		expect(OCCASION_STARTS_AT_MAX_DAYS_AHEAD).toBe(7);
+		expect(PARTICIPANTS_MIN).toBe(2);
+		expect(PARTICIPANTS_MAX).toBe(4);
+		expect(CONSTRAINT_MAX_ITEMS).toBe(10);
+		expect(CONSTRAINT_ITEM_MAX_LENGTH).toBe(40);
+		expect(GEO_RADIUS_MIN_M).toBe(100);
+		expect(GEO_RADIUS_MAX_M).toBe(100_000);
+		expect(BUDGET_MAX).toBe(9_999_999);
 	});
 });
 

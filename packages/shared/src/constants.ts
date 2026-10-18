@@ -142,3 +142,30 @@ export const LIMITS = {
 	BIO_MAX_LENGTH: 200,
 	ICON_MAX_BYTES: 1_048_576,
 } as const;
+
+/** つながりIntentの期限選択肢(日)。docs/05 §2.2(expires_at: 7/30/90選択) */
+export const EXPIRY_CHOICES_DAYS = [7, 30, 90] as const;
+
+/** つながりIntentの既定期限(日)。docs/05 §2.2(既定30日) */
+export const CONNECTION_DEFAULT_EXPIRY_DAYS = 30 as const;
+
+/** 機会Intentの既定TTL(時間)。start+3時間。docs/05 §2.2(機会=既定start+3h) */
+export const OCCASION_DEFAULT_TTL_HOURS = 3 as const;
+
+/** 機会Intentのstarts_at上限(now+7日以内)。docs/05 §2.2(実装で検証) */
+export const OCCASION_STARTS_AT_MAX_DAYS_AHEAD = 7 as const;
+
+/** 参加人数の下限・上限。docs/05 §2.2(participants_min/max)・06(2〜4人内) */
+export const PARTICIPANTS_MIN = 2 as const;
+export const PARTICIPANTS_MAX = 4 as const;
+
+/** 制約の最大項目数・1項目の最大長(ハード/ソフト/否定共通)。docs/05 §2.2(*_constraints) */
+export const CONSTRAINT_MAX_ITEMS = 10 as const;
+export const CONSTRAINT_ITEM_MAX_LENGTH = 40 as const;
+
+/** 地域添付の半径範囲(m)。docs/05 §2.2(geo_radius_m)・04(地理の実装) */
+export const GEO_RADIUS_MIN_M = 100 as const;
+export const GEO_RADIUS_MAX_M = 100_000 as const;
+
+/** 予算の上限(円)。docs/05 §2.2(budget_min/max) */
+export const BUDGET_MAX = 9_999_999 as const;
