@@ -2,7 +2,8 @@
  * 認証ミドルウェア(requireAuth/requireRegistered/requirePreRegistration)の統合試験。
  * docs/05 §3.1(Authorization: Bearer <JWT>)・docs/04 §4(KV失効リスト・jtiをTTL=残り寿命で格納)。
  * Hono<AppEnv>をテスト内で組み立ててapp.request()で呼ぶ(SELF経由不要・envはcloudflare:testのenv)。
- * テストenvはJWT_SECRET未設定のためjwtSecretはDEV_FALLBACK_JWT_SECRETに倒す(docs/10 §1)。
+ * JWT_SECRETを落としてJWT_SECRET未設定のenvを作り、jwtSecretはDEV_FALLBACK_JWT_SECRETに倒す
+ * (docs/10 §1。vitest.config.tsは統合試験用のJWT_SECRETバインディングを注入するため)。
  */
 
 import { env } from "cloudflare:test";
@@ -19,7 +20,10 @@ import { fixedClock } from "../src/clock/clock";
 import { DEV_FALLBACK_JWT_SECRET, type Env } from "../src/env";
 import { newUlid } from "../src/ids";
 
-const testEnv = env as unknown as Env;
+const testEnv = {
+	...env,
+	JWT_SECRET: undefined,
+} as unknown as Env;
 
 /** テスト対象のミドルウェアをダミールートに取り付けたアプリ */
 const app = new Hono<AppEnv>();
