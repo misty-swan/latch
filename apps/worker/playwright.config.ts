@@ -10,16 +10,19 @@
 
 import { defineConfig } from "@playwright/test";
 
+// 既定8787。ローカルで他プロジェクトが8787を占有する場合は
+// `LATCH_E2E_PORT=<空きポート>` を指定(占有されたサーバーを誤再利用しない)。
+const e2ePort = process.env.LATCH_E2E_PORT ?? "8787";
+
 export default defineConfig({
 	testDir: "./e2e",
 	webServer: {
-		command:
-			"node scripts/prepare-dev-vars.mjs && wrangler d1 migrations apply DB --local && wrangler dev --local --port 8787",
-		url: "http://localhost:8787/healthz",
+		command: `node scripts/prepare-dev-vars.mjs && wrangler d1 migrations apply DB --local && wrangler dev --local --port ${e2ePort}`,
+		url: `http://localhost:${e2ePort}/healthz`,
 		reuseExistingServer: !process.env.CI,
 		stdout: "ignore",
 	},
 	use: {
-		baseURL: "http://localhost:8787",
+		baseURL: `http://localhost:${e2ePort}`,
 	},
 });
