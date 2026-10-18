@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "./auth/middleware";
 import { ChatRoomDO } from "./do/chat";
 import { assertEnvSafety, type Env } from "./env";
+import { internalOnError } from "./http/errors";
 import { authRoutes } from "./routes/auth";
 import { iconRoutes } from "./routes/icons";
 import { intentRoutes } from "./routes/intents";
@@ -9,6 +10,9 @@ import { userRoutes } from "./routes/users";
 
 // 各ルートがBindingsにEnv・Variablesにauthクレームを期待する(docs/05 §3.1)
 const app = new Hono<AppEnv>();
+
+// 未捕捉例外はerrorJson形状の500 INTERNALに倒す(エラー応答は1形状のみ・docs/05 §3.1)
+app.onError(internalOnError);
 
 app.get("/healthz", (c) => c.json({ status: "ok" }));
 // 認証API(docs/05 §3.2)
