@@ -1,5 +1,5 @@
 /**
- * E2E用ヘルパー(docs/04 §4: テスト鍵モードのIdPトークン署名)。
+ * E2E用ヘルパー(テスト鍵モードのIdPトークン署名・docs/04 §4+テストユーザー登録)。
  * PlaywrightのspecはNode(workerd外)で実行されるため、コミット済みテスト鍵の
  * 秘密JWKを実FSから読んでjoseで署名できる(統合試験の?raw読み込みとは逆の前提)。
  * Worker側は .dev.vars の LATCH_TEST_IDP_JWKS(prepare-dev-vars.mjsが生成)で
@@ -9,6 +9,7 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { type APIRequestContext, expect } from "@playwright/test";
 import { generateKeyPair, importJWK, SignJWT } from "jose";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
 
@@ -56,4 +57,45 @@ export const signForeignIdpToken = async (sub: string): Promise<string> => {
 		.setIssuedAt(now)
 		.setExpirationTime(now + 600)
 		.sign(privateKey);
+};
+
+/** registerUserの応答(docs/05 §3.3のUserDTO+アクセストークン) */
+export interface RegisteredUser {
+	access_token: string;
+	user: {
+		id: string;
+		display_name: string;
+		bio: string;
+		has_icon: boolean;
+	};
+}
+
+/**
+ * テストユーザーを1人登録する(docs/05 §3.2のauth/token→users登録フローを
+ * 1メソッドに束ねた共通ヘルパー・F3以降のspecでも使う)。subは毎回ランダム生成
+ * (ローカルD1は実行間で永続するための汚染回避・docs/04 §4)。birth_dateは
+ * 18歳以上になる固定値(未成年系の検証はauth.spec.tsが専用の値で担う)
+ */
+export const registerUser = async (
+	request: APIRequestContext,
+	displayName = "E2Eテストユーザー",
+): Promise<RegisteredUser> => {
+	const tokenRes = await request.post("/v1/auth/token", {
+		data: {
+			provider: "google",
+			idp_token: await signIdpToken(`e2e-${crypto.randomUUID()}`),
+		},
+	});
+	expect(tokenRes.status()).toBe(200);
+	const token = (await tokenRes.json()) as { access_token: string };
+	const registerRes = await request.post("/v1/users", {
+		data: { display_name: displayName, birth_date: "2000-01-01", bio: "" },
+		headers: { authorization: `Bearer ${token.access_token}` },
+	});
+	expect(registerRes.status()).toBe(201);
+	const registered = (await registerRes.json()) as {
+		access_token: string;
+		user: RegisteredUser["user"];
+	};
+	return { access_token: registered.access_token, user: registered.user };
 };
