@@ -259,11 +259,14 @@ describe("GET /v1/intents(一覧・docs/05 §3.1・§3.2)", () => {
 		expect(page2.next_cursor).toBeNull();
 	});
 
-	it("limit=51・limit=0・不正cursor・不正statusは400 VALIDATION_FAILED", async () => {
+	it("limit=51・limit=0・limit=1e1・limit=0x10・不正cursor・不正statusは400 VALIDATION_FAILED", async () => {
 		const accessToken = await registerUser("list-invalid");
 		for (const query of [
 			"?limit=51",
 			"?limit=0",
+			// Number()では数値化されるが契約は「数字のみの1〜2桁」のため400(docs/05 §3.1)
+			"?limit=1e1",
+			"?limit=0x10",
 			"?cursor=@@@not-base64@@@",
 			"?status=archived",
 		]) {
@@ -439,6 +442,33 @@ describe("PATCH /v1/intents/{id}・draft状態(docs/05 §3.2: 全項目可変+ac
 		expect(row?.status).toBe("draft");
 		expect(row?.version).toBe(1);
 		expect(row?.topic).toBeNull();
+	});
+
+	it("機会draftのactive化にexpires_in_days指定は400・details.reasonsにexpires_in_days_not_allowed", async () => {
+		const accessToken = await registerUser("patch-activate-occ-days");
+		const start = new Date(Date.now() + 2 * MS_PER_DAY);
+		const draft = await createDraft(accessToken, {
+			form: "occasion",
+			topic: "夕方の散歩会",
+			time: { start: start.toISOString(), end: null },
+		});
+		const res = await patchJson(
+			`/v1/intents/${draft.id}`,
+			{ status: "active", expires_in_days: 30 },
+			accessToken,
+		);
+		// 機会の期限は開始時刻基準で確定するため期限日数の選択は受けない(黙って無視しない)
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as ErrorResponse;
+		expect(body.error.code).toBe("VALIDATION_FAILED");
+		expect(body.error.details.reasons).toEqual(["expires_in_days_not_allowed"]);
+		// 行はdraftのまま・version据え置き
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, draft.id));
+		expect(row?.status).toBe("draft");
+		expect(row?.version).toBe(1);
 	});
 
 	it("activeが5件ある状態でのdraft→active化は422 ACTIVE_INTENT_LIMIT・draftはdraftのまま", async () => {

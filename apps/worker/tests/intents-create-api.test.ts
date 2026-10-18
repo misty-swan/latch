@@ -402,6 +402,23 @@ describe("POST /v1/intents・active作成の検証(docs/05 §2.2の理由コー�
 		expect(body.error.details.reasons).toContain("starts_at_required");
 	});
 
+	it("機会active作成にexpires_in_days指定は400・details.reasonsにexpires_in_days_not_allowed", async () => {
+		const accessToken = await registerUser("reject-occ-expiry-days");
+		const start = new Date(Date.now() + 2 * MS_PER_DAY).toISOString();
+		const res = await postIntents(accessToken, {
+			raw_text: "土曜の10時に朝市へ行きたい",
+			form: "occasion",
+			topic: "朝市めぐり",
+			time: { start, end: null },
+			expires_in_days: 30,
+		});
+		// 機会の期限は開始時刻基準で確定するため期限日数の選択は受けない(黙って無視しない)
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as ErrorResponse;
+		expect(body.error.code).toBe("VALIDATION_FAILED");
+		expect(body.error.details.reasons).toEqual(["expires_in_days_not_allowed"]);
+	});
+
 	it("starts_atが過去の機会active作成は400・details.reasonsにstarts_at_out_of_range", async () => {
 		const accessToken = await registerUser("reject-occ-past");
 		const res = await postIntents(accessToken, {

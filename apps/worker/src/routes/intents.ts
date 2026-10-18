@@ -292,6 +292,21 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 		);
 		return c.json(r.body, r.status);
 	}
+	// 機会Intentのactive作成に期限日数の選択は不可(期限は開始時刻基準で確定するため・
+	// docs/05 §3.3)。黙って無視せず400で返す
+	if (
+		d.status === "active" &&
+		d.form === "occasion" &&
+		d.expires_in_days !== undefined
+	) {
+		logger.warn("intents.create.rejected", { error_code: "VALIDATION_FAILED" });
+		const r = errorJson(
+			"VALIDATION_FAILED",
+			"機会Intentには期限日数を選択できません。開始時刻に基づく期限が適用されます",
+			{ reasons: ["expires_in_days_not_allowed"] },
+		);
+		return c.json(r.body, r.status);
+	}
 	const db = dbOf(c.env);
 	const now = systemClock.now();
 
@@ -423,12 +438,17 @@ intentRoutes.get("/", requireRegistered, async (c) => {
 		statusFilter = parsedStatus.data;
 	}
 
-	// limit=1..50既定20(docs/05 §3.1)。範囲外・整数でない値は400
+	// limit=1..50既定20(docs/05 §3.1)。Number()は「1e1」「0x10」「 5 」等も数値化して
+	// しまうため、先に「数字のみの1〜2桁」の事前照合を行い、範囲外は400にする
 	let limit = 20;
 	const limitParam = c.req.query("limit");
 	if (limitParam !== undefined) {
+		if (!/^[0-9]{1,2}$/u.test(limitParam)) {
+			const r = validationFailed();
+			return c.json(r.body, r.status);
+		}
 		const parsedLimit = Number(limitParam);
-		if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 50) {
+		if (parsedLimit < 1 || parsedLimit > 50) {
 			const r = validationFailed();
 			return c.json(r.body, r.status);
 		}
@@ -597,7 +617,9 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 					: new Date(d.time.end);
 
 	// activeのつながりにtimeを指定する変更は不可・つながりIntentはstarts_at=null不変
-	// (docs/05 §2.2)。time:nullの指定は現行値維持のため可
+	// (docs/05 §2.2)。time:nullの明示は可で、nullを指定したフィールドはそのままnullに
+	// なる(「現行値の維持」ではなく値の明示的設定)。機会Intentのtime:nullは
+	// 下の再検証でstarts_at_required=400になる
 	if (
 		row.status === "active" &&
 		row.form === "connection" &&
@@ -652,6 +674,22 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 	let nextStatus: IntentStatus = row.status;
 	let expiresAt: Date | null;
 	if (d.status === "active") {
+		// 機会Intentのactive化に期限日数の選択は不可(期限は開始時刻基準で確定するため・
+		// docs/05 §3.3)。黙って無視せず400で返す
+		if (
+			(d.form ?? row.form) === "occasion" &&
+			d.expires_in_days !== undefined
+		) {
+			logger.warn("intents.update.rejected", {
+				error_code: "VALIDATION_FAILED",
+			});
+			const r = errorJson(
+				"VALIDATION_FAILED",
+				"機会Intentには期限日数を選択できません。開始時刻に基づく期限が適用されます",
+				{ reasons: ["expires_in_days_not_allowed"] },
+			);
+			return c.json(r.body, r.status);
+		}
 		const explicitExpiresAt =
 			d.expires_at === undefined ? null : new Date(d.expires_at);
 		// マージ結果の検証(意味検証はdraftでは行わずactive化時に行う・docs/05 §3.2)

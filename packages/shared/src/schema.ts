@@ -93,7 +93,11 @@ export const intentStatusSchema = z.enum(INTENT_STATUSES);
 /** アプリ内通知の受け取りレベル。docs/05 §2.2(notification_level・既定proposals_only) */
 export const notificationLevelSchema = z.enum(["proposals_only", "muted"]);
 
-/** ISO 8601日時(オフセット必須・Zも可)。docs/05 §2.2(datetime列) */
+/**
+ * ISO 8601日時(オフセット必須・Zも可)。docs/05 §2.2(datetime列)。
+ * Zod v4のz.iso.datetimeは暦の妥当性も検証するため(例: 2026-02-30は拒否)、
+ * パース後のnew DateがNaNになる経路はこのスキーマで閉じている
+ */
 export const isoDateTimeSchema = z.iso.datetime({ offset: true });
 
 /** parse応答のwarnings要素(判定不能NG条件の注意表示)。docs/05 §3.3 */
