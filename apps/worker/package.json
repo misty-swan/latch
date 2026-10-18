@@ -4,8 +4,10 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
+		"dev": "wrangler dev",
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run"
+		"test": "vitest run",
+		"test:e2e": "playwright test"
 	},
 	"dependencies": {
 		"@latch/shared": "workspace:*",
@@ -16,6 +18,7 @@
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "0.23.0",
+		"@playwright/test": "1.64.1",
 		"@types/node": "22.15.17",
 		"drizzle-kit": "0.31.11",
 		"typescript": "5.9.3",

@@ -8,7 +8,11 @@
 			// ビルド生成物(vite buildの出力。gitignore済みだがbiomeはファイルシステム直視のため除外)
 			"!**/dist",
 			// drizzle-kitの生成物(ツールが都度書き換えるため整形対象外)
-			"!apps/worker/migrations"
+			"!apps/worker/migrations",
+			// wrangler dev/デプロイの一時生成物(gitignore済み・E2Eのwrangler dev起動時に作られる)
+			"!apps/worker/.wrangler",
+			// Playwrightの実行生成物(test-results・gitignore済み・test:e2e実行時に作られる)
+			"!apps/worker/test-results"
 		]
 	}
 }

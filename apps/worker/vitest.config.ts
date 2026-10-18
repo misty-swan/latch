@@ -5,7 +5,7 @@ import {
 	cloudflareTest,
 	readD1Migrations,
 } from "@cloudflare/vitest-pool-workers";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig(async () => {
 	// wrangler設定のmigrations_dirにあるマイグレーションSQLを読み込む。
@@ -40,6 +40,9 @@ export default defineConfig(async () => {
 		],
 		test: {
 			setupFiles: ["./tests/apply-d1-migrations.ts"],
+			// e2e/はPlaywrightが担う(test:e2e)。既定のincludeは**/*.spec.tsまで
+			// 見るためcloudflareプールから外す
+			exclude: [...configDefaults.exclude, "e2e/**"],
 		},
 	};
 });
