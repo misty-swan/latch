@@ -2,8 +2,8 @@
 
 ## 現在の状態
 
-- 文書駆動開発のフェーズ。`docs/`(00〜12)が製品仕様の正本。実装はF0骨組み(モノレポ・wrangler・D1初回マイグレーション・CI・stub LLM・Clock・ログ許可リスト)とF1アカウント(auth 3API・users登録/me・アイコンR2)まで完了し、ゲート「CI緑(認証E2E・テスト鍵起動ガード・CIにE2Eジョブ追加済み)」で証明する。次はF2(Intent API)。索引は `docs/00-document-roadmap.md`
-- 注記: レート制限(04 §5)と退会DELETE /v1/users/me(05 §2.5)はF1スコープ外として後続フェーズで計上
+- 文書駆動開発のフェーズ。`docs/`(00〜12)が製品仕様の正本。実装はF0骨組み(モノレポ・wrangler・D1初回マイグレーション・CI・stub LLM・Clock・ログ許可リスト)・F1アカウント(auth 3API・users登録/me・アイコンR2)・F2 Intent API(parse/CRUD/draft→active/期限・form検証・pause/resume・Active Intent上限5件)まで完了し、ゲート「02 §4の#1〜#5(Intent E2E緑)」で証明する。次はF3(パイプライン前段)。索引は `docs/00-document-roadmap.md`
+- 注記: レート制限(60req/分・作成20/日・更新6/時)と退会DELETE /v1/users/me(05 §2.5)は後続フェーズで計上。Active Intent上限(5件)はF2で実装済み
 - 03(UX仕様)は未作成。`prototype/` はオーナーが作成済みのUI基準(完了)で、03の策定はF2'(フロント基盤・画面)の着手前に必要
 - READMEは現在没有。リポジトリの案内はこのファイルとdocs/00が担う
 

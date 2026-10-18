@@ -1,12 +1,13 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.4
+- 文書バージョン: v0.5
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.4更新: 2026-10-18)
+- 作成日: 2026-10-17(v0.5更新: 2026-10-18)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
+- v0.5の変更点: F2実装に伴い§3.3にIntent系API(parse・作成・一覧・PATCH・pause/resume)の確定レスポンス形状と理由コードの一覧を追記し、§3.2のPATCH可変フィールドと§2.2のactive化検証の記載を実装確定値に精緻化
 - 前提文書: 01 要件定義書 v0.8 / 02 スコープ・受け入れ条件合意書 v0.2 / 04 アーキテクチャ設計書 v0.6
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
@@ -107,7 +108,7 @@ vector_deleted_at:  datetime | null  # ベクトル削除実行記録(§2.6の2�
 created_at / updated_at
 ```
 
-制約(実装で検証): **draftは topic・form・starts_at・expires_at をnull許容とし、raw_text(0..300)のみで保存できる**。active化(PATCH)時に次を検証する(違反はVALIDATION_FAILEDに理由コードを付す): form確定必須 / topic 1..40 / 機会Intentはstarts_at必須かつ現在以降〜now+7日以内 / expires_at設定(機会=既定start+3時間・つながり=7/30/90日選択) / alcohol_involvedは機会Intentのみtrue可。つながりIntentは starts_at=null・alcohol_involved=false。
+制約(実装で検証): **draftは topic・form・starts_at・expires_at をnull許容とし、raw_text(0..300)のみで保存できる**。active化(作成時のstatus=active・PATCHでのdraft→active)時に次を検証する(違反はVALIDATION_FAILEDに理由コードを付す・§3.3に一覧): form確定必須 / topic 1..40 / 機会Intentはstarts_at必須かつ現在以降〜now+7日以内 / expires_at設定(機会=既定start+3時間・つながり=7/30/90日選択) / alcohol_involvedは機会Intentのみtrue可。つながりIntentは starts_at=null・alcohol_involved=false。
 
 **match_events**(Queues投入の記録・冪等性)
 
@@ -306,8 +307,10 @@ POST   /v1/intents                       # 作成(status=draft可)
 GET    /v1/intents?status=active|draft|… # 自Intent一覧
 GET    /v1/intents/{id}
 PATCH  /v1/intents/{id}                  # 更新(version+1)・draft→active化(検証は§2.2)
-       # 可変フィールド: draft=全項目 / active=topic・添付・constraints・notification_level
-       # (visibilityは不可)。topic・constraints等の意味フィールド変更時のみ
+       # 可変フィールド: draft=全項目+status:"active" / active=topic・time・geo・
+       # participants・budget・constraints(3種)・notification_levelのみ
+       # (他のフィールド指定はfield_not_allowed=400・paused等へのPATCHは
+       # invalid_status=400。詳細は§3.3)。topic・constraints等の意味フィールド変更時のみ
        # Embedding再計算イベントを発行し、表示系のみの変更は再評価しない
 DELETE /v1/intents/{id}
 POST   /v1/intents/{id}/pause / resume
@@ -347,7 +350,17 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 
 **POST /v1/auth/refresh** — 200 `{access_token, refresh_token, expires_in}`(回転式・04 §4)。期限切れは401 TOKEN_EXPIRED・未知/再利用トークンは401 UNAUTHORIZED。
 
-**POST /v1/intents/parse** — `{form, topic, category, time:{start,end}|null, geo:{center:{lat,lng},radius_m}|null, participants:{min,max,includes_owner}, budget|null, expires_at_options:[...], alcohol_involved, warnings:[{field, note}](判定不能NG条件の注意表示)}`。formはクライアント側で切替可能(確定送信は別API)。
+**POST /v1/intents/parse** — `{form, topic, category, time:{start,end}|null, geo:{center:{lat,lng},radius_m}|null, participants:{min,max,includes_owner}, budget:{min,max,currency:"JPY"}|null, expires_at_options:[...], alcohol_involved, warnings:[{field, note}](判定不能NG条件の注意表示)}`。formはクライアント側で切替可能(確定送信は別API)。geoは常にnull(parseは地域を解決しない・ユーザーが添付で確定させる)・participants.includes_ownerはtrue・budgetの通貨はJPY固定。expires_at_optionsは期限の選択肢(ISO 8601・昇順): つながりIntent=now+7日/now+30日/now+90日の3件・機会Intent=時刻確定時はstart+3時間の1件・時刻未確定は空配列
+
+**IntentDTO(Intent系API共通の応答形状)** — `{id, form, topic, category, raw_text, time:{start, end}|null, geo:{center:{lat,lng}, radius_m}|null, participants:{min, max, includes_owner}, budget:{min, max, currency:"JPY"}|null, hard_constraints:[...], soft_constraints:[...], negative_constraints:[...], visibility:"hidden_until_match", notification_level, alcohol_involved, status, version, expires_at, created_at, updated_at}`。form・topic・category・time・geo・budget・expires_atは未確定欄がnullとなる(draft保存の許容・§2.2)。時刻はISO 8601。visibilityは単値のため常に"hidden_until_match"
+
+**POST /v1/intents** — 201 IntentDTO。statusの省略時はactive・draftは意味検証せず保存する(version=1)。draft保存では期限の選択(expires_in_days)を含められない(POST/PATCHとも400・理由コードexpires_choice_on_draft)。選択は預ける時(active化)に確定し、draftの明示expires_atは格納できる(機会Intentのactive化時の採用順は 明示expires_at > draft保存値 > 既定start+3時間)。active(status="active"を伴う作成)は§2.2の検証を行い、違反は400 VALIDATION_FAILEDのdetails.reasonsに理由コードの配列で返す: form_required / topic_required / starts_at_required / starts_at_out_of_range / starts_at_not_allowed / alcohol_not_allowed / expires_at_not_allowed / expires_at_before_start
+
+**GET /v1/intents** — 200 `{items: IntentDTO[], next_cursor: string|null}`。自Intentのみ・順序はid降順(ULID=新着順)。`?status=<単一値>`で絞り込み(不明な値は400)。limit=1..50(既定20・範囲外は400)。cursorは不透明(直前ページ最終idのbase64url化・復号できない値は400)
+
+**GET・PATCH・DELETE /v1/intents/{id}** — 200 IntentDTO / 200 IntentDTO(version+1) / 204。他人の・存在しないは一律404(§3.1)。PATCHの可変フィールド: draft=全項目+status:"active"(active化)・active=topic・time・geo・participants・budget・constraints(3種)・notification_levelのみ(他のフィールド指定は400 field_not_allowed)。draft・active以外(paused/matched/expired/cancelled)へのPATCHは400 invalid_status。draft宛のexpires_in_daysは同一リクエストがstatus:"active"を伴う場合を除き400 expires_choice_on_draft。active機会Intentのtime変更は範囲を再検証し、現在のexpires_at以降へは変更できない(400 starts_at_after_expires)
+
+**POST /v1/intents/{id}/pause・resume** — 200 IntentDTO(version+1)。pauseはactiveのみ実行可(他は400 invalid_status)・status=paused・期限は不変。resumeはpausedのみ実行可(他は400 invalid_status)・期限切れ(expires_at<=now)は400(理由コードexpired)・status=active・期限は据え置き(再計算しない)。参加中active数の上限5件は作成・draft→active化・resumeの3経路で検証し、超過は422 ACTIVE_INTENT_LIMIT(§3.1)
 
 **GET /v1/latches(提案)** — `{id, form, proposal:{…表示要素(成立前の条件サマリは含まない)・必要人数}, score, status, response_deadline, my_response|null, participants_count}`。scoreは応答に含むがUIでは表示しない(01 §10の裁定)。
 
