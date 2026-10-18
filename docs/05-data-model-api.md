@@ -1,12 +1,13 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.3
+- 文書バージョン: v0.4
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.3更新: 2026-10-18)
+- 作成日: 2026-10-17(v0.4更新: 2026-10-18)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
-- 前提文書: 01 要件定義書 v0.8 / 02 スコープ・受け入れ条件合意書 v0.2 / 04 アーキテクチャ設計書 v0.5
+- v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記を追加
+- 前提文書: 01 要件定義書 v0.8 / 02 スコープ・受け入れ条件合意書 v0.2 / 04 アーキテクチャ設計書 v0.6
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -226,7 +227,7 @@ created_at / updated_at
 
 **Vectorizeインデックス**(1本): vector id = intent ULID。metadata = `{form, status, category, user_id}`(インデックス作成時にmetadata indexとしてform・status・categoryを宣言する。07 §1)。検索時のfilterで form一致・status=active を最適化として適用し(01 §12)、取り出し後は**D1の現行status・blocks・提案履歴をコードで再検証する**(metadataの同期遅延に依存しない二重化)。Intentの遷移(pause/resume/matched/expired)ごとにmetadataのstatusを更新し、失敗はCronバックフィルで回収する。照合時にD1行が存在しないベクトルはfail-closeで除外する。次元=1024・距離=cosine(07 v0.1で確定)。削除: Intent削除・期限切れ+7日でベクトル削除(§2.6)。
 
-**KV**: `revocation:{jti}` = 1(TTL=JWT残り寿命)。失効はJWT残寿命(最大1時間)以内の効力とし、権限が関わる操作(チャット送信・回答・退会)はD1のusers.statusとblocksを必ず再検証して補完する。WebSocket接続チケットはKVに置かず、**joseで署名した短期トークン(exp=60秒・user_id/latch_idクレーム)** を使う(結果整合の伝播遅延を回避。§3.4)。回転猶予: `rfg:{旧リフレッシュトークンハッシュ}` = 現行リフレッシュトークン(TTL 120秒・取得後に削除で使い切り。窓外の再提示は再利用検出として族をrevoked。04 §4)
+**KV**: `revocation:{jti}` = 1(TTL=JWT残り寿命)。失効はJWT残寿命(最大1時間)以内の効力とし、権限が関わる操作(チャット送信・回答・退会)はD1のusers.statusとblocksを必ず再検証して補完する。WebSocket接続チケットはKVに置かず、**joseで署名した短期トークン(exp=60秒・user_id/latch_idクレーム)** を使う(結果整合の伝播遅延を回避。§3.4)。回転猶予: `rfg:{旧リフレッシュトークンハッシュ}` = 現行リフレッシュトークン(TTL 120秒・取得後に削除で使い切り。窓外の再提示は再利用検出として族をrevoked。04 §4)。KVは結果整合のため猶予エントリの並行取得は理論上可能であり、猶予の「1回に限り」はベストエフォートとする
 
 **R2**: バケット1つ(`icons`)。キー=`{user ULID}/{ULID}`。受け付けはPNG/JPEG/WebP・1MBまで。Workersで受けて検証し保存(外部サービス送信なし)。URLは同一オリジンで配信(04 Assets経由ではなくWorkerレスポンスでストリーム)。
 
@@ -283,7 +284,7 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 { "error": { "code": "UNDER_AGE", "message": "解説文(日本語)", "details": {} } }
 ```
 
-- 主要エラーcode: UNAUTHORIZED / TOKEN_EXPIRED / FORBIDDEN / NOT_FOUND / VALIDATION_FAILED / RATE_LIMITED / ACTIVE_INTENT_LIMIT(422) / UNDER_AGE(422) / ALCOHOL_RESTRICTED(422) / FORM_MISMATCH / PARSE_FAILED / EMBEDDING_PENDING / INTERNAL。本人が所属しないlatch・他人のIntentへのアクセスは、存在を推測させないため一律NOT_FOUNDを返す(FORBIDDENは自己リソースへの操作権限の欠如に限る)
+- 主要エラーcodeとHTTPステータスの対応: UNAUTHORIZED/TOKEN_EXPIRED=401・FORBIDDEN=403・NOT_FOUND=404・VALIDATION_FAILED/FORM_MISMATCH=400・RATE_LIMITED=429・ACTIVE_INTENT_LIMIT/UNDER_AGE/ALCOHOL_RESTRICTED/PARSE_FAILED=422・EMBEDDING_PENDING=409・INTERNAL=500。本人が所属しないlatch・他人のIntentへのアクセスは、存在を推測させないため一律NOT_FOUNDを返す(FORBIDDENは自己リソースへの操作権限の欠如に限る)
 - ページネーション: 一覧系は `?cursor=<不透明>&limit=1..50(既定20)`。応答は `{items: [...], next_cursor: string|null}`
 - レート制限: 1ユーザーあたり60req/分(04 §5)。429には `Retry-After`(固定60秒)を付す
 
@@ -335,6 +336,16 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 ```
 
 ### 3.3 主要レスポンス形状(抜粋)
+
+**POST /v1/auth/token** — `{access_token, refresh_token: string|null, expires_in: 3600, user: UserDTO|null, registration_required: boolean}`。未登録は user=null・refresh_token=null・registration_required=true(登録前JWTの発行・04 §4)。IdPトークン検証の失敗は一律401 UNAUTHORIZED(固定文言)。
+
+**POST /v1/users** — 201 `{user: UserDTO, access_token, refresh_token, expires_in}`(sub付きJWTへの付け替えと新規リフレッシュ族・04 §4)。18歳未満は422 UNDER_AGE・既に登録済み(同一(provider, subject)のactive行)は400 VALIDATION_FAILED。
+
+**GET・PATCH /v1/users/me** — 200 UserDTO(`{id, display_name, bio, has_icon}`)。行無し・status=deleted(退会済み)は一律404 NOT_FOUND(存在を露見させない)。
+
+**POST・DELETE /v1/users/me/icon** — 201 UserDTO / 204(冪等)。**GET /v1/users/{user_id}/icon** — 200(未認証・Cache-Control: private)。ユーザー不在・deleted・アイコン無しは区別せず404。
+
+**POST /v1/auth/refresh** — 200 `{access_token, refresh_token, expires_in}`(回転式・04 §4)。期限切れは401 TOKEN_EXPIRED・未知/再利用トークンは401 UNAUTHORIZED。
 
 **POST /v1/intents/parse** — `{form, topic, category, time:{start,end}|null, geo:{center:{lat,lng},radius_m}|null, participants:{min,max,includes_owner}, budget|null, expires_at_options:[...], alcohol_involved, warnings:[{field, note}](判定不能NG条件の注意表示)}`。formはクライアント側で切替可能(確定送信は別API)。
 

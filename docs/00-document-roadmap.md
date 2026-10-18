@@ -1,27 +1,28 @@
 # LATCH ドキュメントロードマップ
 
-- 文書バージョン: v0.2
+- 文書バージョン: v0.3
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.2更新: 同日)
+- 作成日: 2026-10-17(v0.3更新: 2026-10-18)
 - v0.2の変更点: 多角レビュー(loop1)後の各文書の版数反映・reports/の登録・参照表記の規定追加
+- v0.3の変更点: F1実装に伴う各文書の版数同期(05 v0.4・04 v0.6・10 v0.3)
 - 本書の位置づけ: docs/文書群の構成・依存・運用ルールを示す索引
 
 ## 1. 文書一覧
 
 | ファイル | 文書 | 状態 | 概要 |
 |---|---|---|---|
-| 00-document-roadmap.md | 本書 | v0.1 | 索引と運用ルール |
+| 00-document-roadmap.md | 本書 | v0.3 | 索引と運用ルール |
 | 01-requirements.md | 要件定義書 | v0.8 | コンセプト・要件・v1.0完成条件・製品の未決(D-xx) |
 | 02-scope-acceptance.md | スコープ・受け入れ条件合意書 | v0.2 | 作る/作らないの境界・完成条件×検証方法(#1〜#35) |
 | 03-ux-spec.md | UX仕様書 | **未作成(プロトタイプの手配待ち)** | 5画面フロー・通知・状態遷移・スタイリング(D-A-07) |
-| 04-system-architecture.md | アーキテクチャ設計書 | v0.5 | Cloudflare構成・技術スタック・開発規律 |
-| 05-data-model-api.md | データモデル・API仕様書 | v0.3 | D1テーブル・Vectorize/KV/R2・API契約・WebSocket |
+| 04-system-architecture.md | アーキテクチャ設計書 | v0.6 | Cloudflare構成・技術スタック・開発規律 |
+| 05-data-model-api.md | データモデル・API仕様書 | v0.4 | D1テーブル・Vectorize/KV/R2・API契約・WebSocket |
 | 06-matching-pipeline.md | マッチングパイプライン設計書 | v0.2 | 5層・イベント駆動・提案化・縮退 |
 | 07-jev-llm-spec.md | LLM利用仕様書 | v0.2 | Parser/Embedding/Jevの提供元と精度ゲート |
 | 08-privacy-safety.md | プライバシー・安全設計書 | v0.2 | 表示最小化・外部送信・同意・安全機構・法務確認 |
 | 09-verification-evaluation.md | 検証・評価計画書 | v0.2 | 前提の確認・KPI定義・A/B・警報・アンケート |
-| 10-test-env-nfr.md | テスト環境・非機能検証計画書 | v0.2 | 環境・時刻制御・E2Eマトリクス・負荷・縮退 |
+| 10-test-env-nfr.md | テスト環境・非機能検証計画書 | v0.3 | 環境・時刻制御・E2Eマトリクス・負荷・縮退 |
 | 11-release-plan.md | リリース計画書 | v0.2 | 公開前提・手順・ロールバック・獲得施策 |
 | 12-development-roadmap.md | 開発ロードマップ | v0.2 | F0〜F10の工程とゲート |
 | reviews/ | レビュー記録 | ― | 多角レビューの指摘票と統合レポート(loop1/等) |
