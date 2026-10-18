@@ -552,6 +552,58 @@ describe("PATCH /v1/intents/{id}・active状態(docs/05 §3.2: 可変フィー�
 		expect(row?.topic).toBe("変更できない学習仲間");
 	});
 
+	it("activeつながりへのtime指定は400・details.reasonsにstarts_at_not_allowed・行不変", async () => {
+		const accessToken = await registerUser("patch-conn-time");
+		const created = await createActiveConnection(
+			accessToken,
+			"時刻を持たない学習仲間",
+		);
+		const res = await patchJson(
+			`/v1/intents/${created.id}`,
+			{
+				time: {
+					start: new Date(Date.now() + MS_PER_DAY).toISOString(),
+					end: null,
+				},
+			},
+			accessToken,
+		);
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as ErrorResponse;
+		expect(body.error.code).toBe("VALIDATION_FAILED");
+		// つながりIntentはstarts_at=null不変(docs/05 §2.2)
+		expect(body.error.details.reasons).toEqual(["starts_at_not_allowed"]);
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, created.id));
+		expect(row?.startsAt).toBeNull();
+		expect(row?.version).toBe(1);
+	});
+
+	it("他人のIntentへのPATCHは404・DB行は不変(存在を隠す)", async () => {
+		const owner = await registerUser("patch-owner");
+		const other = await registerUser("patch-other");
+		const created = await createActiveConnection(
+			owner,
+			"他人は変えられない学習仲間",
+		);
+		const res = await patchJson(
+			`/v1/intents/${created.id}`,
+			{ topic: "他人による主題書き換え" },
+			other,
+		);
+		expect(res.status).toBe(404);
+		const body = (await res.json()) as ErrorResponse;
+		expect(body.error.code).toBe("NOT_FOUND");
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, created.id));
+		expect(row?.topic).toBe("他人は変えられない学習仲間");
+		expect(row?.version).toBe(1);
+	});
+
 	it("機会のstarts_atを過去へ変更は400・details.reasonsにstarts_at_out_of_range", async () => {
 		const accessToken = await registerUser("patch-occ-past");
 		const start = new Date(Date.now() + 2 * MS_PER_DAY);

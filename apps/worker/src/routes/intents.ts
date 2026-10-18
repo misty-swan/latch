@@ -519,6 +519,23 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 					? null
 					: new Date(d.time.end);
 
+	// activeのつながりにtimeを指定する変更は不可・つながりIntentはstarts_at=null不変
+	// (docs/05 §2.2)。time:nullの指定は現行値維持のため可
+	if (
+		row.status === "active" &&
+		row.form === "connection" &&
+		d.time !== undefined &&
+		d.time !== null
+	) {
+		logger.warn("intents.update.rejected", { error_code: "VALIDATION_FAILED" });
+		const r = errorJson(
+			"VALIDATION_FAILED",
+			"つながりIntentには開始時刻を設定できません",
+			{ reasons: ["starts_at_not_allowed"] },
+		);
+		return c.json(r.body, r.status);
+	}
+
 	// activeの機会でstarts_atを変更する場合は範囲と期限を再検証する(docs/05 §3.2)
 	if (
 		row.status === "active" &&
