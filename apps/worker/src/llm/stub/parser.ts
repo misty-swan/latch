@@ -2,8 +2,9 @@
  * Intent Parserのstub(docs/07 §2(a)・§3)。規則ベースの抽出のみでLLMを呼ばない。
  * 決定的(同一入力+同一clock→同一出力)であることを仕様とする(07 §2)。
  */
-import { type IntentForm, LIMITS } from "@latch/shared";
+import { EXPIRY_CHOICES_DAYS, type IntentForm, LIMITS } from "@latch/shared";
 import type { Clock } from "../../clock/clock";
+import { MS_PER_DAY, occasionDefaultExpiry } from "../../intents/expiry";
 import type { ParserStubOutput } from "../types";
 
 /** JST=UTC+9の固定オフセット。Intl・タイムゾーンDBは使わない(clock.tsと同一方針・04 §4) */
@@ -44,6 +45,13 @@ const ALCOHOL_WORDS = [
 ] as const;
 
 const pad2 = (n: number): string => String(n).padStart(2, "0");
+
+/** DateをJSTオフセット付きISO文字列へ整形する(time.startと同一形式・04 §4) */
+const toJstIso = (date: Date): string => {
+	// JSTへずらした値のUTC部分を読む(nextJstDayと同一方針)
+	const shifted = new Date(date.getTime() + JST_OFFSET_MS);
+	return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}T${pad2(shifted.getUTCHours())}:${pad2(shifted.getUTCMinutes())}:00+09:00`;
+};
 
 /** clock基準日のJST翌日の年月日を求める(時刻語は「基準日のJST翌日のその時刻」と解釈・07 §3) */
 const nextJstDay = (
@@ -113,6 +121,19 @@ export const stubParse = (raw_text: string, clock: Clock): ParserStubOutput => {
 		raw_text.includes(word),
 	);
 
+	// 期限選択肢(05 §2.2): つながりはnow+7/30/90日の3件(EXPIRY_CHOICES_DAYSは昇順固定)・
+	// 機会は時刻確定時のみstart+3時間の1件・日付語のみでstart未確定なら空配列
+	let expires_at_options: string[] = EXPIRY_CHOICES_DAYS.map((days) =>
+		toJstIso(new Date(clock.now().getTime() + days * MS_PER_DAY)),
+	);
+	if (form === "occasion") {
+		// time.startは直上で生成した+09:00付きISOのためnew Dateで確実にパースできる
+		expires_at_options =
+			time === null
+				? []
+				: [toJstIso(occasionDefaultExpiry(new Date(time.start)))];
+	}
+
 	return {
 		form,
 		topic: extractTopic(raw_text),
@@ -121,6 +142,7 @@ export const stubParse = (raw_text: string, clock: Clock): ParserStubOutput => {
 		participants,
 		budget,
 		alcohol_involved,
+		expires_at_options,
 		warnings: [],
 	};
 };

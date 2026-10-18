@@ -17,6 +17,8 @@ export interface ParserStubOutput {
 	participants: { min: number; max: number };
 	budget: { min: number; max: number } | null;
 	alcohol_involved: boolean;
+	/** 提案する期限の選択肢(JSTオフセット付きISO・05 §2.2)。機会で時刻未確定のときは空配列 */
+	expires_at_options: string[];
 	warnings: [];
 }
 

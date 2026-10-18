@@ -91,6 +91,40 @@ describe("stubParseのtopicと固定フィールド(07 §3・04 §5の上限)", 
 	});
 });
 
+describe("stubParseの期限選択肢(05 §2.2: つながり=7/30/90日・機会=start+3時間)", () => {
+	it("時刻語あり(機会)はstart+3時間の1件・JSTオフセット付きISO", () => {
+		const out = stubParse("日曜17時にカレー会", fixed);
+		expect(out.expires_at_options).toEqual(["2026-10-18T20:00:00+09:00"]);
+	});
+
+	it("start+3時間が翌日へまたがる時刻でも暦通りに計算する", () => {
+		const out = stubParse("22時半の飲み会", fixed);
+		expect(out.time?.start).toBe("2026-10-18T22:30:00+09:00");
+		expect(out.expires_at_options).toEqual(["2026-10-19T01:30:00+09:00"]);
+	});
+
+	it("日付語のみ(機会・時刻null)はstartが決まらないため空配列", () => {
+		const out = stubParse("明日ランチしよう", fixed);
+		expect(out.expires_at_options).toEqual([]);
+	});
+
+	it("時刻語なし(つながり)はnow+7/30/90日の3件・ISO昇順", () => {
+		const out = stubParse("個人開発仲間が欲しい", fixed);
+		expect(out.expires_at_options).toEqual([
+			"2026-10-24T09:00:00+09:00",
+			"2026-11-16T09:00:00+09:00",
+			"2027-01-15T09:00:00+09:00",
+		]);
+	});
+
+	it("同一(input, clock)で2回呼んでも期限選択肢は同一(07 §2の決定性)", () => {
+		const input = "個人開発仲間が欲しい";
+		const first = stubParse(input, fixed);
+		const second = stubParse(input, fixed);
+		expect(second.expires_at_options).toEqual(first.expires_at_options);
+	});
+});
+
 describe("stubParseの決定性(07 §2: stubは同一入力→同一出力)", () => {
 	it("同一(input, clock)で2回呼ぶとdeep equal", () => {
 		const input = "日曜17時に銀座でワイン会 5000円くらい 2〜4人";
