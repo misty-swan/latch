@@ -19,8 +19,8 @@ app.route("/v1/users", userRoutes);
 // userRoutesと同じ /v1/users にマウントする(userRoutes側に /me/icon と
 // /:user_id/icon の形のルートは無いため競合しない)
 app.route("/v1/users", iconRoutes);
-// Intent API(構造化プレビュー・作成・docs/05 §3.2)。
-// 一覧・取得・更新・削除・pause/resumeは後続タスクでintentRoutesに追加する
+// Intent API(構造化プレビュー・作成・一覧・取得・更新・削除・docs/05 §3.2)。
+// pause/resumeは後続タスクでintentRoutesに追加する
 app.route("/v1/intents", intentRoutes);
 
 // prod起動ガードはisolateごとに1回だけ(docs/04 §4・docs/10 §2)。

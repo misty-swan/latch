@@ -298,6 +298,39 @@ describe("POST /v1/intents・draft作成(docs/05 §3.2: 意味検証なしで保
 		expect(body.visibility).toBe("hidden_until_match");
 	});
 
+	it("draftへのexpires_in_days指定は400・details.reasonsにexpires_choice_on_draft", async () => {
+		const accessToken = await registerUser("draft-expiry-days");
+		const res = await postIntents(accessToken, {
+			raw_text: "期限の選択は預ける時に確定させる",
+			status: "draft",
+			expires_in_days: 30,
+		});
+		// draftでは期限の選択(expires_in_days)を受けない・作成もされない
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as ErrorResponse;
+		expect(body.error.code).toBe("VALIDATION_FAILED");
+		expect(body.error.details.reasons).toEqual(["expires_choice_on_draft"]);
+	});
+
+	it("draft作成時に明示expires_atを指定するとその値が保存される", async () => {
+		const accessToken = await registerUser("draft-expires-at");
+		const expiresAt = new Date(Date.now() + MS_PER_DAY).toISOString();
+		const res = await postIntents(accessToken, {
+			raw_text: "いつか行きたい場所のメモ",
+			status: "draft",
+			expires_at: expiresAt,
+		});
+		// draft保存ではexpires_at格納可(null可と同格・docs/05 §2.2)
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as IntentDTO;
+		expect(body.expires_at).toBe(expiresAt);
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, body.id));
+		expect(row?.expiresAt?.toISOString()).toBe(expiresAt);
+	});
+
 	it("form/topic/過去starts_at付きdraftは意味検証されずその値が保存される", async () => {
 		const accessToken = await registerUser("draft-full");
 		const past = new Date(Date.now() - MS_PER_DAY).toISOString();
