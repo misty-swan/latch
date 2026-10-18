@@ -60,7 +60,11 @@ const authenticate = async (
 	try {
 		claims = await verifyAccessToken(jwtSecret(env), parts[1]);
 	} catch (error) {
-		if (error instanceof AccessTokenError && error.kind === "expired") {
+		// 予期しない内部エラーは401に偽装せず500として表面化させる
+		if (!(error instanceof AccessTokenError)) {
+			throw error;
+		}
+		if (error.kind === "expired") {
 			return {
 				ok: false,
 				result: errorJson(

@@ -144,15 +144,19 @@ describe("回転猶予(docs/04 §4: 応答喪失後の同一旧トークン再�
 			throw new Error("猶予が失敗した");
 		}
 
-		// 2回目の再提示: 猶予キーは既に無く、再利用検出として族がrevokedになる
-		const second = await rotateRefreshToken(testEnv, clock, token);
+		// 2回目の再提示: 猶予キーは既に無く、回転から猶予窓(120秒)を過ぎた時刻での
+		// 再提示は再利用検出として族がrevokedになる(docs/05 §2.3)
+		const outside = fixedClock(
+			new Date(BASE_MS + (GRACE_WINDOW_SECONDS + 1) * 1000),
+		);
+		const second = await rotateRefreshToken(testEnv, outside, token);
 		expect(second).toEqual({ ok: false, code: "UNAUTHORIZED" });
 
 		const family = await familyById(familyId);
 		expect(family.status).toBe("revoked");
 	});
 
-	it("猶予窓の経過(KVキーの手動削除)後の旧トークン提示は再利用検出で族revoked+UNAUTHORIZED(docs/04 §4)", async () => {
+	it("猶予窓の経過後(KVキーの手動削除+fixedClockを窓外へ進行)の旧トークン提示は再利用検出で族revoked+UNAUTHORIZED(docs/04 §4)", async () => {
 		const userId = await createUser();
 		const { token, familyId } = await createRefreshFamily(
 			testEnv,
@@ -163,16 +167,53 @@ describe("回転猶予(docs/04 §4: 応答喪失後の同一旧トークン再�
 		if (!rotated.ok) {
 			throw new Error("回転が失敗した");
 		}
-		// TTL 120秒の経過をKVキーの削除で模擬する
+		// TTL 120秒の経過をKVキーの削除で模擬し、時刻も猶予窓の外へ進める
+		// (窓内のKVエントリ不在は結果整合の競合として扱い族は失効させない・docs/05 §2.3)
 		await testEnv.REVOCATION_KV.delete(
 			REFRESH_GRACE_KV_PREFIX + (await sha256Hex(token)),
 		);
+		const outside = fixedClock(
+			new Date(BASE_MS + (GRACE_WINDOW_SECONDS + 1) * 1000),
+		);
 
-		const result = await rotateRefreshToken(testEnv, clock, token);
+		const result = await rotateRefreshToken(testEnv, outside, token);
 		expect(result).toEqual({ ok: false, code: "UNAUTHORIZED" });
 
 		const family = await familyById(familyId);
 		expect(family.status).toBe("revoked");
+	});
+
+	it("猶予窓内にKVエントリが見えない旧トークン再提示(結果整合の競合)は族を失効させず401のみ(docs/05 §2.3)", async () => {
+		const userId = await createUser();
+		const { token, familyId } = await createRefreshFamily(
+			testEnv,
+			clock,
+			userId,
+		);
+		const rotated = await rotateRefreshToken(testEnv, clock, token);
+		if (!rotated.ok) {
+			throw new Error("回転が失敗した");
+		}
+		// CAS回転後・KV put完了前の競合で猶予エントリが見えない状態をキーの手動削除で模擬する
+		await testEnv.REVOCATION_KV.delete(
+			REFRESH_GRACE_KV_PREFIX + (await sha256Hex(token)),
+		);
+
+		// 回転から猶予窓内の時刻での再提示: 401のみで族はactiveのまま(docs/05 §2.3)
+		const within = fixedClock(new Date(BASE_MS + 1000));
+		const retry = await rotateRefreshToken(testEnv, within, token);
+		expect(retry).toEqual({ ok: false, code: "UNAUTHORIZED" });
+		const active = await familyById(familyId);
+		expect(active.status).toBe("active");
+
+		// 猶予窓外の同トークン再提示: 再利用検出として族がrevokedになる(docs/04 §4)
+		const outside = fixedClock(
+			new Date(BASE_MS + (GRACE_WINDOW_SECONDS + 1) * 1000),
+		);
+		const second = await rotateRefreshToken(testEnv, outside, token);
+		expect(second).toEqual({ ok: false, code: "UNAUTHORIZED" });
+		const revoked = await familyById(familyId);
+		expect(revoked.status).toBe("revoked");
 	});
 });
 

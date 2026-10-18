@@ -175,7 +175,7 @@ test("5. POST /v1/auth/refresh → 200・旧refresh_tokenの再提示 → 200(�
 	expect(second.status()).toBe(200);
 	const secondBody = (await second.json()) as RefreshResponse;
 	expect(secondBody.refresh_token).toBe(firstBody.refresh_token);
-	// 3回目: 猶予を使い切った再提示は再利用検出で401(族も失効・docs/04 §4)
+	// 3回目: 猶予を使い切った再提示は401(猶予窓内のため族は失効せず・docs/04 §4・05 §2.3)
 	const third = await request.post("/v1/auth/refresh", {
 		data: { refresh_token },
 	});

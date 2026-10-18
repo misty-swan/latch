@@ -7,7 +7,7 @@
  * 時刻の規律(docs/04 §4): 実時間を直接参照しない。現在時刻は引数のclock経由でのみ受け取る
  */
 
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, lt } from "drizzle-orm";
 import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import type { Clock } from "../clock/clock";
 import { refreshFamilies } from "../db/schema";
@@ -97,7 +97,9 @@ export type RotateResult =
  * 1. CAS回転成功 → KV `rfg:{提示ハッシュ}` に新トークンをTTL=GRACE_WINDOW_SECONDSで保存し {ok:true}
  * 2. 現行ハッシュの行あり → status≠activeならUNAUTHORIZED / 期限切れならTOKEN_EXPIRED
  * 3. 行なし+猶予キーあり → キーを削除(使い切り)のうえ現行トークンを再返却
- * 4. 猶予キーなし+previous_hash一致のactive族あり → 再利用検出: 族をrevokedにしてUNAUTHORIZED
+ * 4. 猶予キーなし+previous_hash一致のactive族(回転が猶予窓外) → 再利用検出:
+ *    族をrevokedにしてUNAUTHORIZED。回転が猶予窓内のときはKV猶予エントリが結果整合に
+ *    よりまだ見えない競合の可能性があるため族は失効させずUNAUTHORIZEDのみ(docs/05 §2.3)
  * 5. いずれでもない未知トークン → UNAUTHORIZED(族を特定できないため失効対象なし)
  */
 export const rotateRefreshToken = async (
@@ -173,7 +175,10 @@ export const rotateRefreshToken = async (
 		// 族が既に失効している等は猶予不成立。次の再利用検出判定へ落ちる
 	}
 
-	// 4. 再利用検出: previous_hash一致のactive族を失効させる(docs/04 §4)。
+	// 4. 再利用検出: previous_hash一致のactive族のうち回転が猶予窓外のものを失効させる
+	// (docs/04 §4)。回転が猶予窓内のときはCAS回転後のKV put完了前に同一旧トークンが
+	// 再提示され、猶予エントリが結果整合によりまだ見えない競合が起こりえる。この場合は
+	// 正規セッションの誤失効を避けるため族は失効させず401のみ(docs/05 §2.3)。
 	// ユーザーごとの族数は多くないため previous_hash による走査は全走査を許容し索引は追加しない
 	const [reused] = await db
 		.select({ id: refreshFamilies.id })
@@ -182,6 +187,10 @@ export const rotateRefreshToken = async (
 			and(
 				eq(refreshFamilies.previousHash, presentedHash),
 				eq(refreshFamilies.status, "active"),
+				lt(
+					refreshFamilies.rotatedAt,
+					new Date(now.getTime() - GRACE_WINDOW_SECONDS * 1000),
+				),
 			),
 		);
 	if (reused !== undefined) {
