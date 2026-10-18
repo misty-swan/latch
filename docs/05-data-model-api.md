@@ -1,14 +1,15 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.5
+- 文書バージョン: v0.6
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.5更新: 2026-10-18)
+- 作成日: 2026-10-17(v0.6更新: 2026-10-18)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
 - v0.5の変更点: F2実装に伴い§3.3にIntent系API(parse・作成・一覧・PATCH・pause/resume)の確定レスポンス形状と理由コードの一覧を追記し、§3.2のPATCH可変フィールドと§2.2のactive化検証の記載を実装確定値に精緻化。§3.3にPATCH・pause・resumeのversion楽観ロック(競合時は400 version_conflict・行消滅時は一律404)と機会Intentのexpires_in_days指定の拒否(expires_in_days_not_allowed)を追記
-- 前提文書: 01 要件定義書 v0.8 / 02 スコープ・受け入れ条件合意書 v0.2 / 04 アーキテクチャ設計書 v0.6
+- v0.6の変更点: 03(UX仕様書)の不作成裁定(00 §1の決定記録)に伴い、D-B-03(proposal表示項目のUI選択)の確定タイミングをF2'着手時(prototype/基準)に変更。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.9 / 02 スコープ・受け入れ条件合意書 v0.3 / 04 アーキテクチャ設計書 v0.7
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -163,7 +164,7 @@ Layer 1はoutcomeがmatchedまたはrejectedの行の存在で除外する(defer
 id:                 ULID(PK)
 form:               connection | occasion
 intent_ids:         json(2..4)   # ULID配列(参加メンバーはlatch_members副表で管理)
-proposal:           json          # {form, topic, time_window, region_name, participants, budget}(成立後に表示する上位集合。成立前の応答は旨・回答期限・必要人数のみ・§3.3。UI表示の選択は03)
+proposal:           json          # {form, topic, time_window, region_name, participants, budget}(成立後に表示する上位集合。成立前の応答は旨・回答期限・必要人数のみ・§3.3。UI表示の選択はF2'着手時に`prototype/`基準で確定・D-B-03)
 score:              real          # 内部利用(順序付け・計測)。UIには表示しない(01 §10裁定)
 status:             candidate | proposed | partial_accept | matched |
                     rejected | expired | cancelled | completed
@@ -389,6 +390,6 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 | ID | 未決事項 | 暫定案 |
 |---|---|---|
 | D-B-01 | category低粒度タグの初期セット値 | 15種の初期セットを暫定確定(§2.2 intents注記)。Parserゴールドセット作成時に見直す |
-| D-B-03 | proposal(条件サマリ)のJSON項目のUI表示の最終形 | API上位集合は§2.2(latches.proposal)で確定済み。画面で表示する項目の選択のみ03で確定 |
+| D-B-03 | proposal(条件サマリ)のJSON項目のUI表示の最終形 | API上位集合は§2.2(latches.proposal)で確定済み。表示項目の選択はF2'着手時に`prototype/`(Proposal/Matchedボード)基準で確定し本書へ反映 |
 
 (D-B-02 アンケート設問は09 §7で確定し解消)。外部依存の既知未決はD-A-03(地名データ)であり、本書の該当箇所に影響する。

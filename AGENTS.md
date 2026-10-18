@@ -4,7 +4,7 @@
 
 - 文書駆動開発のフェーズ。`docs/`(00〜12)が製品仕様の正本。実装はF0骨組み(モノレポ・wrangler・D1初回マイグレーション・CI・stub LLM・Clock・ログ許可リスト)・F1アカウント(auth 3API・users登録/me・アイコンR2)・F2 Intent API(parse/CRUD/draft→active/期限・form検証・pause/resume・Active Intent上限5件)まで完了し、ゲート「02 §4の#1〜#5(Intent E2E緑)」で証明する。次はF3(パイプライン前段)。索引は `docs/00-document-roadmap.md`
 - 注記: レート制限(60req/分・作成20/日・更新6/時)と退会DELETE /v1/users/me(05 §2.5)は後続フェーズで計上。Active Intent上限(5件)はF2で実装済み
-- 03(UX仕様)は未作成。`prototype/` はオーナーが作成済みのUI基準(完了)で、03の策定はF2'(フロント基盤・画面)の着手前に必要
+- 03(UX仕様)は不作成(2026-10-18オーナー裁定・docs/00の決定記録)。`prototype/` がUIの正本(README・project/latch.css)で、F2'(フロント基盤・画面)はF2のAPIが揃っていればいつでも着手可
 - READMEは現在没有。リポジトリの案内はこのファイルとdocs/00が担う
 
 ## 絶対に守ること
