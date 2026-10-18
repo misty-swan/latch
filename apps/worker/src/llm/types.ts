@@ -3,7 +3,7 @@
  * LATCH_LLM_MODEで切り替える3系統(Intent Parser / Embedding / Jev)の
  * 入出力をここに集約する。実装はstub/配下・束ねはmode.ts。
  */
-import type { IntentForm } from "@latch/shared";
+import type { IntentForm, ParseWarning } from "@latch/shared";
 
 /** LLMの動作モード。既定stub・real適用は精度ゲート(07 §6)合格が条件 */
 export type LlmMode = "stub" | "real";
@@ -19,7 +19,8 @@ export interface ParserStubOutput {
 	alcohol_involved: boolean;
 	/** 提案する期限の選択肢(JSTオフセット付きISO・05 §2.2)。機会で時刻未確定のときは空配列 */
 	expires_at_options: string[];
-	warnings: [];
+	/** 判定不能NG条件の注意表示(warningSchema・05 §3.3と同形状)。人数の丸め等で載る */
+	warnings: ParseWarning[];
 }
 
 /** Jevの7軸(07 §5・01 §13)。1リクエストで7軸を並列判定する */

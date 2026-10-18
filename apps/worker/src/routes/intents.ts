@@ -34,6 +34,7 @@ import {
 	OCCASION_STARTS_AT_MAX_DAYS_AHEAD,
 	type ParseIntentResponse,
 	parseIntentRequestSchema,
+	parseResponseSchema,
 	patchIntentRequestSchema,
 } from "@latch/shared";
 import { and, count, desc, eq, lt } from "drizzle-orm";
@@ -190,6 +191,17 @@ intentRoutes.post("/parse", requireRegistered, async (c) => {
 		alcohol_involved: result.alcohol_involved,
 		warnings: result.warnings,
 	};
+	// 応答契約の保証(docs/05 §3.3): 組立後に応答スキーマで再検証し、契約外の値
+	// (Parser実装の逸脱)は200で返さずPARSE_FAILED(422)に倒す。通常のstubでは通らない防御
+	const checked = parseResponseSchema.safeParse(body);
+	if (!checked.success) {
+		logger.warn("intents.parse.failed", { error_code: "PARSE_FAILED" });
+		const r = errorJson(
+			"PARSE_FAILED",
+			"解析に失敗しました。入力を見直してください",
+		);
+		return c.json(r.body, r.status);
+	}
 	logger.info("intents.parse.previewed");
 	return c.json(body, 200);
 });

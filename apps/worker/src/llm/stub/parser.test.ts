@@ -125,6 +125,60 @@ describe("stubParseの期限選択肢(05 §2.2: つながり=7/30/90日・機会
 	});
 });
 
+describe("stubParseの範囲外入力の丸め(07 §3: 時刻語は0〜23時のみ・人数は2〜4人へ丸め)", () => {
+	it("「25時に渋谷で飲み会」は時刻語を採用せず日付語も無いためつながり・期限選択肢3件", () => {
+		const out = stubParse("25時に渋谷で飲み会", fixed);
+		// 範囲外の時刻語は不採用=日付語の有無でform判定(この文は日付語なし→つながり)
+		expect(out.form).toBe("connection");
+		expect(out.time).toBeNull();
+		expect(out.participants).toEqual({ min: 2, max: 2 });
+		expect(out.warnings).toEqual([]);
+		// つながりの既定経路のため期限選択肢はnow+7/30/90日の3件
+		expect(out.expires_at_options).toHaveLength(3);
+		expect(out.alcohol_involved).toBe(true);
+	});
+
+	it("時刻語の採用境界は0〜23時(23時は採用・24時は不採用)", () => {
+		expect(stubParse("23時に集合", fixed).time?.start).toBe(
+			"2026-10-18T23:00:00+09:00",
+		);
+		expect(stubParse("24時に集合", fixed).time).toBeNull();
+	});
+
+	it("「5人でテニス」は人数を4人へ丸め・warningsにparticipantsの注意表示1件", () => {
+		const out = stubParse("5人でテニス", fixed);
+		expect(out.participants).toEqual({ min: 4, max: 4 });
+		expect(out.warnings).toEqual([
+			{
+				field: "participants",
+				note: "人数は2〜4人の範囲で設定してください",
+			},
+		]);
+	});
+
+	it("「3人〜9人でバレー」は幅の上限を4人へ丸め・warnings1件", () => {
+		const out = stubParse("3人〜9人でバレー", fixed);
+		expect(out.participants).toEqual({ min: 3, max: 4 });
+		expect(out.warnings).toEqual([
+			{
+				field: "participants",
+				note: "人数は2〜4人の範囲で設定してください",
+			},
+		]);
+	});
+
+	it("「1人で」は下限2人へ丸め・warnings1件", () => {
+		const out = stubParse("1人で読書", fixed);
+		expect(out.participants).toEqual({ min: 2, max: 2 });
+		expect(out.warnings).toHaveLength(1);
+	});
+
+	it("丸めが効く入力でも同一(input, clock)で同一出力(07 §2の決定性)", () => {
+		const input = "25時に渋谷で飲み会 5人で";
+		expect(stubParse(input, fixed)).toEqual(stubParse(input, fixed));
+	});
+});
+
 describe("stubParseの決定性(07 §2: stubは同一入力→同一出力)", () => {
 	it("同一(input, clock)で2回呼ぶとdeep equal", () => {
 		const input = "日曜17時に銀座でワイン会 5000円くらい 2〜4人";

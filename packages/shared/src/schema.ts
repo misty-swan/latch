@@ -101,6 +101,7 @@ export const warningSchema = z.object({
 	field: z.string(),
 	note: z.string(),
 });
+export type ParseWarning = z.infer<typeof warningSchema>;
 
 /** 参加人数(2〜4人・min<=max)。docs/05 §2.2(participants_*)・06 */
 export const participantsSchema = z

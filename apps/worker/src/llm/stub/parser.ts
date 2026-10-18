@@ -2,7 +2,14 @@
  * Intent Parserのstub(docs/07 §2(a)・§3)。規則ベースの抽出のみでLLMを呼ばない。
  * 決定的(同一入力+同一clock→同一出力)であることを仕様とする(07 §2)。
  */
-import { EXPIRY_CHOICES_DAYS, type IntentForm, LIMITS } from "@latch/shared";
+import {
+	EXPIRY_CHOICES_DAYS,
+	type IntentForm,
+	LIMITS,
+	PARTICIPANTS_MAX,
+	PARTICIPANTS_MIN,
+	type ParseWarning,
+} from "@latch/shared";
 import type { Clock } from "../../clock/clock";
 import { MS_PER_DAY, occasionDefaultExpiry } from "../../intents/expiry";
 import type { ParserStubOutput } from "../types";
@@ -10,7 +17,7 @@ import type { ParserStubOutput } from "../types";
 /** JST=UTC+9の固定オフセット。Intl・タイムゾーンDBは使わない(clock.tsと同一方針・04 §4) */
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
-/** 時刻語。「半」は30分に読む(07 §3) */
+/** 時刻語。「半」は30分に読む(07 §3)。採用は0〜23時のみ(範囲外は時刻語としない) */
 const TIME_WORD = /(\d{1,2})時(半)?/;
 
 /** 日付語。時刻までは確定しないが機会Intent(form=occasion)の根拠になる(07 §3) */
@@ -46,6 +53,16 @@ const ALCOHOL_WORDS = [
 
 const pad2 = (n: number): string => String(n).padStart(2, "0");
 
+/** 人数を2〜4人へ丸める(07 §3)。範囲外の入力を契約内(05 §2.2)の値へ倒す */
+const clampParticipants = (count: number): number =>
+	Math.min(Math.max(count, PARTICIPANTS_MIN), PARTICIPANTS_MAX);
+
+/** 人数を丸めた場合の注意表示(warningSchema・05 §3.3の{field, note}形状) */
+const PARTICIPANTS_WARNING: ParseWarning = {
+	field: "participants",
+	note: "人数は2〜4人の範囲で設定してください",
+};
+
 /** DateをJSTオフセット付きISO文字列へ整形する(time.startと同一形式・04 §4) */
 const toJstIso = (date: Date): string => {
 	// JSTへずらした値のUTC部分を読む(nextJstDayと同一方針)
@@ -76,14 +93,17 @@ const extractTopic = (raw_text: string): string => {
 
 /** raw_textを規則ベースで構造化する(07 §2(a)・§3) */
 export const stubParse = (raw_text: string, clock: Clock): ParserStubOutput => {
-	// form判定: 時刻語→機会(時刻確定)・日付語のみ→機会(時刻null)・
-	// どちらもなし→より安全な側のつながり(07 §3)
+	// form判定: 時刻語(0〜23時のみ採用)→機会(時刻確定)・日付語のみ→機会(時刻null)・
+	// どちらもなし→より安全な側のつながり(07 §3)。範囲外の時刻語(例: 「25時」)は
+	// 時刻語として採用しない(不正なISO・Invalid Dateを作らないため。日付語の有無で
+	// form判定する)
 	const timeMatch = TIME_WORD.exec(raw_text);
 	const dateMatch = DATE_WORD.exec(raw_text);
 
 	let form: IntentForm = "connection";
 	let time: ParserStubOutput["time"] = null;
-	if (timeMatch !== null) {
+	const warnings: ParserStubOutput["warnings"] = [];
+	if (timeMatch !== null && Number(timeMatch[1]) <= 23) {
 		form = "occasion";
 		const hour = Number(timeMatch[1]);
 		const minute = timeMatch[2] === undefined ? 0 : 30;
@@ -104,16 +124,29 @@ export const stubParse = (raw_text: string, clock: Clock): ParserStubOutput => {
 		budget = { min: amount, max: amount };
 	}
 
-	// 人数: 幅表記→{min,max}・単独→min=max・既定{2,2}(07 §3)
+	// 人数: 幅表記→{min,max}・単独→min=max・既定{2,2}(07 §3)。範囲外は2〜4人へ
+	// 丸め、丸めた場合はwarningsに注意表示を載せる(05 §3.3の{field,note}形状)
 	const rangeMatch = PARTICIPANT_RANGE.exec(raw_text);
 	const singleMatch =
 		rangeMatch === null ? PARTICIPANT_SINGLE.exec(raw_text) : null;
 	let participants: ParserStubOutput["participants"] = { min: 2, max: 2 };
 	if (rangeMatch !== null) {
-		participants = { min: Number(rangeMatch[1]), max: Number(rangeMatch[2]) };
+		const rawMin = Number(rangeMatch[1]);
+		const rawMax = Number(rangeMatch[2]);
+		participants = {
+			min: clampParticipants(rawMin),
+			max: clampParticipants(rawMax),
+		};
+		if (participants.min !== rawMin || participants.max !== rawMax) {
+			warnings.push(PARTICIPANTS_WARNING);
+		}
 	} else if (singleMatch !== null) {
-		const count = Number(singleMatch[1]);
+		const rawCount = Number(singleMatch[1]);
+		const count = clampParticipants(rawCount);
 		participants = { min: count, max: count };
+		if (count !== rawCount) {
+			warnings.push(PARTICIPANTS_WARNING);
+		}
 	}
 
 	// 飲酒: 辞書の部分一致(07 §3)
@@ -143,6 +176,6 @@ export const stubParse = (raw_text: string, clock: Clock): ParserStubOutput => {
 		budget,
 		alcohol_involved,
 		expires_at_options,
-		warnings: [],
+		warnings,
 	};
 };
