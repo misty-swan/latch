@@ -16,6 +16,11 @@
  *   notification_levelのみ(他フィールドは400 field_not_allowed)。
  *   paused/matched/expired/cancelled行は400 invalid_status
  * - DELETE /v1/intents/{id}: 削除(所有者のみ・他人は404)
+ * - POST /v1/intents/{id}/pause: 一時停止。activeのみ可(他は400 invalid_status)。
+ *   status=paused・version+1。期限は変更しない
+ * - POST /v1/intents/{id}/resume: 再開。pausedのみ可(他は400 invalid_status)。
+ *   期限切れ(expires_at<=now)は400(expired遷移自体はF3のCron)。active化と同じ
+ *   ACTIVE_INTENT_LIMIT検証(422)。status=active・version+1・期限は据え置き
  * エラー応答はdocs/05 §3.1の共通形状(errorJson)のみ。
  * 時刻の規律(docs/04 §4): ルートは合成の起点(composition root)のためsystemClockをimportして使う
  */
@@ -701,4 +706,140 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	// TODO(F4): このIntentが参加する提案のcancelled連鎖
 	logger.info("intents.deleted", { intent_id: deleted.id });
 	return c.body(null, 204);
+});
+
+/**
+ * POST /v1/intents/{id}/pause(一時停止・docs/05 §3.2)。activeのみ実行可
+ * (draft・paused等は400 invalid_status)。status=paused・version+1・期限は不変。
+ * pausedはLayer 2 Candidate Retrievalの新規候補化を停止する(docs/06)。
+ * 他人の・存在しないは一律404(存在を隠す・docs/05 §3.1)
+ */
+intentRoutes.post("/:id/pause", requireRegistered, async (c) => {
+	const sub = c.var.auth.sub;
+	if (sub === undefined) {
+		// requireRegisteredが保証する(到達しない・防御・docs/05 §3.1)
+		const r = unauthorizedForRegistered();
+		return c.json(r.body, r.status);
+	}
+	const db = dbOf(c.env);
+	const [row] = await db
+		.select()
+		.from(intents)
+		.where(and(eq(intents.id, c.req.param("id")), eq(intents.userId, sub)));
+	if (row === undefined) {
+		const r = notFound();
+		return c.json(r.body, r.status);
+	}
+	if (row.status !== "active") {
+		logger.warn("intents.pause.rejected", { error_code: "VALIDATION_FAILED" });
+		const r = errorJson(
+			"VALIDATION_FAILED",
+			"預けている(active)Intentのみ一時停止できます",
+			{ reasons: ["invalid_status"] },
+		);
+		return c.json(r.body, r.status);
+	}
+	const [updated] = await db
+		.update(intents)
+		.set({
+			status: "paused",
+			// 遷移ごとにversion+1(docs/01 §16)
+			version: row.version + 1,
+			updatedAt: systemClock.now(),
+		})
+		.where(and(eq(intents.id, row.id), eq(intents.userId, sub)))
+		.returning();
+	if (updated === undefined) {
+		const r = errorJson("INTERNAL", "Intentの一時停止に失敗しました");
+		return c.json(r.body, r.status);
+	}
+	// TODO(F3): Vectorize metadataのstatus更新はイベント発行側で行う(docs/05 §2.3)
+	logger.info("intents.paused", {
+		intent_id: updated.id,
+		status: updated.status,
+		version: updated.version,
+	});
+	return c.json(toIntentDto(updated), 200);
+});
+
+/**
+ * POST /v1/intents/{id}/resume(再開・docs/05 §3.2)。pausedのみ実行可
+ * (active・draft等は400 invalid_status)。期限切れ(expires_at<=now)は400
+ * (行のexpired遷移自体はF3のCronが行うため、ここでは再開だけを拒否する)。
+ * 再開はactiveへの復帰と同じ扱いのため、Active Intent上限(5件)検証を行い
+ * 超過は422 ACTIVE_INTENT_LIMIT(docs/05 §3.1)。status=active・version+1・
+ * 期限は据え置き(再計算しない)。他人の・存在しないは一律404
+ */
+intentRoutes.post("/:id/resume", requireRegistered, async (c) => {
+	const sub = c.var.auth.sub;
+	if (sub === undefined) {
+		// requireRegisteredが保証する(到達しない・防御・docs/05 §3.1)
+		const r = unauthorizedForRegistered();
+		return c.json(r.body, r.status);
+	}
+	const db = dbOf(c.env);
+	const now = systemClock.now();
+	const [row] = await db
+		.select()
+		.from(intents)
+		.where(and(eq(intents.id, c.req.param("id")), eq(intents.userId, sub)));
+	if (row === undefined) {
+		const r = notFound();
+		return c.json(r.body, r.status);
+	}
+	if (row.status !== "paused") {
+		logger.warn("intents.resume.rejected", { error_code: "VALIDATION_FAILED" });
+		const r = errorJson(
+			"VALIDATION_FAILED",
+			"一時停止中(paused)のIntentのみ再開できます",
+			{ reasons: ["invalid_status"] },
+		);
+		return c.json(r.body, r.status);
+	}
+	// 期限切れの再開は不可。expiredへの遷移自体はF3のCron(docs/05 §2.2)
+	if (row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime()) {
+		logger.warn("intents.resume.rejected", { error_code: "VALIDATION_FAILED" });
+		const r = errorJson(
+			"VALIDATION_FAILED",
+			"期限切れのIntentは再開できません",
+			{ reasons: ["expired"] },
+		);
+		return c.json(r.body, r.status);
+	}
+	// 参加中active数の上限(作成・active化と同じ検証・上限5件・docs/05 §3.1)
+	const [counted] = await db
+		.select({ value: count() })
+		.from(intents)
+		.where(and(eq(intents.userId, sub), eq(intents.status, "active")));
+	if ((counted?.value ?? 0) >= LIMITS.ACTIVE_INTENTS_PER_USER) {
+		logger.warn("intents.resume.rejected", {
+			error_code: "ACTIVE_INTENT_LIMIT",
+		});
+		const r = errorJson(
+			"ACTIVE_INTENT_LIMIT",
+			"参加中のIntentが上限に達しています。既存のIntentを見直してください",
+		);
+		return c.json(r.body, r.status);
+	}
+	const [updated] = await db
+		.update(intents)
+		.set({
+			status: "active",
+			// 遷移ごとにversion+1(docs/01 §16)
+			version: row.version + 1,
+			updatedAt: now,
+		})
+		.where(and(eq(intents.id, row.id), eq(intents.userId, sub)))
+		.returning();
+	if (updated === undefined) {
+		const r = errorJson("INTERNAL", "Intentの再開に失敗しました");
+		return c.json(r.body, r.status);
+	}
+	// TODO(F3): intent_updatedイベント発行(Vectorize metadata更新はイベント発行側・docs/06)
+	logger.info("intents.resumed", {
+		intent_id: updated.id,
+		status: updated.status,
+		version: updated.version,
+	});
+	return c.json(toIntentDto(updated), 200);
 });
