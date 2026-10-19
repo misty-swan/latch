@@ -33,6 +33,7 @@ import {
 	LIMITS,
 	OCCASION_STARTS_AT_MAX_DAYS_AHEAD,
 	type ParseIntentResponse,
+	PIPELINE,
 	parseIntentRequestSchema,
 	parseResponseSchema,
 	patchIntentRequestSchema,
@@ -43,7 +44,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { type AppEnv, requireRegistered } from "../auth/middleware";
 import { systemClock } from "../clock/clock";
-import { intents } from "../db/schema";
+import { intents, matchEvents } from "../db/schema";
 import type { Env } from "../env";
 import { type ErrorResult, errorJson } from "../http/errors";
 import { newUlid } from "../ids";
@@ -51,6 +52,7 @@ import { MS_PER_DAY } from "../intents/expiry";
 import { validateIntentForActive } from "../intents/validation";
 import { createLlm } from "../llm/mode";
 import { createLogger } from "../logging/logger";
+import { emitMatchEvent } from "../pipeline/events";
 
 /** 構造化ロガー(docs/08 §6: 許可フィールドのみ)。raw_text・topic・座標は決して出力しない */
 const logger = createLogger();
@@ -222,6 +224,35 @@ export const toIntentDto = (row: typeof intents.$inferSelect): IntentDTO => ({
 	created_at: row.createdAt.toISOString(),
 	updated_at: row.updatedAt.toISOString(),
 });
+
+/**
+ * active更新での意味フィールド変更判定(docs/06 §2のintent_updated発行条件)。
+ * 更新前の行(row)と更新後の行(updated)を比較し、topic・time(starts_at/ends_atの
+ * エポックms)・geo(lat/lng/radiusの3値)・participants(min/max)・budget(min/max)・
+ * constraints 3種(JSON文字列比較)のいずれかが変わったときtrue。
+ * notification_level・participants_includes_owner・currency等の表示・補助設定の
+ * 変更は再評価の起点にしないため発行条件に含めない
+ */
+const intentMeaningChanged = (
+	row: typeof intents.$inferSelect,
+	updated: typeof intents.$inferSelect,
+): boolean =>
+	updated.topic !== row.topic ||
+	(updated.startsAt?.getTime() ?? null) !== (row.startsAt?.getTime() ?? null) ||
+	(updated.endsAt?.getTime() ?? null) !== (row.endsAt?.getTime() ?? null) ||
+	updated.geoCenterLat !== row.geoCenterLat ||
+	updated.geoCenterLng !== row.geoCenterLng ||
+	updated.geoRadiusM !== row.geoRadiusM ||
+	updated.participantsMin !== row.participantsMin ||
+	updated.participantsMax !== row.participantsMax ||
+	updated.budgetMin !== row.budgetMin ||
+	updated.budgetMax !== row.budgetMax ||
+	JSON.stringify(updated.hardConstraints) !==
+		JSON.stringify(row.hardConstraints) ||
+	JSON.stringify(updated.softConstraints) !==
+		JSON.stringify(row.softConstraints) ||
+	JSON.stringify(updated.negativeConstraints) !==
+		JSON.stringify(row.negativeConstraints);
 
 intentRoutes.post("/parse", requireRegistered, async (c) => {
 	const parsed = parseIntentRequestSchema.safeParse(await readJsonBody(c));
@@ -410,6 +441,17 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 		status: inserted.status,
 		version: inserted.version,
 	});
+	// イベント発行(docs/06 §2): active作成はintent_createdを即時投入する。
+	// draft保存では発行しない。waitUntilでsendし、応答をブロックしない(04 §7の保存p95)
+	if (inserted.status === "active") {
+		c.executionCtx.waitUntil(
+			emitMatchEvent(c.env, {
+				eventType: "intent_created",
+				intentId: inserted.id,
+				version: inserted.version,
+			}),
+		);
+	}
 	return c.json(toIntentDto(inserted), 201);
 });
 
@@ -742,7 +784,6 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 			d.expires_at === undefined ? row.expiresAt : new Date(d.expires_at);
 	}
 
-	// TODO(F3): topic等の意味フィールド変更時のEmbedding再計算イベント発行
 	const result = await updateWithOptimisticLock(db, row, sub, {
 		form: d.form ?? row.form,
 		topic: d.topic ?? row.topic,
@@ -789,12 +830,39 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 		status: result.row.status,
 		version: result.row.version,
 	});
+	// イベント発行(docs/06 §2): draft→active化はintent_createdを即時投入。activeは
+	// 意味フィールド(topic・time・geo・participants・budget・constraints)が変わったとき
+	// だけintent_updatedを10秒遅延で投入する(notification_levelのみの変更と
+	// draftままでの編集は発行しない)。waitUntilでsendし、応答をブロックしない
+	if (row.status === "draft" && result.row.status === "active") {
+		c.executionCtx.waitUntil(
+			emitMatchEvent(c.env, {
+				eventType: "intent_created",
+				intentId: result.row.id,
+				version: result.row.version,
+			}),
+		);
+	} else if (row.status === "active" && intentMeaningChanged(row, result.row)) {
+		c.executionCtx.waitUntil(
+			emitMatchEvent(
+				c.env,
+				{
+					eventType: "intent_updated",
+					intentId: result.row.id,
+					version: result.row.version,
+				},
+				{ delaySeconds: PIPELINE.UPDATE_EVENT_DELAY_SECONDS },
+			),
+		);
+	}
 	return c.json(toIntentDto(result.row), 200);
 });
 
 /**
  * DELETE /v1/intents/{id}(削除・docs/05 §3.2)。所有者のみ・他人は404(存在を隠す)。
- * 所有者条件を含む1文のDELETE…RETURNINGで判定と削除を同時に行う
+ * match_eventsは当該Intentの行を先に削除してから本体を削除する
+ * (イベント投入記録がintentsをFK参照するため・docs/05 §2.5)。
+ * 期限切れ後のVectorize削除は別途(docs/05 §2.3)
  */
 intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	const sub = c.var.auth.sub;
@@ -803,11 +871,25 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 		const r = unauthorizedForRegistered();
 		return c.json(r.body, r.status);
 	}
-	const [deleted] = await dbOf(c.env)
+	const db = dbOf(c.env);
+	// 所有確認(他人の・存在しないIntentは一律404・存在を隠す)。所有確認を先に
+	// 行うのは、404の応答で他人のイベント投入記録に触れないようにするため
+	const [target] = await db
+		.select({ id: intents.id })
+		.from(intents)
+		.where(and(eq(intents.id, c.req.param("id")), eq(intents.userId, sub)));
+	if (target === undefined) {
+		const r = notFound();
+		return c.json(r.body, r.status);
+	}
+	// 子(イベント投入記録)を先に削除してから本体を削除する(docs/05 §2.5)
+	await db.delete(matchEvents).where(eq(matchEvents.sourceIntentId, target.id));
+	const [deleted] = await db
 		.delete(intents)
-		.where(and(eq(intents.id, c.req.param("id")), eq(intents.userId, sub)))
+		.where(and(eq(intents.id, target.id), eq(intents.userId, sub)))
 		.returning();
 	if (deleted === undefined) {
+		// 所有確認後の並行削除。消えていれば同じ404(冪等な結果)
 		const r = notFound();
 		return c.json(r.body, r.status);
 	}
@@ -946,7 +1028,15 @@ intentRoutes.post("/:id/resume", requireRegistered, async (c) => {
 		const r = guardedUpdateFailure(result.kind);
 		return c.json(r.body, r.status);
 	}
-	// TODO(F3): intent_updatedイベント発行(Vectorize metadata更新はイベント発行側・docs/06)
+	// イベント発行(docs/06 §2「resumeはintent_updatedイベントを発行して再評価する」)。
+	// 即時投入・versionは再開後の値。waitUntilでsendし、応答をブロックしない
+	c.executionCtx.waitUntil(
+		emitMatchEvent(c.env, {
+			eventType: "intent_updated",
+			intentId: result.row.id,
+			version: result.row.version,
+		}),
+	);
 	logger.info("intents.resumed", {
 		intent_id: result.row.id,
 		status: result.row.status,

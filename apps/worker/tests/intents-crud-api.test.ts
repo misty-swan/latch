@@ -15,7 +15,7 @@ import { importJWK, SignJWT } from "jose";
 import { ulid } from "ulid";
 import { describe, expect, it } from "vitest";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
-import { intents, users } from "../src/db/schema";
+import { intents, matchEvents, users } from "../src/db/schema";
 import { MS_PER_DAY } from "../src/intents/expiry";
 import { updateWithOptimisticLock } from "../src/routes/intents";
 import privateJwkText from "./fixtures/test-idp-private.jwk?raw";
@@ -820,6 +820,11 @@ describe("PATCH・pause・resume共通のversion楽観ロック(docs/01 §16・0
 		const accessToken = await registerUser("optimistic-deleted");
 		const created = await createActiveConnection(accessToken, "消える学習仲間");
 		const { row, ownerId } = await readRowAndOwner(created.id);
+		// 削除はアプリ層では子(match_events)を先に消す(docs/05 §2.5)。直接DB操作での
+		// 模擬も同じ順序にする(FKがintentsを参照するため子の先行削除が必須)
+		await db
+			.delete(matchEvents)
+			.where(eq(matchEvents.sourceIntentId, created.id));
 		await db.delete(intents).where(eq(intents.id, created.id));
 		const result = await updateWithOptimisticLock(db, row, ownerId, {
 			topic: "反映されない主題変更",
