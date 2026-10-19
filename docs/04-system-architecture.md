@@ -12,7 +12,7 @@
 - v0.7の変更点: 03(UX仕様書)の不作成裁定(00 §1の決定記録)に伴い、D-A-07(スタイリング手法)の確定タイミングをF2'着手時(本書で技術選定として確定)に変更。値の源は`prototype/project/latch.css`。前提文書欄の版数を更新
 - v0.8の変更点: プロトタイプREADME §7のオーナー裁定(2026-10-19)に伴いD-A-07(スタイリング手法)を解消した(バニラCSS(グローバル)採用・決定記録)。§3.2・§9を更新。前提文書欄の版数を更新
 - v0.9の変更点: F2'(フロント基盤)実装に伴い§4へdev専用サインイン(POST /v1/dev/idp-token)とWorkers Assets同一オリジン配信の実装確定を追記し、§3.2に稼働状況と移植運用を追記した。前提文書欄の変更はない
-- v0.10の変更点: F3実装に伴い§4へVectorStore抽象(LATCH_ENV=localはインメモリ実装・staging/prodはVectorizeラップ)・Analytics Engine束縛(PIPELINE_AX・dataset=latch_metrics)・DLQのdead反映consumerの実装確定を追記。前提文書欄の変更はない
+- v0.10の変更点: F3実装に伴い§4へVectorStore抽象(upsert/query/getByIds/deleteByIds・LATCH_ENV=localはインメモリ実装・staging/prodはVectorizeラップ)・Analytics Engine束縛(PIPELINE_AX・dataset=latch_metrics)・DLQのdead反映consumerの実装確定を追記し、§4のCron列挙を06 §2の(a)〜(i)に揃えた(実装済み/F4・F5計上の区別を含む)。§3.3・§6の開発環境の表記をVectorizeはインメモリ代替となる実態に整合。前提文書欄の変更はない
 - 前提文書: 01 要件定義書 v0.10 / 02 スコープ・受け入れ条件合意書 v0.4
 - 本書の位置づけ: 01第19節の技術スタック選定を確定させる文書。UIの正本は`prototype/`(03は不作成)。スタイリング手法(D-A-07)はバニラCSS(グローバル)に確定済み(§3.2・決定記録(2026-10-19))
 
@@ -116,7 +116,7 @@
 | 開発用Node | Node 22 LTS | ビルド・試験ツールのためのみ(実行はWorkers) |
 | リント/整形 | Biome(確定・D-A-06解消) | 単一ツール・高速。毎コミット実行 |
 | 型チェック | tsc --noEmit | Biomeと分離(型はtscが正) |
-| バックエンド試験 | vitest + @cloudflare/vitest-pool-workers | D1・Queues・Vectorize・DOのローカル実行で単体・統合試験 |
+| バックエンド試験 | vitest + @cloudflare/vitest-pool-workers | D1・Queues・DOのローカル実行(Vectorizeはインメモリ代替・§4)で単体・統合試験 |
 | CI/CD | GitHub Actions + wrangler | §6(品質ゲート→staging自動→prod手動) |
 
 ### 3.4 対抗案と選定理由
@@ -147,9 +147,9 @@
 
 **イベント駆動(01 §16の実装)。** Intentの作成はapi出口で即時にQueuesへ送信(第1段=Embedding要求。draft→active化も即時とし、初回提案のレイテンシを守る)。Embedding完了時に派生イベント(embedding_completed)を再送し(第2段=Layer 1〜5)。**更新のみ**10秒の遅延配信とし、消費側で現行versionと突き合わせて古ければ破棄する(idempotency。match_eventsのUNIQUE制約が二重投入も許さない)。失敗は再試行上限(max_retries=3初期値)ののちDLQへ隔離し、DLQを見る最小のconsumerがmatch_eventsのstatusをdeadへ反映して警報する。誤った提案より提示の見送りを優先する方針である。deadの再処理は、UNIQUE衝突を避けるため新規イベントとして再発行する(手動)。
 
-**VectorStore抽象と観測束縛(F3実装確定)。** Vectorizeにはローカルシミュレータが存在しないため、VectorStoreインタフェース(upsert/query/delete)の背後に2実装を置く。LATCH_ENV=local(単体・統合試験・wrangler dev・E2E)はコサイン距離・metadata filter込みのインメモリ実装、staging/prodはenv.VECTORS(Vectorize)のラップ実装であり、選択はLATCH_ENVで行う(05 §2.3)。パイプラインの計測はAnalytics EngineバインディングPIPELINE_AX(dataset=latch_metrics)へ層通過のdata pointをイベント単位で書く(06 §7・バインド未設定の環境では送信を省略)。DLQを見る最小のconsumer(match_eventsへのdead反映・警報)は第1段の消費と同一Workerに実装済みである。
+**VectorStore抽象と観測束縛(F3実装確定)。** Vectorizeにはローカルシミュレータが存在しないため、VectorStoreインタフェース(upsert/query/getByIds/deleteByIds)の背後に2実装を置く。LATCH_ENV=local(単体・統合試験・wrangler dev・E2E)はコサイン距離・metadata filter込みのインメモリ実装、staging/prodはenv.VECTORS(Vectorize)のラップ実装であり、選択はLATCH_ENVで行う(05 §2.3)。パイプラインの計測はAnalytics EngineバインディングPIPELINE_AX(dataset=latch_metrics)へ層通過のdata pointをイベント単位で書く(06 §7・バインド未設定の環境では送信を省略)。DLQを見る最小のconsumer(match_eventsへのdead反映・警報)は第1段の消費と同一Workerに実装済みである。
 
-**Cron(毎分)。** (a)機会Intentの時間Bucket到来の再評価と期限前catch-up走査(01 §16)、(b)全Intentの期限切れバッチ、(c)つながりLATCHのチャット非活動90日判定(completed)、(d)Jev予算の80%到達検知とアラート。毎分1回のCron Trigger内で走査対象をインデックス(status・starts_at・expires_at)で最小化する。
+**Cron(毎分)。** 記号と内容は06 §2に揃える。(a)機会Intentのbucket到来の再評価、(b)期限前catch-up走査(expires_atまで2時間以内かつlast_evaluated_atから30分以上経過・01 §16)、(c)全active Intentの期限切れバッチ、(d)つながりLATCHのチャット非活動90日判定(completed)、(e)埋め込み未完了のIntentのバックフィル再試行、(f)usage_counters集計とJev予算の80%到達検知とアラート、(g)埋め込み済みかつ未評価のactive Intentの回収再評価(キュー消失の安全網)、(h)active化後10分経過のつながりIntentの1回きり遅延再評価、(i)提案クローズ後続処理。F3では(a)(b)(c)(e)(g)(h)と保持期間削除(05 §2.6)を実装済み・(d)(f)(i)はF4/F5で計上する(06 §2)。毎分1回のCron Trigger内で走査対象をインデックス(status・starts_at・expires_at)で最小化する。
 
 **地理の実装。** 地域添付は中心座標+半径をD1に保存し、候補検索はSQLのバウンディングボックス事前絞り+TSでの距離判定。相手への表示は地域名のみ(01 §21の丸め規定)。座標・距離の数値は一切表示しない。
 
@@ -175,7 +175,7 @@
 
 ## 6. 環境・CI/CD・テスト戦略
 
-**環境(3つ)。** (1)開発= `wrangler dev`(ローカルD1・Queues・Vectorizeのエミュレート。外部LLMはstubモード)、(2)staging= Workersのプレビュー環境(実D1・stub/real切替。02の#34クローズドテストの対象)、(3)prod=カスタムドメイン。D1・Vectorize・KVは環境ごとに分離する。
+**環境(3つ)。** (1)開発= `wrangler dev`(ローカルD1・Queues・DOのエミュレート。Vectorizeは§4のインメモリ代替を使用。外部LLMはstubモード)、(2)staging= Workersのプレビュー環境(実D1・stub/real切替。02の#34クローズドテストの対象)、(3)prod=カスタムドメイン。D1・Vectorize・KVは環境ごとに分離する。
 
 **CI(GitHub Actions)。** プルリクエストごとに(1)Biome(リント+整形)、(2)tsc(typecheck)、(3)vitest(vitest-pool-workersでD1/Queues/Vectorize込みの単体・統合試験)、(4)Playwright E2E(wrangler devに対して実行)を回す。mainマージでstagingへ自動デプロイ、**prodへのデプロイは手動承認トリガー**とする(公開前はプロダクトオーナーの操作)。
 

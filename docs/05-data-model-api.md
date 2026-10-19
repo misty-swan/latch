@@ -11,7 +11,7 @@
 - v0.6の変更点: 03(UX仕様書)の不作成裁定(00 §1の決定記録)に伴い、D-B-03(proposal表示項目のUI選択)の確定タイミングをF2'着手時(prototype/基準)に変更。前提文書欄の版数を更新
 - v0.7の変更点: プロトタイプREADME §7のオーナー裁定(2026-10-19)に伴い、退会後の表示名を終了の原因を問わず「つながっていた相手」に統一(01 §10の規定どおり・§2.5)。D-B-03(proposal表示項目)を解消し§4に決定記録を追加。前提文書欄の版数を更新
 - v0.8の変更点: 前提文書欄の版数同期(F2'実装に伴う04改版への追従)。内容の変更はない
-- v0.9の変更点: F3実装に伴い§2.2のintentsへdelayed_reeval_at列(つながりIntentの1回きり遅延再評価の実行済みマーカー)を追記し、§2.3へVectorizeのローカル代替(LATCH_ENV=localはインメモリ実装)を追記。§2.5へIntent削除時はベクトル削除を先に行い失敗時は500で中断する実行順序を追記。§3.3へdev専用観測API(GET /v1/dev/match-events・match-candidates)の応答形状を追記。前提文書欄の版数を更新
+- v0.9の変更点: F3実装に伴い§2.2のintentsへdelayed_reeval_at列(つながりIntentの1回きり遅延再評価の実行済みマーカー)を追記し、§2.3へVectorizeのローカル代替(LATCH_ENV=localはインメモリ実装・取得系getByIdsの用途)を追記。§2.5へIntent削除時はベクトル削除を先に行い失敗時は500で中断する実行順序を追記。§3.3へdev専用観測API(GET /v1/dev/match-events・match-candidates)の応答形状を追記。前提文書欄の版数を更新
 - 前提文書: 01 要件定義書 v0.10 / 02 スコープ・受け入れ条件合意書 v0.4 / 04 アーキテクチャ設計書 v0.10
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
@@ -231,7 +231,7 @@ created_at / updated_at
 
 ### 2.3 Vectorize・KV・R2
 
-**Vectorizeインデックス**(1本): vector id = intent ULID。metadata = `{form, status, category, user_id}`(インデックス作成時にmetadata indexとしてform・status・categoryを宣言する。07 §1)。検索時のfilterで form一致・status=active を最適化として適用し(01 §12)、取り出し後は**D1の現行status・blocks・提案履歴をコードで再検証する**(metadataの同期遅延に依存しない二重化)。Intentの遷移(pause/resume/matched/expired)ごとにmetadataのstatusを更新し、失敗はCronバックフィルで回収する。照合時にD1行が存在しないベクトルはfail-closeで除外する。次元=1024・距離=cosine(07 v0.1で確定)。削除: Intent削除・期限切れ+7日でベクトル削除(§2.6)。**ローカル代替(F3実装確定)。** Vectorizeにはローカルシミュレータが存在しないため、LATCH_ENV=local(単体・統合試験・wrangler dev・E2E)では同一インタフェースのインメモリ実装(コサイン距離・metadata filter込み・04 §4のVectorStore抽象)へ置き換える。staging/prodはVectorize実装を使う。
+**Vectorizeインデックス**(1本): vector id = intent ULID。metadata = `{form, status, category, user_id}`(インデックス作成時にmetadata indexとしてform・status・categoryを宣言する。07 §1)。検索時のfilterで form一致・status=active を最適化として適用し(01 §12)、取り出し後は**D1の現行status・blocks・提案履歴をコードで再検証する**(metadataの同期遅延に依存しない二重化)。Intentの遷移(pause/resume/matched/expired)ごとにmetadataのstatusを更新し、失敗はCronバックフィルで回収する。照合時にD1行が存在しないベクトルはfail-closeで除外する。次元=1024・距離=cosine(07 v0.1で確定)。削除: Intent削除・期限切れ+7日でベクトル削除(§2.6)。**ローカル代替(F3実装確定)。** Vectorizeにはローカルシミュレータが存在しないため、LATCH_ENV=local(単体・統合試験・wrangler dev・E2E)では同一インタフェースのインメモリ実装(コサイン距離・metadata filter込み・04 §4のVectorStore抽象)へ置き換える。staging/prodはVectorize実装を使う。取得系(getByIds)はupsert反映確認・metadata同期・Cronの整合点検に使う(06 §2)。
 
 **KV**: `revocation:{jti}` = 1(TTL=JWT残り寿命)。失効はJWT残寿命(最大1時間)以内の効力とし、権限が関わる操作(チャット送信・回答・退会)はD1のusers.statusとblocksを必ず再検証して補完する。WebSocket接続チケットはKVに置かず、**joseで署名した短期トークン(exp=60秒・user_id/latch_idクレーム)** を使う(結果整合の伝播遅延を回避。§3.4)。回転猶予: `rfg:{旧リフレッシュトークンハッシュ}` = 現行リフレッシュトークン(TTL 120秒・取得後に削除で使い切り。窓外の再提示は再利用検出として族をrevoked。04 §4)。猶予窓内の旧トークン再提示でKVエントリが見えない場合は結果整合の競合の可能性があるため族は失効させず401のみ(窓外のみ再利用検出として族revoked)。KVは結果整合のため猶予エントリの並行取得は理論上可能であり、猶予の「1回に限り」はベストエフォートとする
 
