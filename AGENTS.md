@@ -2,10 +2,11 @@
 
 ## 現在の状態
 
-- 文書駆動開発のフェーズ。`docs/`(00〜12)が製品仕様の正本。実装はF0骨組み(モノレポ・wrangler・D1初回マイグレーション・CI・stub LLM・Clock・ログ許可リスト)・F1アカウント(auth 3API・users登録/me・アイコンR2)・F2 Intent API(parse/CRUD/draft→active/期限・form検証・pause/resume・Active Intent上限5件)まで完了し、ゲート「02 §4の#1〜#5(Intent E2E緑)」で証明する。次はF3(パイプライン前段)。索引は `docs/00-document-roadmap.md`
-- 注記: レート制限(60req/分・作成20/日・更新6/時)と退会DELETE /v1/users/me(05 §2.5)は後続フェーズで計上。Active Intent上限(5件)はF2で実装済み
-- 03(UX仕様)は不作成(2026-10-18オーナー裁定・docs/00の決定記録)。`prototype/` がUIの正本(README・project/latch.css)で、F2'(フロント基盤・画面)はF2のAPIが揃っていればいつでも着手可
+- 文書駆動開発のフェーズ。`docs/`(00〜12)が製品仕様の正本。実装はF0骨組み(モノレポ・wrangler・D1初回マイグレーション・CI・stub LLM・Clock・ログ許可リスト)・F1アカウント(auth 3API・users登録/me・アイコンR2)・F2 Intent API(parse/CRUD/draft→active/期限・form検証・pause/resume・Active Intent上限5件)・F2'フロント基盤(web基盤(apiFetch・Router・Query・latch.css移植)・dev専用サインイン(POST /v1/dev/idp-token・テスト鍵・prod拒否の二重防御)・Workers Assets同一オリジン配信(SPAフォールバック)・ようこそ〜サインイン/登録/同意・預ける〜読み解き確認・Home一覧・PWA設定)まで完了。F2のゲート「02 §4の#1〜#5(Intent E2E緑)」とF2'のゲート「画面フローが`prototype/`基準であること」を証明済み(それぞれworker E2E・web E2E 8本=Playwright chromium・CIジョブあり)。次はF3(パイプライン前段)。索引は `docs/00-document-roadmap.md`
+- 注記: レート制限(60req/分・作成20/日・更新6/時)と退会DELETE /v1/users/me(05 §2.5)は後続フェーズで計上。Active Intent上限(5件)はF2で実装済み。F2'で実装した画面はwelcome〜confirmとhomeのみで、提案・回答・チャット画面等の残りのUIはF4〜F8で計上。本番IdP(Google/Apple)への接続はF10公開準備前に実施
+- 03(UX仕様)は不作成(2026-10-18オーナー裁定・docs/00の決定記録)。`prototype/` がUIの正本(README・project/latch.css)で、実装側のスタイリング正本は`apps/web/src/styles/latch.css`(prototypeから不改変コピー・docs/04 §3.2)
 - READMEは現在没有。リポジトリの案内はこのファイルとdocs/00が担う
+- ローカルでE2Eを実行するときの注意: 既定ポートはworker E2E=8787・web E2E=8788で分離している。他プロセスがポートを占有している場合は `LATCH_E2E_PORT=<空きポート>` で回避する(占有側のプロセスは停止しない・webとworkerには別ポートを割り当てる)
 
 ## 絶対に守ること
 

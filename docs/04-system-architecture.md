@@ -1,9 +1,9 @@
 # LATCH アーキテクチャ設計書
 
-- 文書バージョン: v0.8
+- 文書バージョン: v0.9
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.8更新: 2026-10-19)
+- 作成日: 2026-10-17(v0.9更新: 2026-10-19)
 - v0.2の変更点: §3を全面改訂し、スタックを「バックエンド・フロントエンドの構成部品」(DBアクセス・マイグレーション・入力検証・プッシュ実装・フォーム等)まで確定した。D-A-06(Biome)を解消し、D-A-07(スタイリング=03で確定)を新設した
 - v0.3の変更点: 07(LLM利用仕様書)の策定に伴いD-A-01(Embedding)を解消した(Workers AI bge-m3・1024次元・cosine)。R2(ユーザーアイコン)をスタックへ追加した
 - v0.4の変更点: 本書が単体で完結するよう記述を整理した(変更の経緯はgit履歴を参照)
@@ -11,6 +11,7 @@
 - v0.6の変更点: F1実装に伴い§4の認証・セッションを確定した(起動ガード条件の拡張・テスト用IdPのiss/aud固定値・本番IdP検証の前提)
 - v0.7の変更点: 03(UX仕様書)の不作成裁定(00 §1の決定記録)に伴い、D-A-07(スタイリング手法)の確定タイミングをF2'着手時(本書で技術選定として確定)に変更。値の源は`prototype/project/latch.css`。前提文書欄の版数を更新
 - v0.8の変更点: プロトタイプREADME §7のオーナー裁定(2026-10-19)に伴いD-A-07(スタイリング手法)を解消した(バニラCSS(グローバル)採用・決定記録)。§3.2・§9を更新。前提文書欄の版数を更新
+- v0.9の変更点: F2'(フロント基盤)実装に伴い§4へdev専用サインイン(POST /v1/dev/idp-token)とWorkers Assets同一オリジン配信の実装確定を追記し、§3.2に稼働状況と移植運用を追記した。前提文書欄の変更はない
 - 前提文書: 01 要件定義書 v0.10 / 02 スコープ・受け入れ条件合意書 v0.4
 - 本書の位置づけ: 01第19節の技術スタック選定を確定させる文書。UIの正本は`prototype/`(03は不作成)。スタイリング手法(D-A-07)はバニラCSS(グローバル)に確定済み(§3.2・決定記録(2026-10-19))
 
@@ -103,6 +104,8 @@
 | 単体試験 | vitest + Testing Library(happy-dom) | fetchはモック |
 | E2E | Playwright(chromium) | 02の対応表#34の社内クローズドテストに使用 |
 
+上記のフロント構成(React Router・TanStack Query・react-hook-form+zod resolver・vite-plugin-pwa)はF2'(フロント基盤)で実装済みで稼働している。バージョン番号は§1の規律どおり `package.json` が正である。スタイリングの移植運用(D-A-07): `prototype/project/latch.css` から `apps/web/src/styles/latch.css` への移植は**不改変コピー**とし、整形・リントの対象外とする(Biomeの除外設定に加える。§3.3の生成物除外と同型の運用で、デザイン定義の単一源を保つ)
+
 ### 3.3 共有・品質・CI
 
 | 用途 | 選定 | 理由・備考 |
@@ -137,7 +140,9 @@
 
 ## 4. 主要設計
 
-**認証・セッション。** Google・AppleのIdPトークンを検証し(joseのリモートJWKS)、独自JWT(有効期限1時間)を発行する。リフレッシュトークンは回転式(30日)でD1に族IDごと管理し、再利用を検出したら族失効+401とする(ただし応答喪失後の同一旧トークン再提示は1回に限り現行トークンを再返す猶予を持つ)。ログアウト・ブロック・退会の反映はKVの失効リスト(JWTのjtiをTTL=残り寿命で格納。JWT残寿命以内に効力)とし、権限が関わる操作(チャット送信・回答・退会)はD1のusers.statusとblocksを再検証して補完する(05 §2.3)。起動ガードとして、prodでテスト鍵(LATCH_TEST_IDP_JWKS)が残存する場合、またはJWT_SECRETが未設定もしくは32字未満の場合は起動を拒否する。テスト用IdP(staging・ローカルの内部トークン用・10 §2)のiss・audは固定値 `urn:latch:test-idp`・`latch-test` とし、prodでは起動ガードがこの設定自体を拒否する。本番IdP検証の前提: Google=JWKS `https://www.googleapis.com/oauth2/v3/certs`(iss `accounts.google.com`・aud=GOOGLE_CLIENT_ID)/ Apple=JWKS `https://appleid.apple.com/auth/keys`(iss `https://appleid.apple.com`・aud=APPLE_CLIENT_ID)。client id未設定は認証失敗として扱う。
+**認証・セッション。** Google・AppleのIdPトークンを検証し(joseのリモートJWKS)、独自JWT(有効期限1時間)を発行する。リフレッシュトークンは回転式(30日)でD1に族IDごと管理し、再利用を検出したら族失効+401とする(ただし応答喪失後の同一旧トークン再提示は1回に限り現行トークンを再返す猶予を持つ)。ログアウト・ブロック・退会の反映はKVの失効リスト(JWTのjtiをTTL=残り寿命で格納。JWT残寿命以内に効力)とし、権限が関わる操作(チャット送信・回答・退会)はD1のusers.statusとblocksを再検証して補完する(05 §2.3)。起動ガードとして、prodでテスト鍵(LATCH_TEST_IDP_JWKS)が残存する場合、またはJWT_SECRETが未設定もしくは32字未満の場合は起動を拒否する。テスト用IdP(staging・ローカルの内部トークン用・10 §2)のiss・audは固定値 `urn:latch:test-idp`・`latch-test` とし、prodでは起動ガードがこの設定自体を拒否する。**dev専用サインイン(F2'実装確定)。** ブラウザE2E・ローカル開発のサインイン入口としてPOST /v1/dev/idp-tokenを提供する。コミット済みテスト鍵の秘密鍵(LATCH_TEST_IDP_PRIVATE_JWKS)でRS256署名したIdPトークン(有効期限600秒)を返し、受け取ったトークンは通常どおりPOST /v1/auth/tokenで検証するため、認証フローに特別経路は設けない。存在を隠すため、LATCH_ENVがproductionの場合・またはテスト鍵2変数(LATCH_TEST_IDP_PRIVATE_JWKS・LATCH_TEST_IDP_JWKS)が未設定の場合は一律404を返す(理由は区別しない)。prodでは加えて起動ガードが秘密鍵の設定自体を拒否する二重防御とする(10 §2)。成否は構造化ログのイベント(dev.signin.issued・dev.signin.rejected)でのみ判別でき、subject等は出力しない。本番IdP検証の前提: Google=JWKS `https://www.googleapis.com/oauth2/v3/certs`(iss `accounts.google.com`・aud=GOOGLE_CLIENT_ID)/ Apple=JWKS `https://appleid.apple.com/auth/keys`(iss `https://appleid.apple.com`・aud=APPLE_CLIENT_ID)。client id未設定は認証失敗として扱う。
+
+**フロント配信(Workers Assets・F2'実装確定)。** SPAの静的資産はWorkers Assetsが同一オリジンで配信する(assets directory= `pnpm --filter web build` の生成物apps/web/dist)。未一致のパスはindex.htmlへ倒すSPAフォールバック(not_found_handling=single-page-application)とする。/v1/*と/healthzはrun_worker_firstで必ずWorkerが先に処理する。AssetsはGET/HEAD以外のメソッドをWorkerへ迂回させないため、APIのPOST/PUT/DELETEを届かせるにはこの指定が必須であり、/healthzも含めてヘルスチェックがSPAフォールバックのindex.htmlで代替応答されないようにする。
 
 **イベント駆動(01 §16の実装)。** Intentの作成はapi出口で即時にQueuesへ送信(第1段=Embedding要求。draft→active化も即時とし、初回提案のレイテンシを守る)。Embedding完了時に派生イベント(embedding_completed)を再送し(第2段=Layer 1〜5)。**更新のみ**10秒の遅延配信とし、消費側で現行versionと突き合わせて古ければ破棄する(idempotency。match_eventsのUNIQUE制約が二重投入も許さない)。失敗は再試行上限(max_retries=3初期値)ののちDLQへ隔離し、DLQを見る最小のconsumerがmatch_eventsのstatusをdeadへ反映して警報する。誤った提案より提示の見送りを優先する方針である。deadの再処理は、UNIQUE衝突を避けるため新規イベントとして再発行する(手動)。
 
