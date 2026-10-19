@@ -229,3 +229,26 @@
 - [ ] **Step 2: AGENTS.mdの「現在の状態」を更新(F2'完了・次はF3・本番IdP接続と地名検択UI・残画面はF4〜F8で計上の旨)**
 - [ ] **Step 3: F2'ゲート確認** — Run: `pnpm lint && pnpm typecheck && pnpm test && pnpm --filter worker test:e2e && pnpm --filter web test:e2e` Expected: 全緑(ゲート=画面フローがprototype基準であることのE2E証明)
 - [ ] **Step 4: コミット** — 「F2': devサインインとAssets構成を04/10へ反映し現在の状態を更新」
+
+---
+
+## 完了後記録(2026-10-19・F2'全タスク+最終レビュー+修正波まで完了・ゲート全緑)
+
+### F4着手前の掃除リスト(最終レビューで繰り延べたMinor・F4の提案UIがこの基盤に載る前に一括掃除を推奨)
+
+1. apiFetchの成功応答JSONパース素通し(200+非JSONをINTERNALへ倒す)
+2. readJsonBodyのworker内4ファイル重複を `src/http/` へ共通化
+3. dev秘密鍵env不正値(JSON破損)の早期fail
+4. restore()/sessionまわり: なし(I-3で解消済み)・ただし未認証ガード試験を全ルート分へ拡張
+5. devサインインのprovider=google固定(apple再現)とstaging簡易ガード(なりすまし余地・10 §2へ注意記録も可)
+6. Compose: 「読み解く」ボタンのbusy中考慮・301字超の無反応停止・カウンタid="c-count"
+7. Confirm: 機会→つながり切替時の期限caption流用(切替後はnow+日数で提示)・行内エディタ同時オープン防止・日時の入力時検証(min/max属性)・予算の未設定復帰
+8. Home: 件数caption計数基準(F4でproposed出たら再訪)・cancelledの非表示化(DSLatch規定)・本番QueryClient retry見直し
+9. routerにcatch-all(`/foo`→welcomeへリダイレクト)
+10. worker playwright.configのwebServerへ `pnpm --filter web build` 前置(ローカル実行の前提解消)
+11. apps/webのtsconfig includeへe2e/とplaywright.config.tsを追加(typecheck対象化)
+12. Placed自動遷移(4秒)とE2Eの競合リスクの解消
+13. partial_acceptの専用グリフgd+gm分離(F4・DSLatchボード:41)
+
+### 成立数・表示の申し送り(F4/F5)
+- Homeカードの「これまでの成立数」(01 §10・ボード「つながり 2」)はAPI項目が無いため未表示。F4/F5でlatches側の項目追加時に計上
