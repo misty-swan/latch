@@ -3,6 +3,8 @@
  * - アクセストークンはメモリのみに置く(localStorageへ残さない)
  * - リフレッシュトークンは回転式でlocalStorage(latch.refresh)に置く
  * - restore()は起動時の復元(保存済みリフレッシュトークンでリフレッシュを試みる)
+ *   サーバーの明示拒否(401等)のときだけ保存値を除去し・通信失敗では残す
+ *   (一時的なオフラインで有効なトークンを消さないため)
  * - refresh()は同時多発の401を単一フライトに収束させる
  * リフレッシュの呼び出しは生のfetchを直接使う(apiFetchを経由しない=循環と無限ループの構造的防止)。
  * リフレッシュ失敗時のセッション破棄と遷移は呼び出し側(apiFetch)が判断する
@@ -18,49 +20,69 @@ interface RefreshResponse {
 	expires_in: number;
 }
 
+/**
+ * リフレッシュ1回の結果。
+ * - success: 応答を受け・新しいトークンを得た
+ * - rejected: 応答は受けたがサーバーが明示拒否(!ok)=保存値が無効と判断できる
+ * - network_error: fetch例外・応答本文が読めない等で判断できない(一時的なオフライン含む)
+ */
+type RefreshOutcome = "success" | "rejected" | "network_error";
+
 let accessToken: string | null = null;
-let refreshInFlight: Promise<boolean> | null = null;
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
 
 const readStoredRefreshToken = (): string | null =>
 	localStorage.getItem(REFRESH_STORAGE_KEY);
 
 /** リフレッシュを1回実行する(成功時は回転後のトークンで上書きする) */
-const performRefresh = async (): Promise<boolean> => {
+const performRefresh = async (): Promise<RefreshOutcome> => {
 	const stored = readStoredRefreshToken();
 	if (stored === null) {
-		return false;
+		return "rejected";
 	}
+	let response: Response;
 	try {
-		const response = await fetch(REFRESH_ENDPOINT, {
+		response = await fetch(REFRESH_ENDPOINT, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ refresh_token: stored }),
 		});
-		if (!response.ok) {
-			return false;
-		}
+	} catch {
+		// 通信失敗(一時的なオフライン等)。トークンの有効性は判断できない
+		return "network_error";
+	}
+	if (!response.ok) {
+		// サーバーが明示拒否(401等)=保存値は無効
+		return "rejected";
+	}
+	try {
 		const data = (await response.json()) as RefreshResponse;
 		if (typeof data.access_token !== "string" || data.access_token === "") {
-			return false;
+			// 応答が期待どおりでない=判断できない(拒否とは限らない)
+			return "network_error";
 		}
 		accessToken = data.access_token;
 		if (data.refresh_token !== null) {
 			localStorage.setItem(REFRESH_STORAGE_KEY, data.refresh_token);
 		}
-		return true;
+		return "success";
 	} catch {
-		// ネットワーク異常・応答の欠落もリフレッシュ失敗として扱う
-		return false;
+		// 応答本文が読めない(ゲートウェイのHTML応答等)。判断できないため保存値は残す
+		return "network_error";
 	}
 };
 
 /** 同時呼び出しを1回のリフレッシュに束ねる(単一フライト) */
-const refreshTokens = (): Promise<boolean> => {
+const refreshOutcome = (): Promise<RefreshOutcome> => {
 	refreshInFlight ??= performRefresh().finally(() => {
 		refreshInFlight = null;
 	});
 	return refreshInFlight;
 };
+
+/** リフレッシュの成否(apiFetch用の真偽値。失敗の理由は問わない) */
+const refreshTokens = (): Promise<boolean> =>
+	refreshOutcome().then((outcome) => outcome === "success");
 
 export const authSession = {
 	/** メモリ上のアクセストークン(未取得はnull) */
@@ -81,17 +103,22 @@ export const authSession = {
 	},
 	/**
 	 * 起動時の復元。保存済みリフレッシュトークンがあればリフレッシュを試みる。
-	 * 失敗時はlocalStorageのトークンを除去する(失効済みの保存値による無駄な再試行の防止)
+	 * サーバーの明示拒否(401等)のときだけlocalStorageのトークンを除去する
+	 * (失効済みの保存値による無駄な再試行の防止)。通信失敗では保存値を残し・
+	 * 次回の起動時に再試行する(一時的なオフラインで有効なセッションを消さない)
 	 */
 	restore(): Promise<boolean> {
 		if (readStoredRefreshToken() === null) {
 			return Promise.resolve(false);
 		}
-		return refreshTokens().then((restored) => {
-			if (!restored) {
+		return refreshOutcome().then((outcome) => {
+			if (outcome === "success") {
+				return true;
+			}
+			if (outcome === "rejected") {
 				localStorage.removeItem(REFRESH_STORAGE_KEY);
 			}
-			return restored;
+			return false;
 		});
 	},
 	/** リフレッシュトークンを回転させる(同時呼び出しは単一フライトに収束) */

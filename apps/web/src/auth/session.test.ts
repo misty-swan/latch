@@ -83,7 +83,7 @@ describe("authSession", () => {
 		expect(authSession.accessToken).toBeNull();
 	});
 
-	it("restoreはリフレッシュ失敗時にlocalStorageの失効トークンを除去する(無駄な再試行の防止)", async () => {
+	it("restoreはサーバーの明示拒否(401)でlocalStorageの失効トークンを除去する(無駄な再試行の防止)", async () => {
 		localStorage.setItem(REFRESH_KEY, "stale-refresh");
 		fetchMock.mockResolvedValueOnce(
 			jsonResponse(401, {
@@ -94,6 +94,16 @@ describe("authSession", () => {
 		await expect(authSession.restore()).resolves.toBe(false);
 
 		expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
+	});
+
+	it("restoreはネットワーク例外ではlocalStorageのトークンを残す(一時的なオフラインで有効なトークンを消さない)", async () => {
+		localStorage.setItem(REFRESH_KEY, "refresh-1");
+		fetchMock.mockRejectedValueOnce(new TypeError("network down"));
+
+		await expect(authSession.restore()).resolves.toBe(false);
+
+		// 判断不能の失敗のため保存値はそのまま・次回の起動時に再試行できる
+		expect(localStorage.getItem(REFRESH_KEY)).toBe("refresh-1");
 	});
 
 	it("restoreの成功時は保存値を除去しない", async () => {
