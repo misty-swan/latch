@@ -228,6 +228,11 @@ const userIdOf = async (intentId: string): Promise<string> => {
 	return row.userId;
 };
 
+/** docs/05 §3.1のエラー応答の形状(details.reasonsに理由コードを載せる場合がある) */
+interface ErrorResponse {
+	error: { code: string; message: string; details: { reasons?: string[] } };
+}
+
 describe("DELETE /v1/intents/{id}の後始末(docs/05 §2.5)", () => {
 	beforeEach(() => {
 		resetMemoryVectorStore();
@@ -331,6 +336,66 @@ describe("DELETE /v1/intents/{id}の後始末(docs/05 §2.5)", () => {
 		expect(await eventsOf(keptY.id)).toHaveLength(1);
 		const [keptVector] = await memoryVectorStore().getByIds([keptY.id]);
 		expect(keptVector?.metadata.status).toBe("active");
+	});
+
+	it("ベクトル削除の失敗は500で削除全体を中止する(D1もベクトルも未削除の再試行可能状態)", async () => {
+		const accessToken = await registerUser("cleanup-del-vecfail");
+		const created = await createActiveConnection(
+			accessToken,
+			"削除が失敗する学習仲間",
+		);
+		// 候補子行のFK参照先として同一ユーザーのもう1件のIntentを用意する
+		const paired = await createActiveConnection(
+			accessToken,
+			"候補の参照先になる学習仲間",
+		);
+		// 作成時のintent_createdイベント行(waitUntil内のINSERT)の定着を待つ
+		await vi.waitUntil(
+			async () => (await eventsOf(created.id)).length >= 1,
+			WAIT,
+		);
+		// 削除対象になり得る子行(1対1候補)を直接投入
+		await db.insert(matchCandidates).values({
+			id: ulid(),
+			intentAId: created.id,
+			intentBId: paired.id,
+			intentAVersion: 1,
+			intentBVersion: 1,
+			form: "connection",
+			status: "candidate",
+			createdAt: new Date(),
+			updatedAt: new Date(),
+		});
+		await memoryVectorStore().upsert([
+			makeVector(created.id, [1, 0], {
+				form: "connection",
+				user_id: await userIdOf(created.id),
+			}),
+		]);
+
+		// deleteByIdsだけを1回失敗させる(Vectorize障害の模擬)
+		const deleteSpy = vi
+			.spyOn(memoryVectorStore(), "deleteByIds")
+			.mockRejectedValueOnce(new Error("vectorize down"));
+		const res = await SELF.fetch(`https://localhost/v1/intents/${created.id}`, {
+			method: "DELETE",
+			headers: { Authorization: `Bearer ${accessToken}` },
+		});
+		expect(res.status).toBe(500);
+		expect(((await res.json()) as ErrorResponse).error.code).toBe("INTERNAL");
+		deleteSpy.mockRestore();
+
+		// D1は一切削除されていない(再試行可能)
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, created.id));
+		expect(row).toBeDefined();
+		expect(await candidatesInvolving(created.id)).toHaveLength(1);
+		expect(await eventsOf(created.id)).toHaveLength(1);
+		// ベクトルも残る(削除は未遂行)
+		const [vector] = await memoryVectorStore().getByIds([created.id]);
+		expect(vector).not.toBeNull();
 	});
 });
 

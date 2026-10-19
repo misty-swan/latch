@@ -16,8 +16,8 @@
  *   notification_levelのみ(他フィールドは400 field_not_allowed)。
  *   paused/matched/expired/cancelled行は400 invalid_status
  * - DELETE /v1/intents/{id}: 削除(所有者のみ・他人は404)。後始末(docs/05 §2.5)として
- *   1対1候補・グループ候補・イベント投入記録の子行を先に削除し、Vectorizeの
- *   ベクトルも即時削除する
+ *   まずVectorizeのベクトルを即時削除(失敗時は500で削除全体を中断・D1未削除)し、
+ *   次に1対1候補・グループ候補・イベント投入記録の子行を削除してから本体を削除する
  * - POST /v1/intents/{id}/pause: 一時停止。activeのみ可(他は400 invalid_status)。
  *   status=paused・version+1。期限は変更しない。Vectorize metadataのstatusを
  *   pausedへ即時同期(ベストエフォート・docs/06 §2)
@@ -908,10 +908,14 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 
 /**
  * DELETE /v1/intents/{id}(削除・docs/05 §3.2)。所有者のみ・他人は404(存在を隠す)。
- * 削除の後始末(docs/05 §2.5): match_candidates(intent_a/bに含む行)・
- * group_candidates(intent_idsに含む行)・match_events(当該Intentの行)を先に削除して
- * から本体を削除する(子行がintentsをFK参照するため)。Vectorizeのベクトルも即時
- * 削除する(期限+7日の遅延削除ではない・docs/05 §2.5)。
+ * 削除の後始末(docs/05 §2.5の無条件削除): まずVectorizeのベクトルを即時削除する
+ * (期限+7日の遅延ではない)。ここが失敗した場合は削除全体を中断して500 INTERNAL
+ * (D1は未削除のため再試行可能)。この順序により「Intent行が消えたならベクトルも
+ * 消えている」が保証され、検索可能な孤立埋め込みが残らない。逆にベクトル削除の
+ * 後の子・本体削除が失敗した場合はIntent行が残るため再埋め込みで回収できる。
+ * 次にmatch_candidates(intent_a/bに含む行)・group_candidates(intent_idsに含む行)・
+ * match_events(当該Intentの行)を先に削除してから本体を削除する
+ * (子行がintentsをFK参照するため)。
  * イベント型のintent_deleted等はF3では投入しない(削除はdocs/06 §1のとおり層を経ず
  * 即時処理し、05 §2.2の列挙値はF4以降のために予約)。期限切れIntentのベクトル削除は
  * 別途Cronの2窓走査(docs/05 §2.6)
@@ -932,6 +936,23 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 		.where(and(eq(intents.id, c.req.param("id")), eq(intents.userId, sub)));
 	if (target === undefined) {
 		const r = notFound();
+		return c.json(r.body, r.status);
+	}
+	// ベクトルを先に削除する(docs/05 §2.5の無条件削除)。失敗時はD1に触れず
+	// 500 INTERNALで中止する(クライアントが再試行できる)。pause/resumeの
+	// metadata同期と違い、削除はベストエフォートにしない(孤立ベクトルの
+	// 回収経路がCronに無いため)
+	try {
+		await createVectorStore(c.env).deleteByIds([target.id]);
+	} catch {
+		logger.error("intents.delete.vector_failed", {
+			intent_id: target.id,
+			error_code: "INTERNAL",
+		});
+		const r = errorJson(
+			"INTERNAL",
+			"削除に失敗しました。時間を置いて再度お試しください",
+		);
 		return c.json(r.body, r.status);
 	}
 	// 子(候補・イベント投入記録)を先に削除してから本体を削除する(docs/05 §2.5)。
@@ -956,20 +977,10 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 		.where(and(eq(intents.id, target.id), eq(intents.userId, sub)))
 		.returning();
 	if (deleted === undefined) {
-		// 所有確認後の並行削除。消えていれば同じ404(冪等な結果)
+		// 所有確認後の並行削除。消えていれば同じ404(冪等な結果)。
+		// ベクトルは先行して削除済みだが、行も無いため孤立にはならない
 		const r = notFound();
 		return c.json(r.body, r.status);
-	}
-	// Vectorizeからも即時削除する(docs/05 §2.5)。本体削除後のため失敗しても
-	// 応答は204のまま(warnログのみ・残存ベクトルはLayer 1のD1再検証で候補化されない)
-	try {
-		await createVectorStore(c.env).deleteByIds([target.id]);
-	} catch (error) {
-		logger.warn("vector.sync.failed", {
-			intent_id: target.id,
-			status: "deleted",
-			error_code: error instanceof Error ? error.name : "UNKNOWN",
-		});
 	}
 	// TODO(F4): このIntentが参加する提案のcancelled連鎖
 	logger.info("intents.deleted", { intent_id: deleted.id });
