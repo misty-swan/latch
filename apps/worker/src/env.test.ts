@@ -45,6 +45,18 @@ describe("assertEnvSafety(docs/04 §4・docs/10 §2: prodテスト鍵起動ガ�
 		).toThrow("ENV_UNSAFE_TEST_KEY");
 	});
 
+	it("prodでキュー消費停止印(TEST_QUEUES_DISABLED)が設定されると例外", () => {
+		expect(() =>
+			assertEnvSafety(
+				makeEnv({
+					LATCH_ENV: "production",
+					JWT_SECRET: SECRET_32,
+					TEST_QUEUES_DISABLED: "1",
+				}),
+			),
+		).toThrow("ENV_UNSAFE_TEST_QUEUE_GUARD");
+	});
+
 	it("prodでJWT_SECRET未設定は例外", () => {
 		expect(() => assertEnvSafety(makeEnv({ LATCH_ENV: "production" }))).toThrow(
 			"ENV_UNSAFE_JWT_SECRET",

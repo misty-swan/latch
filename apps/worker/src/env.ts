@@ -47,7 +47,9 @@ export interface Env {
 	 * 消費の副作用が既存試験の前提を壊すため、vitest.config.tsのminiflare.bindings
 	 * のみに設定する(TEST_MIGRATIONSと同じ前例)。消費の試験は
 	 * createMessageBatchでhandleQueueBatchを直接呼んで行う(pipeline-consumer.test.ts)。
-	 * wrangler.jsonc・.dev.varsには存在しない
+	 * wrangler.jsonc・.dev.varsには存在しない。prodで設定が漏れた場合は
+	 * パイプラインの消費が黙って止まるため、assertEnvSafetyが起動を拒否する
+	 * (docs/10 §2のテスト鍵ガードと同じ二重防御)
 	 */
 	TEST_QUEUES_DISABLED?: string;
 	GOOGLE_CLIENT_ID?: string;
@@ -89,6 +91,12 @@ export const assertEnvSafety = (env: Env): void => {
 	if (env.LATCH_TEST_IDP_PRIVATE_JWKS !== undefined) {
 		throw new Error(
 			"ENV_UNSAFE_TEST_KEY: prod環境でテスト鍵(LATCH_TEST_IDP_PRIVATE_JWKS)が設定されている(docs/10 §2)",
+		);
+	}
+	// キュー消費停止印のprod混入はパイプラインの消費を黙って止めるため起動ごと拒否する
+	if (env.TEST_QUEUES_DISABLED !== undefined) {
+		throw new Error(
+			"ENV_UNSAFE_TEST_QUEUE_GUARD: prod環境でTEST_QUEUES_DISABLEDが設定されている(docs/10 §2)",
 		);
 	}
 	if (env.JWT_SECRET === undefined || env.JWT_SECRET.length < 32) {
