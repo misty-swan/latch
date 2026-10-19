@@ -5,8 +5,8 @@
  * embedding_completedイベントの再投入(同version・即時)。
  * 消費は例外を外へ出さない(=全メッセージack)。失敗はイベント行のstatusで
  * 記録し、Embedding失敗は再試行せずCronのバックフィルが回収する(06 §5)。
- * embedding_completedの消費(第2段)はTask 11が実装するため、現段階では
- * processedにせず保持する仮枝。
+ * embedding_completedの消費(第2段)はevaluateIntent(pipeline/evaluate.ts)へ
+ * 委譲し、戻り値の計測結果を起点イベントのpayloadへ記録する(06 §7)。
  */
 import type { MatchQueueMessage } from "@latch/shared";
 import { PIPELINE } from "@latch/shared";
@@ -19,6 +19,7 @@ import { createEmbedder } from "../llm/embedding";
 import { createLogger } from "../logging/logger";
 import { createVectorStore } from "../vectorstore";
 import type { VectorStore } from "../vectorstore/types";
+import { evaluateIntent } from "./evaluate";
 import { emitMatchEvent } from "./events";
 import { buildNormalizedText } from "./normalize";
 
@@ -141,12 +142,15 @@ export const runEmbeddingStage = async (
 	}
 };
 
-/** 起点イベントをprocessedへ倒す。payloadの上書きがあれば合わせて記録する */
+/**
+ * 起点イベントをprocessedへ倒す。payloadの上書きがあれば合わせて記録する
+ * (第2段の計測結果やskipped理由・docs/06 §7)
+ */
 const markProcessed = async (
 	env: Env,
 	eventId: string,
 	clock: Clock,
-	payload?: Record<string, string>,
+	payload?: Record<string, unknown>,
 ): Promise<void> => {
 	await drizzle(env.DB)
 		.update(matchEvents)
@@ -190,9 +194,25 @@ const consumeEvent = async (
 	if (event.status === "processed") {
 		return;
 	}
-	// embedding_completed(第2段)はTask 11まで「processedにせず何もしない+ack」の
-	// 仮枝。Task 11がこの分岐をLayer 2 Candidate Retrieval以降の処理へ置換する
+	// embedding_completed(第2段・docs/06 §2〜§3): 評価実行(Layer 2検索→
+	// Layer 1→Layer 3→候補保存)をevaluateIntentへ委譲し、戻り値の計測結果を
+	// 起点イベントのpayloadへ記録する(docs/06 §7のイベント単位の計測)。
+	// evaluateIntentがnull(抑制・対象外)のときはskippedを載せてprocessedへ倒す
 	if (event.eventType === "embedding_completed") {
+		const result = await evaluateIntent(env, event.sourceIntentId, clock);
+		await markProcessed(
+			env,
+			event.id,
+			clock,
+			result === null
+				? { skipped: "suppressed" }
+				: {
+						retrieval_count: result.retrievalCount,
+						l1_pass: result.l1Pass,
+						l1_exclusions: result.exclusions,
+						l3_pass: result.l3Pass,
+					},
+		);
 		return;
 	}
 	const [intent] = await db

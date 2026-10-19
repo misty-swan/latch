@@ -217,20 +217,22 @@ describe("第1段の消費(intent_created・docs/06 §2)", () => {
 		expect(origin?.payload).toEqual({});
 	});
 
-	it("embedding_completedイベントはTask 11まで何もせずpendingのまま保持する(仮枝)", async () => {
+	it("embedding_completedイベントは第2段の評価へ委譲されprocessedになる", async () => {
 		const { intentId, eventId } = await seedEvent({
 			eventType: "embedding_completed",
 		});
 
 		const result = await runBatch("match-events", [eventId]);
 
-		// ackするがprocessedにはしない(第2段の消費はTask 11)
+		// ベクトルが無い(第1段を経ていない)ため評価は対象外パスで終わり、
+		// 呼び出し側はnullを受けてskippedをpayloadへ載せてprocessedにする
 		expectAcked(result);
 		const [row] = await db
 			.select()
 			.from(matchEvents)
 			.where(eq(matchEvents.id, eventId));
-		expect(row?.status).toBe("pending");
+		expect(row?.status).toBe("processed");
+		expect(row?.payload).toEqual({ skipped: "suppressed" });
 		// 第1段の副作用も起きない
 		expect(await memoryVectorStore().getByIds([intentId])).toEqual([null]);
 	});
