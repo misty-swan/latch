@@ -36,3 +36,36 @@
 	line-height: 1.7;
 	color: var(--danger);
 }
+
+/* 読み解き確認の行内編集(主題・日時・予算・条件の入力)。ボードに編集UIが無いため
+   latch.cssの変数で組みる(実装の裁量・F2' Task 5) */
+.fact-input {
+	width: 100%;
+	box-sizing: border-box;
+	padding: 8px 10px;
+	border: none;
+	border-radius: 10px;
+	background: var(--surface);
+	box-shadow: inset 0 0 0 1px var(--line-2);
+	font-family: inherit;
+	font-size: 15px;
+	color: var(--ink);
+}
+.fact-input:focus-visible {
+	outline: 2px solid var(--ink);
+	outline-offset: 2px;
+}
+.fact-input--number {
+	width: 140px;
+}
+.chip-input {
+	width: auto;
+}
+
+/* 読み解き確認の人数ステッパー(下限・上限の2..4)。+/-はicon-btnを流用する */
+.fact-stepper {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin-right: 14px;
+}

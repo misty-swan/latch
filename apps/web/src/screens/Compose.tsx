@@ -19,7 +19,11 @@ import {
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { ApiError, apiFetch } from "../api/client";
-import { savePendingCompose } from "../intents/composeState";
+import {
+	readComposeState,
+	readPendingCompose,
+	savePendingCompose,
+} from "../intents/composeState";
 import { PATHS } from "../routes/paths";
 import { ScreenGrain } from "./shared";
 
@@ -31,8 +35,15 @@ export function Compose() {
 	const [searchParams] = useSearchParams();
 	const draftParam = searchParams.get("draft");
 
-	const [text, setText] = useState("");
-	const [draftId, setDraftId] = useState<string | null>(null);
+	// 確認からの「文章を直す」・読み解けなかった「もう一度読み解く」で
+	// 文章と下書きidを保持する(composeStateに残っている分から復元: F2'計画Review Focus #3)
+	const [text, setText] = useState(
+		() => readComposeState()?.raw_text ?? readPendingCompose()?.raw_text ?? "",
+	);
+	const [draftId, setDraftId] = useState<string | null>(
+		() =>
+			readComposeState()?.draft_id ?? readPendingCompose()?.draft_id ?? null,
+	);
 	const [restoring, setRestoring] = useState(draftParam !== null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
