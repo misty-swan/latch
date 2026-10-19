@@ -40,6 +40,16 @@ export interface Env {
 	 * 設定自体を拒否する(docs/10 §2)
 	 */
 	LATCH_TEST_IDP_PRIVATE_JWKS?: string;
+	/**
+	 * 単体・統合試験(vitest)専用の印。設定されている間はQueues consumerの
+	 * 自動消費を行わない(index.tsのqueueハンドラで判定する)。
+	 * vitest-pool-workersのminiflareはテスト内でsendされたメッセージを自動消費し、
+	 * 消費の副作用が既存試験の前提を壊すため、vitest.config.tsのminiflare.bindings
+	 * のみに設定する(TEST_MIGRATIONSと同じ前例)。消費の試験は
+	 * createMessageBatchでhandleQueueBatchを直接呼んで行う(pipeline-consumer.test.ts)。
+	 * wrangler.jsonc・.dev.varsには存在しない
+	 */
+	TEST_QUEUES_DISABLED?: string;
 	GOOGLE_CLIENT_ID?: string;
 	APPLE_CLIENT_ID?: string;
 }

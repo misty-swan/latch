@@ -1,8 +1,11 @@
+import type { MatchQueueMessage } from "@latch/shared";
 import { Hono } from "hono";
 import type { AppEnv } from "./auth/middleware";
+import { systemClock } from "./clock/clock";
 import { ChatRoomDO } from "./do/chat";
 import { assertEnvSafety, type Env } from "./env";
 import { internalOnError } from "./http/errors";
+import { handleQueueBatch } from "./pipeline/consumer";
 import { authRoutes } from "./routes/auth";
 import { devRoutes } from "./routes/dev";
 import { iconRoutes } from "./routes/icons";
@@ -48,10 +51,19 @@ export default {
 		}
 		return app.fetch(request, env, ctx);
 	},
-	// TODO(F3で実装): Queues consumer(match-events)。
-	// F0では何もしない(=全メッセージをackする)
-	queue: async () => {
-		// ackのみ
+	// Queues consumer(match-eventsとmatch-events-dlq・docs/06 §2・§5)。
+	// 消費は例外を外へ出さない(=全メッセージack)。失敗はイベント行のstatusで記録する。
+	// 単体・統合試験では自動消費しない(vitest.config.tsだけが持つTEST_QUEUES_DISABLED
+	// バインディングで判定・消費の試験はhandleQueueBatchの直接呼びで行う)
+	queue: async (
+		batch: MessageBatch<MatchQueueMessage>,
+		env: Env,
+		ctx: ExecutionContext,
+	): Promise<void> => {
+		if (env.TEST_QUEUES_DISABLED !== undefined) {
+			return;
+		}
+		await handleQueueBatch(batch, env, ctx, systemClock);
 	},
 	// TODO(F3で実装): Cronハンドラ(bucket走査・期限切れバッチ等)。F0では何もしない
 	scheduled: async () => {

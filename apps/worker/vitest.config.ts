@@ -41,6 +41,10 @@ export default defineConfig(async () => {
 						JWT_SECRET: "unit-test-jwt-secret-0123456789ab",
 						LATCH_TEST_IDP_JWKS: testIdpJwks,
 						LATCH_TEST_IDP_PRIVATE_JWKS: testIdpPrivateJwk,
+						// キューの自動消費を止める印(src/env.ts・index.tsのqueueハンドラ参照)。
+						// テストがsendしたメッセージの消費による副作用を防ぎ、消費の試験は
+						// createMessageBatchでhandleQueueBatchを直接呼んで行う
+						TEST_QUEUES_DISABLED: "1",
 					},
 				},
 			}),

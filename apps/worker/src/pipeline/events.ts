@@ -15,8 +15,11 @@ import { newUlid } from "../ids";
 
 /** emitMatchEventのパラメータ */
 export interface EmitMatchEventParams {
-	/** イベント種別(この関数は第1段の作成・更新のみを扱う・docs/06 §2) */
-	eventType: Extract<MatchEventType, "intent_created" | "intent_updated">;
+	/** イベント種別(第1段の作成・更新と、第1段からの再投入embedding_completed・docs/06 §2) */
+	eventType: Extract<
+		MatchEventType,
+		"intent_created" | "intent_updated" | "embedding_completed"
+	>;
 	/** 起点Intentのid */
 	intentId: string;
 	/** Intentのversion(発行時点の値・更新後イベントは更新後のversion) */
