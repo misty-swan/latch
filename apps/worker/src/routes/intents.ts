@@ -15,12 +15,16 @@
  *   期限確定)。active=可変はtopic・time・geo・participants・budget・constraints・
  *   notification_levelのみ(他フィールドは400 field_not_allowed)。
  *   paused/matched/expired/cancelled行は400 invalid_status
- * - DELETE /v1/intents/{id}: 削除(所有者のみ・他人は404)
+ * - DELETE /v1/intents/{id}: 削除(所有者のみ・他人は404)。後始末(docs/05 §2.5)として
+ *   1対1候補・グループ候補・イベント投入記録の子行を先に削除し、Vectorizeの
+ *   ベクトルも即時削除する
  * - POST /v1/intents/{id}/pause: 一時停止。activeのみ可(他は400 invalid_status)。
- *   status=paused・version+1。期限は変更しない
+ *   status=paused・version+1。期限は変更しない。Vectorize metadataのstatusを
+ *   pausedへ即時同期(ベストエフォート・docs/06 §2)
  * - POST /v1/intents/{id}/resume: 再開。pausedのみ可(他は400 invalid_status)。
  *   期限切れ(expires_at<=now)は400(expired遷移自体はF3のCron)。active化と同じ
- *   ACTIVE_INTENT_LIMIT検証(422)。status=active・version+1・期限は据え置き
+ *   ACTIVE_INTENT_LIMIT検証(422)。status=active・version+1・期限は据え置き。
+ *   Vectorize metadataのstatusをactiveへ戻し、intent_updatedを即時発行(docs/06 §2)
  * エラー応答はdocs/05 §3.1の共通形状(errorJson)のみ。
  * 時刻の規律(docs/04 §4): ルートは合成の起点(composition root)のためsystemClockをimportして使う
  */
@@ -38,13 +42,18 @@ import {
 	parseResponseSchema,
 	patchIntentRequestSchema,
 } from "@latch/shared";
-import { and, count, desc, eq, lt } from "drizzle-orm";
+import { and, count, desc, eq, lt, or, sql } from "drizzle-orm";
 import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { type AppEnv, requireRegistered } from "../auth/middleware";
 import { systemClock } from "../clock/clock";
-import { intents, matchEvents } from "../db/schema";
+import {
+	groupCandidates,
+	intents,
+	matchCandidates,
+	matchEvents,
+} from "../db/schema";
 import type { Env } from "../env";
 import { type ErrorResult, errorJson } from "../http/errors";
 import { newUlid } from "../ids";
@@ -53,6 +62,7 @@ import { validateIntentForActive } from "../intents/validation";
 import { createLlm } from "../llm/mode";
 import { createLogger } from "../logging/logger";
 import { emitMatchEvent } from "../pipeline/events";
+import { createVectorStore } from "../vectorstore";
 
 /** 構造化ロガー(docs/08 §6: 許可フィールドのみ)。raw_text・topic・座標は決して出力しない */
 const logger = createLogger();
@@ -255,6 +265,42 @@ const intentMeaningChanged = (
 		JSON.stringify(row.softConstraints) ||
 	JSON.stringify(updated.negativeConstraints) !==
 		JSON.stringify(row.negativeConstraints);
+
+/**
+ * Vectorizeのmetadata.statusを同期する(docs/06 §2「pauseはVectorize metadataの
+ * statusを即時更新して新規候補化を停止する」)。既存ベクトルをgetByIdsで取得し、
+ * 同じvaluesでmetadata.statusだけを書き替えてupsertする(再埋め込みはしない)。
+ * ベクトルが無い(埋め込み未実施・削除済み)場合は何もしない。
+ * 同期はベストエフォートで、失敗しても呼び出し元(pause/resume)の応答は成功のまま
+ * (06 §2「metadata更新の失敗はCronのバックフィルで回収する」)。
+ * 失敗時はwarnログのみ(許可フィールド: intent_id・status・error_code・docs/08 §6)
+ */
+const syncVectorStatus = async (
+	env: Env,
+	intentId: string,
+	status: "active" | "paused",
+): Promise<void> => {
+	try {
+		const store = createVectorStore(env);
+		const [existing] = await store.getByIds([intentId]);
+		if (existing === null) {
+			return;
+		}
+		await store.upsert([
+			{
+				id: existing.id,
+				values: existing.values,
+				metadata: { ...existing.metadata, status },
+			},
+		]);
+	} catch (error) {
+		logger.warn("vector.sync.failed", {
+			intent_id: intentId,
+			status,
+			error_code: error instanceof Error ? error.name : "UNKNOWN",
+		});
+	}
+};
 
 intentRoutes.post("/parse", requireRegistered, async (c) => {
 	const parsed = parseIntentRequestSchema.safeParse(await readJsonBody(c));
@@ -862,9 +908,13 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 
 /**
  * DELETE /v1/intents/{id}(削除・docs/05 §3.2)。所有者のみ・他人は404(存在を隠す)。
- * match_eventsは当該Intentの行を先に削除してから本体を削除する
- * (イベント投入記録がintentsをFK参照するため・docs/05 §2.5)。
- * 期限切れ後のVectorize削除は別途(docs/05 §2.3)
+ * 削除の後始末(docs/05 §2.5): match_candidates(intent_a/bに含む行)・
+ * group_candidates(intent_idsに含む行)・match_events(当該Intentの行)を先に削除して
+ * から本体を削除する(子行がintentsをFK参照するため)。Vectorizeのベクトルも即時
+ * 削除する(期限+7日の遅延削除ではない・docs/05 §2.5)。
+ * イベント型のintent_deleted等はF3では投入しない(削除はdocs/06 §1のとおり層を経ず
+ * 即時処理し、05 §2.2の列挙値はF4以降のために予約)。期限切れIntentのベクトル削除は
+ * 別途Cronの2窓走査(docs/05 §2.6)
  */
 intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	const sub = c.var.auth.sub;
@@ -884,7 +934,22 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 		const r = notFound();
 		return c.json(r.body, r.status);
 	}
-	// 子(イベント投入記録)を先に削除してから本体を削除する(docs/05 §2.5)
+	// 子(候補・イベント投入記録)を先に削除してから本体を削除する(docs/05 §2.5)。
+	// 1対1候補はintent_a/bのどちらかに含む行・グループ候補はintent_idsに含む行
+	await db
+		.delete(matchCandidates)
+		.where(
+			or(
+				eq(matchCandidates.intentAId, target.id),
+				eq(matchCandidates.intentBId, target.id),
+			),
+		);
+	// intent_idsはJSON配列列のため、json_eachで展開した要素の一致で絞り込む
+	await db
+		.delete(groupCandidates)
+		.where(
+			sql`EXISTS (SELECT 1 FROM json_each(${groupCandidates.intentIds}) WHERE json_each.value = ${target.id})`,
+		);
 	await db.delete(matchEvents).where(eq(matchEvents.sourceIntentId, target.id));
 	const [deleted] = await db
 		.delete(intents)
@@ -895,7 +960,17 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 		const r = notFound();
 		return c.json(r.body, r.status);
 	}
-	// TODO(F3): VectorizeからこのIntentのベクトルを削除する
+	// Vectorizeからも即時削除する(docs/05 §2.5)。本体削除後のため失敗しても
+	// 応答は204のまま(warnログのみ・残存ベクトルはLayer 1のD1再検証で候補化されない)
+	try {
+		await createVectorStore(c.env).deleteByIds([target.id]);
+	} catch (error) {
+		logger.warn("vector.sync.failed", {
+			intent_id: target.id,
+			status: "deleted",
+			error_code: error instanceof Error ? error.name : "UNKNOWN",
+		});
+	}
 	// TODO(F4): このIntentが参加する提案のcancelled連鎖
 	logger.info("intents.deleted", { intent_id: deleted.id });
 	return c.body(null, 204);
@@ -947,7 +1022,9 @@ intentRoutes.post("/:id/pause", requireRegistered, async (c) => {
 		const r = guardedUpdateFailure(result.kind);
 		return c.json(r.body, r.status);
 	}
-	// TODO(F3): Vectorize metadataのstatus更新はイベント発行側で行う(docs/05 §2.3)
+	// Vectorize metadataのstatusをpausedへ即時同期(docs/06 §2)。新規候補化を止める。
+	// 失敗はベストエフォート(Cronのバックフィルで回収)のため応答は成功のまま
+	await syncVectorStatus(c.env, result.row.id, "paused");
 	logger.info("intents.paused", {
 		intent_id: result.row.id,
 		status: result.row.status,
@@ -1030,6 +1107,9 @@ intentRoutes.post("/:id/resume", requireRegistered, async (c) => {
 		const r = guardedUpdateFailure(result.kind);
 		return c.json(r.body, r.status);
 	}
+	// Vectorize metadataのstatusをactiveへ戻す(docs/06 §2)。失敗はベストエフォート
+	// (Cronのバックフィルで回収)のため応答は成功のまま
+	await syncVectorStatus(c.env, result.row.id, "active");
 	// イベント発行(docs/06 §2「resumeはintent_updatedイベントを発行して再評価する」)。
 	// 即時投入・versionは再開後の値。waitUntilでsendし、応答をブロックしない
 	c.executionCtx.waitUntil(
