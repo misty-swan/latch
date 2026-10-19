@@ -364,6 +364,9 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 		await insertCandidate(expiring.id, healthy1.id, "candidate");
 		await insertCandidate(healthy1.id, healthy2.id, "candidate");
 		await insertCandidate(expiring.id, healthy2.id, "proposed");
+		// グループ候補: expiringを含む行(→closed)と含まない行(→残る)
+		await insertGroupCandidate([expiring.id, healthy1.id], FIXED_NOW);
+		await insertGroupCandidate([healthy1.id, healthy2.id], FIXED_NOW);
 
 		await runScheduledPipeline(testEnv, directClock);
 
@@ -378,6 +381,16 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 		expect(untouched?.status).toBe("candidate");
 		const [proposed] = await candidateOfPair(expiring.id, healthy2.id);
 		expect(proposed?.status).toBe("proposed");
+		// グループ候補クローズ: intent_idsに当該Intentを含むcandidateのみclosed
+		const groupRows = await db.select().from(groupCandidates);
+		const closingGroup = groupRows.find((row) =>
+			row.intentIds.includes(expiring.id),
+		);
+		const keptGroup = groupRows.find(
+			(row) => !row.intentIds.includes(expiring.id),
+		);
+		expect(closingGroup?.status).toBe("closed");
+		expect(keptGroup?.status).toBe("candidate");
 		// ベクトルmetadata.statusの同期(best-effort・docs/06 §2)
 		expect((await vectorOf(expiring.id))?.metadata.status).toBe("expired");
 		expect((await vectorOf(healthy1.id))?.metadata.status).toBe("active");
@@ -649,14 +662,18 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 		});
 		await insertIntentRow(intentA);
 		await insertIntentRow(intentB);
-		// 古い行(updated_at=now−31日・version=1)は削除され、
-		// 新しい行(updated_at=now−29日・version=2)は残る
-		await insertCandidate(
-			intentA.id,
-			intentB.id,
-			"candidate",
-			new Date(BASE - 31 * MS_PER_DAY),
-		);
+		// 古い行(updated_at=now−31日・3件)は1回の実行で全て削除され、
+		// 新しい行(updated_at=now−29日)は残る。versionはUNIQUE(a,b,va,vb)が
+		// 重複しないよう専用の値を振る
+		for (const version of [1, 3, 4]) {
+			await insertCandidate(
+				intentA.id,
+				intentB.id,
+				"candidate",
+				new Date(BASE - 31 * MS_PER_DAY),
+				{ a: version, b: 1 },
+			);
+		}
 		await insertCandidate(
 			intentA.id,
 			intentB.id,

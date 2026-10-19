@@ -218,11 +218,12 @@ const runExpiryWindows = async (env: Env, clock: Clock): Promise<void> => {
 		// グループ候補のクローズ: 当該Intentをintent_idsに含むstatus=candidateの行。
 		// intent_idsはJSON配列列で索引が無いため、candidate行自体は保持期間(30日)で
 		// 上限づけられた小さい表であることを前提に、candidate行だけを取得して
-		// JS側で照合する(expireがあるときだけ走査する)
+		// JS側で照合する(expireがあるときだけ走査し・CRON_BATCH_LIMITで頭打ち)
 		const groupRows = await db
 			.select()
 			.from(groupCandidates)
-			.where(eq(groupCandidates.status, "candidate"));
+			.where(eq(groupCandidates.status, "candidate"))
+			.limit(PIPELINE.CRON_BATCH_LIMIT);
 		const idSet = new Set(ids);
 		const closingGroups = groupRows
 			.filter((row) => row.intentIds.some((id) => idSet.has(id)))
@@ -473,22 +474,42 @@ const runDelayedReevalSweep = async (env: Env, clock: Clock): Promise<void> => {
 /**
  * 保持期間削除(docs/05 §2.6)。1対1候補は評価確定から30日
  * (updated_at≤now−30日)・グループ候補は生成から30日(created_at≤now−30日)で
- * 削除する(01 §21)
+ * 削除する(01 §21)。D1はDELETE...LIMITに対応しないため、先にCRON_BATCH_LIMITで
+ * 削除対象のidを取得してからinArrayで削除する(1実行あたりの処理量を
+ * CRON_BATCH_LIMITで頭打ちにし、超過分は次回のCronで回収する・docs/04 §4)
  */
 const runRetentionSweep = async (env: Env, clock: Clock): Promise<void> => {
 	const db = drizzle(env.DB);
 	const cutoff = new Date(
 		clock.now().getTime() - PIPELINE.CANDIDATE_RETENTION_DAYS * MS_PER_DAY,
 	);
-	const matchDeleted = await db
-		.delete(matchCandidates)
+	const staleCandidates = await db
+		.select({ id: matchCandidates.id })
+		.from(matchCandidates)
 		.where(lte(matchCandidates.updatedAt, cutoff))
-		.returning({ id: matchCandidates.id });
-	const groupDeleted = await db
-		.delete(groupCandidates)
+		.limit(PIPELINE.CRON_BATCH_LIMIT);
+	for (let i = 0; i < staleCandidates.length; i += UPDATE_CHUNK) {
+		await db.delete(matchCandidates).where(
+			inArray(
+				matchCandidates.id,
+				staleCandidates.slice(i, i + UPDATE_CHUNK).map((row) => row.id),
+			),
+		);
+	}
+	const staleGroups = await db
+		.select({ id: groupCandidates.id })
+		.from(groupCandidates)
 		.where(lte(groupCandidates.createdAt, cutoff))
-		.returning({ id: groupCandidates.id });
-	const deleted = matchDeleted.length + groupDeleted.length;
+		.limit(PIPELINE.CRON_BATCH_LIMIT);
+	for (let i = 0; i < staleGroups.length; i += UPDATE_CHUNK) {
+		await db.delete(groupCandidates).where(
+			inArray(
+				groupCandidates.id,
+				staleGroups.slice(i, i + UPDATE_CHUNK).map((row) => row.id),
+			),
+		);
+	}
+	const deleted = staleCandidates.length + staleGroups.length;
 	if (deleted > 0) {
 		logger.info("cron.retention.deleted", { count: deleted });
 	}
