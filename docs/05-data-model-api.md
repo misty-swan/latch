@@ -1,9 +1,9 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.8
+- 文書バージョン: v0.9
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.8更新: 2026-10-19)
+- 作成日: 2026-10-17(v0.9更新: 2026-10-20)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
@@ -11,7 +11,8 @@
 - v0.6の変更点: 03(UX仕様書)の不作成裁定(00 §1の決定記録)に伴い、D-B-03(proposal表示項目のUI選択)の確定タイミングをF2'着手時(prototype/基準)に変更。前提文書欄の版数を更新
 - v0.7の変更点: プロトタイプREADME §7のオーナー裁定(2026-10-19)に伴い、退会後の表示名を終了の原因を問わず「つながっていた相手」に統一(01 §10の規定どおり・§2.5)。D-B-03(proposal表示項目)を解消し§4に決定記録を追加。前提文書欄の版数を更新
 - v0.8の変更点: 前提文書欄の版数同期(F2'実装に伴う04改版への追従)。内容の変更はない
-- 前提文書: 01 要件定義書 v0.10 / 02 スコープ・受け入れ条件合意書 v0.4 / 04 アーキテクチャ設計書 v0.9
+- v0.9の変更点: F3実装に伴い§2.2のintentsへdelayed_reeval_at列(つながりIntentの1回きり遅延再評価の実行済みマーカー)を追記し、§2.3へVectorizeのローカル代替(LATCH_ENV=localはインメモリ実装)を追記。§2.5へIntent削除時はベクトル削除を先に行い失敗時は500で中断する実行順序を追記。§3.3へdev専用観測API(GET /v1/dev/match-events・match-candidates)の応答形状を追記。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.10 / 02 スコープ・受け入れ条件合意書 v0.4 / 04 アーキテクチャ設計書 v0.10
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -107,6 +108,7 @@ expires_at:         datetime  # つながり=既定30日(7/30/90選択)/機会=�
 embedding_model:    string | null   # 埋め込み済みモデル識別子(01 §18)
 embedded_at:        datetime | null
 last_evaluated_at:  datetime | null  # 30分再評価抑制(§2.6)
+delayed_reeval_at:  datetime | null  # つながりIntentの1回きり遅延再評価(06 §2の(h))の実行済みマーカー(実行時に刻印)
 vector_deleted_at:  datetime | null  # ベクトル削除実行記録(§2.6の2窓走査用)
 created_at / updated_at
 ```
@@ -229,7 +231,7 @@ created_at / updated_at
 
 ### 2.3 Vectorize・KV・R2
 
-**Vectorizeインデックス**(1本): vector id = intent ULID。metadata = `{form, status, category, user_id}`(インデックス作成時にmetadata indexとしてform・status・categoryを宣言する。07 §1)。検索時のfilterで form一致・status=active を最適化として適用し(01 §12)、取り出し後は**D1の現行status・blocks・提案履歴をコードで再検証する**(metadataの同期遅延に依存しない二重化)。Intentの遷移(pause/resume/matched/expired)ごとにmetadataのstatusを更新し、失敗はCronバックフィルで回収する。照合時にD1行が存在しないベクトルはfail-closeで除外する。次元=1024・距離=cosine(07 v0.1で確定)。削除: Intent削除・期限切れ+7日でベクトル削除(§2.6)。
+**Vectorizeインデックス**(1本): vector id = intent ULID。metadata = `{form, status, category, user_id}`(インデックス作成時にmetadata indexとしてform・status・categoryを宣言する。07 §1)。検索時のfilterで form一致・status=active を最適化として適用し(01 §12)、取り出し後は**D1の現行status・blocks・提案履歴をコードで再検証する**(metadataの同期遅延に依存しない二重化)。Intentの遷移(pause/resume/matched/expired)ごとにmetadataのstatusを更新し、失敗はCronバックフィルで回収する。照合時にD1行が存在しないベクトルはfail-closeで除外する。次元=1024・距離=cosine(07 v0.1で確定)。削除: Intent削除・期限切れ+7日でベクトル削除(§2.6)。**ローカル代替(F3実装確定)。** Vectorizeにはローカルシミュレータが存在しないため、LATCH_ENV=local(単体・統合試験・wrangler dev・E2E)では同一インタフェースのインメモリ実装(コサイン距離・metadata filter込み・04 §4のVectorStore抽象)へ置き換える。staging/prodはVectorize実装を使う。
 
 **KV**: `revocation:{jti}` = 1(TTL=JWT残り寿命)。失効はJWT残寿命(最大1時間)以内の効力とし、権限が関わる操作(チャット送信・回答・退会)はD1のusers.statusとblocksを必ず再検証して補完する。WebSocket接続チケットはKVに置かず、**joseで署名した短期トークン(exp=60秒・user_id/latch_idクレーム)** を使う(結果整合の伝播遅延を回避。§3.4)。回転猶予: `rfg:{旧リフレッシュトークンハッシュ}` = 現行リフレッシュトークン(TTL 120秒・取得後に削除で使い切り。窓外の再提示は再利用検出として族をrevoked。04 §4)。猶予窓内の旧トークン再提示でKVエントリが見えない場合は結果整合の競合の可能性があるため族は失効させず401のみ(窓外のみ再利用検出として族revoked)。KVは結果整合のため猶予エントリの並行取得は理論上可能であり、猶予の「1回に限り」はベストエフォートとする
 
@@ -268,6 +270,8 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 | push_subscriptions / refresh_families | — | 削除・失効(発行済みJWTのjtiをKV失効リストへ登録) |
 | R2アイコン | — | icon_key解除+R2オブジェクト削除 |
 | users行 | — | status=deleted + 表示名/プロフィール/アイコンを消去 |
+
+**Intent削除の実行順序(F3実装確定)。** Vectorizeの該当ベクトルの削除を先に実行し、これが失敗した場合はD1に触れず500 INTERNALで中断する(クライアントの再試行で完結する)。この順序により「Intent行が消えたならベクトルも消えている」ことが保証され、検索可能な孤立ベクトルが残らない。ベクトルの削除は期限+7日の遅延ではなく**無条件の即時削除**である。
 
 ### 2.6 保持期間・定期削除(Cron・04 §4)
 
@@ -370,6 +374,8 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 **POST /v1/latches/{id}/response** — 状態遷移後のlatch。全員YESで matched + チャット解放対象となり、双方の詳細情報(表示名・アイコン・プロフィール)が以降のGETに含まれる(01 §8)。
 
 **回答と取り消しの状態遷移。** defer=[今回は見送る]は提案を即時にrejectedで閉じる(proposal_historyのoutcomeはdeferred)。no=API契約経由の明示の拒否(同rejected・outcome=rejectedで恒久排除)。retract(回答取り消し)は回答期限内・未成立のみ可とし、partial_accept→proposedへ復帰する(双方YES成立後は不可。離脱はleaveを使う)。leave(参加取り消し)はmatchedのLATCHをcancelledとし、チャットを双方読み取り専用にする(02 D-08)。グループで必要人数の下限を割った場合もLATCH全体をcancelledとする。
+
+**dev専用観測API(F3実装確定・テスト専用)** — GET /v1/dev/match-events・GET /v1/dev/match-candidates。worker E2Eがゲートの合格証拠(match_eventsの計測payload・match_candidatesの生成記録)を観測するためのdev専用API。クエリはintent_id(必須・ULID形式外は400)・limit=1..50既定20・cursor(§3.1と同一の不透明cursor)。応答は`{items, next_cursor}`(id降順)で、itemsはmatch_events行=id / event_type / source_intent_id / version / status / payload / created_at / processed_at・match_candidates行=id / intent_a_id / intent_b_id / intent_a_version / intent_b_version / form / retrieval_score / cheap_judge_score / status / created_at / updated_at(テーブル列の範囲のみ・jev_result等の内部列は含めない)。起点Intentとの一致条件はmatch_events=source_intent_id・match_candidates=intent_a_idかintent_b_idのいずれか。所有者に限定しない(候補は2ユーザーのIntentで構成されるため・観測の実行は認証済みユーザーが行う)。存在隠しはPOST /v1/dev/idp-token(04 §4)と同一条件(prod・テスト鍵2変数のいずれか未設定は認証・クエリ検証より先に一律404・理由は区別しない)。
 
 ### 3.4 WebSocket(リアルタイムチャット)
 

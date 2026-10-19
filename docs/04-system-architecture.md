@@ -1,9 +1,9 @@
 # LATCH アーキテクチャ設計書
 
-- 文書バージョン: v0.9
+- 文書バージョン: v0.10
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.9更新: 2026-10-19)
+- 作成日: 2026-10-17(v0.10更新: 2026-10-20)
 - v0.2の変更点: §3を全面改訂し、スタックを「バックエンド・フロントエンドの構成部品」(DBアクセス・マイグレーション・入力検証・プッシュ実装・フォーム等)まで確定した。D-A-06(Biome)を解消し、D-A-07(スタイリング=03で確定)を新設した
 - v0.3の変更点: 07(LLM利用仕様書)の策定に伴いD-A-01(Embedding)を解消した(Workers AI bge-m3・1024次元・cosine)。R2(ユーザーアイコン)をスタックへ追加した
 - v0.4の変更点: 本書が単体で完結するよう記述を整理した(変更の経緯はgit履歴を参照)
@@ -12,6 +12,7 @@
 - v0.7の変更点: 03(UX仕様書)の不作成裁定(00 §1の決定記録)に伴い、D-A-07(スタイリング手法)の確定タイミングをF2'着手時(本書で技術選定として確定)に変更。値の源は`prototype/project/latch.css`。前提文書欄の版数を更新
 - v0.8の変更点: プロトタイプREADME §7のオーナー裁定(2026-10-19)に伴いD-A-07(スタイリング手法)を解消した(バニラCSS(グローバル)採用・決定記録)。§3.2・§9を更新。前提文書欄の版数を更新
 - v0.9の変更点: F2'(フロント基盤)実装に伴い§4へdev専用サインイン(POST /v1/dev/idp-token)とWorkers Assets同一オリジン配信の実装確定を追記し、§3.2に稼働状況と移植運用を追記した。前提文書欄の変更はない
+- v0.10の変更点: F3実装に伴い§4へVectorStore抽象(LATCH_ENV=localはインメモリ実装・staging/prodはVectorizeラップ)・Analytics Engine束縛(PIPELINE_AX・dataset=latch_metrics)・DLQのdead反映consumerの実装確定を追記。前提文書欄の変更はない
 - 前提文書: 01 要件定義書 v0.10 / 02 スコープ・受け入れ条件合意書 v0.4
 - 本書の位置づけ: 01第19節の技術スタック選定を確定させる文書。UIの正本は`prototype/`(03は不作成)。スタイリング手法(D-A-07)はバニラCSS(グローバル)に確定済み(§3.2・決定記録(2026-10-19))
 
@@ -145,6 +146,8 @@
 **フロント配信(Workers Assets・F2'実装確定)。** SPAの静的資産はWorkers Assetsが同一オリジンで配信する(assets directory= `pnpm --filter web build` の生成物apps/web/dist)。未一致のパスはindex.htmlへ倒すSPAフォールバック(not_found_handling=single-page-application)とする。/v1/*と/healthzはrun_worker_firstで必ずWorkerが先に処理する。AssetsはGET/HEAD以外のメソッドをWorkerへ迂回させないため、APIのPOST/PUT/DELETEを届かせるにはこの指定が必須であり、/healthzも含めてヘルスチェックがSPAフォールバックのindex.htmlで代替応答されないようにする。
 
 **イベント駆動(01 §16の実装)。** Intentの作成はapi出口で即時にQueuesへ送信(第1段=Embedding要求。draft→active化も即時とし、初回提案のレイテンシを守る)。Embedding完了時に派生イベント(embedding_completed)を再送し(第2段=Layer 1〜5)。**更新のみ**10秒の遅延配信とし、消費側で現行versionと突き合わせて古ければ破棄する(idempotency。match_eventsのUNIQUE制約が二重投入も許さない)。失敗は再試行上限(max_retries=3初期値)ののちDLQへ隔離し、DLQを見る最小のconsumerがmatch_eventsのstatusをdeadへ反映して警報する。誤った提案より提示の見送りを優先する方針である。deadの再処理は、UNIQUE衝突を避けるため新規イベントとして再発行する(手動)。
+
+**VectorStore抽象と観測束縛(F3実装確定)。** Vectorizeにはローカルシミュレータが存在しないため、VectorStoreインタフェース(upsert/query/delete)の背後に2実装を置く。LATCH_ENV=local(単体・統合試験・wrangler dev・E2E)はコサイン距離・metadata filter込みのインメモリ実装、staging/prodはenv.VECTORS(Vectorize)のラップ実装であり、選択はLATCH_ENVで行う(05 §2.3)。パイプラインの計測はAnalytics EngineバインディングPIPELINE_AX(dataset=latch_metrics)へ層通過のdata pointをイベント単位で書く(06 §7・バインド未設定の環境では送信を省略)。DLQを見る最小のconsumer(match_eventsへのdead反映・警報)は第1段の消費と同一Workerに実装済みである。
 
 **Cron(毎分)。** (a)機会Intentの時間Bucket到来の再評価と期限前catch-up走査(01 §16)、(b)全Intentの期限切れバッチ、(c)つながりLATCHのチャット非活動90日判定(completed)、(d)Jev予算の80%到達検知とアラート。毎分1回のCron Trigger内で走査対象をインデックス(status・starts_at・expires_at)で最小化する。
 
