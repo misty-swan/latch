@@ -33,6 +33,18 @@ describe("assertEnvSafety(docs/04 §4・docs/10 §2: prodテスト鍵起動ガ�
 		).toThrow("ENV_UNSAFE_TEST_KEY");
 	});
 
+	it("prodでdevサインイン用秘密鍵(LATCH_TEST_IDP_PRIVATE_JWKS)が残存すると例外(F2' Task 2の二重防御)", () => {
+		expect(() =>
+			assertEnvSafety(
+				makeEnv({
+					LATCH_ENV: "production",
+					JWT_SECRET: SECRET_32,
+					LATCH_TEST_IDP_PRIVATE_JWKS: "{}",
+				}),
+			),
+		).toThrow("ENV_UNSAFE_TEST_KEY");
+	});
+
 	it("prodでJWT_SECRET未設定は例外", () => {
 		expect(() => assertEnvSafety(makeEnv({ LATCH_ENV: "production" }))).toThrow(
 			"ENV_UNSAFE_JWT_SECRET",

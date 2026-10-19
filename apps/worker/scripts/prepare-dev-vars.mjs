@@ -6,6 +6,9 @@
  * - LATCH_TEST_IDP_JWKS: コミット済みテスト鍵の公開JWKS(tests/fixtures)を1行JSON化。
  *   prodではassertEnvSafetyが同じ変数の設定自体を拒否するため、コミット済み鍵が
  *   本番で使われることはない(docs/10 §2)
+ * - LATCH_TEST_IDP_PRIVATE_JWKS: 同じくコミット済みテスト鍵の秘密JWKを1行JSON化
+ *   (F2'計画Task 2)。devサインイン(POST /v1/dev/idp-token)のRS256署名に使い、
+ *   prodではassertEnvSafetyが設定自体を拒否する(起動ガードと404の二重防御)
  * 生成は決定的(同じ入力から常に同じ内容)で、実行のたびに上書きする。
  * .dev.varsはgitignore済みの生成物として扱う
  */
@@ -17,14 +20,18 @@ import { fileURLToPath } from "node:url";
 /** apps/worker(このスクリプトの1つ上) */
 const workerDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-/** 公開JWKSを1行JSONへ整えて読む(キー順は元ファイルのまま=決定的) */
-const jwksOneLine = JSON.stringify(
-	JSON.parse(
-		readFileSync(
-			path.join(workerDir, "tests/fixtures/test-idp-jwks.json"),
-			"utf8",
-		),
-	),
+/** JSON文字列を1行へ整える(キー順は元ファイルのまま=決定的) */
+const oneLineJson = (file) =>
+	JSON.stringify(JSON.parse(readFileSync(file, "utf8")));
+
+/** 公開JWKS(tests/fixtures) */
+const jwksOneLine = oneLineJson(
+	path.join(workerDir, "tests/fixtures/test-idp-jwks.json"),
+);
+
+/** 秘密JWK(tests/fixtures・devサインインの署名鍵) */
+const privateJwkOneLine = oneLineJson(
+	path.join(workerDir, "tests/fixtures/test-idp-private.jwk"),
 );
 
 /** E2E専用の固定JWT署名鍵(32字以上・docs/10 §1の開発/テスト専用値) */
@@ -38,6 +45,7 @@ if (devJwtSecret.length < 32) {
 const content = [
 	`JWT_SECRET=${devJwtSecret}`,
 	`LATCH_TEST_IDP_JWKS='${jwksOneLine}'`,
+	`LATCH_TEST_IDP_PRIVATE_JWKS='${privateJwkOneLine}'`,
 	"",
 ].join("\n");
 

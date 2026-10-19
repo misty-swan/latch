@@ -22,6 +22,13 @@ export interface Env {
 	LATCH_ENV: string;
 	JWT_SECRET?: string;
 	LATCH_TEST_IDP_JWKS?: string;
+	/**
+	 * dev専用サインイン(POST /v1/dev/idp-token)のRS256署名鍵
+	 * (fixturesの秘密JWKのJSON文字列・F2'計画Task 2)。prepare-dev-vars.mjsが
+	 * .dev.varsへ生成し、ローカル/CI/E2Eのみに存在する。prodではassertEnvSafetyが
+	 * 設定自体を拒否する(docs/10 §2)
+	 */
+	LATCH_TEST_IDP_PRIVATE_JWKS?: string;
 	GOOGLE_CLIENT_ID?: string;
 	APPLE_CLIENT_ID?: string;
 }
@@ -44,7 +51,8 @@ export const jwtSecret = (env: Env): string => {
 
 /**
  * prod起動ガード(docs/04 §4・docs/10 §2)。fetchの先頭で呼ぶことを想定する。
- * - prodでテスト鍵(LATCH_TEST_IDP_JWKS)が残存 → 例外(テスト鍵でprodを起動させない)
+ * - prodでテスト鍵(LATCH_TEST_IDP_JWKS・LATCH_TEST_IDP_PRIVATE_JWKS)が残存 →
+ *   例外(テスト鍵でprodを起動させない。秘密鍵はdevサインイン用のF2'計画Task 2)
  * - prodでJWT_SECRETが未設定・32字未満 → 例外
  * prod以外(LATCH_ENVがproduction以外)は何もしない
  */
@@ -55,6 +63,11 @@ export const assertEnvSafety = (env: Env): void => {
 	if (env.LATCH_TEST_IDP_JWKS !== undefined) {
 		throw new Error(
 			"ENV_UNSAFE_TEST_KEY: prod環境でテスト鍵(LATCH_TEST_IDP_JWKS)が設定されている(docs/10 §2)",
+		);
+	}
+	if (env.LATCH_TEST_IDP_PRIVATE_JWKS !== undefined) {
+		throw new Error(
+			"ENV_UNSAFE_TEST_KEY: prod環境でテスト鍵(LATCH_TEST_IDP_PRIVATE_JWKS)が設定されている(docs/10 §2)",
 		);
 	}
 	if (env.JWT_SECRET === undefined || env.JWT_SECRET.length < 32) {

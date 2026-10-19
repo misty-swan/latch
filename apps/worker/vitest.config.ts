@@ -19,6 +19,12 @@ export default defineConfig(async () => {
 		path.join(import.meta.dirname, "tests/fixtures/test-idp-jwks.json"),
 		"utf8",
 	);
+	// テスト専用IdPの秘密JWK(devサインインPOST /v1/dev/idp-tokenが署名に使う・
+	// F2'計画Task 2)。統合試験がdev/idp-token→auth/tokenの連結を検証できるようにする
+	const testIdpPrivateJwk = fs.readFileSync(
+		path.join(import.meta.dirname, "tests/fixtures/test-idp-private.jwk"),
+		"utf8",
+	);
 
 	return {
 		plugins: [
@@ -34,6 +40,7 @@ export default defineConfig(async () => {
 						// JWT署名鍵(docs/10 §1: テスト用の値)
 						JWT_SECRET: "unit-test-jwt-secret-0123456789ab",
 						LATCH_TEST_IDP_JWKS: testIdpJwks,
+						LATCH_TEST_IDP_PRIVATE_JWKS: testIdpPrivateJwk,
 					},
 				},
 			}),

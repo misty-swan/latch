@@ -4,6 +4,7 @@ import { ChatRoomDO } from "./do/chat";
 import { assertEnvSafety, type Env } from "./env";
 import { internalOnError } from "./http/errors";
 import { authRoutes } from "./routes/auth";
+import { devRoutes } from "./routes/dev";
 import { iconRoutes } from "./routes/icons";
 import { intentRoutes } from "./routes/intents";
 import { userRoutes } from "./routes/users";
@@ -26,6 +27,9 @@ app.route("/v1/users", iconRoutes);
 // Intent API(構造化プレビュー・作成・一覧・取得・更新・削除・docs/05 §3.2)。
 // pause/resumeは後続タスクでintentRoutesに追加する
 app.route("/v1/intents", intentRoutes);
+// dev専用サインインAPI(POST /v1/dev/idp-token・F2'計画Task 2)。テスト鍵モードの
+// ローカル/CI/E2Eでのみ存在し、prodでは404+起動ガードの二重防御(docs/10 §2)
+app.route("/v1/dev", devRoutes);
 
 // prod起動ガードはisolateごとに1回だけ(docs/04 §4・docs/10 §2)。
 // Workersに起動フックはないため、モジュール変数フラグでfetchの先頭から1回だけ呼ぶ

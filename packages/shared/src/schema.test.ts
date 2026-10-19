@@ -8,6 +8,7 @@ import {
 	categorySchema,
 	constraintsSchema,
 	createIntentRequestSchema,
+	devIdpTokenRequestSchema,
 	intentDtoSchema,
 	intentFormSchema,
 	isoDateTimeSchema,
@@ -98,6 +99,30 @@ describe("logoutRequestSchema", () => {
 		expect(logoutRequestSchema.safeParse({ refresh_token: "" }).success).toBe(
 			false,
 		);
+	});
+});
+
+describe("devIdpTokenRequestSchema(F2' Task 2: dev専用サインイン)", () => {
+	it("1字以上64字以下のsubjectを受理する", () => {
+		expect(devIdpTokenRequestSchema.safeParse({ subject: "a" }).success).toBe(
+			true,
+		);
+		expect(
+			devIdpTokenRequestSchema.safeParse({ subject: "a".repeat(64) }).success,
+		).toBe(true);
+	});
+
+	it("空文字・65字以上・非文字列のsubjectを拒否する", () => {
+		expect(devIdpTokenRequestSchema.safeParse({ subject: "" }).success).toBe(
+			false,
+		);
+		expect(
+			devIdpTokenRequestSchema.safeParse({ subject: "a".repeat(65) }).success,
+		).toBe(false);
+		expect(devIdpTokenRequestSchema.safeParse({ subject: 1 }).success).toBe(
+			false,
+		);
+		expect(devIdpTokenRequestSchema.safeParse({}).success).toBe(false);
 	});
 });
 

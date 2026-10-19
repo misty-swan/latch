@@ -8,6 +8,17 @@
 		"enabled": true
 	},
 
+	// フロントエンド配信(Workers Assets・F2'計画Task 2)。/v1/*は必ずWorkerが先に
+	// 処理し、それ以外のパスはapps/web/distをSPAとして配信(未一致はindex.htmlへ倒す)。
+	// run_worker_firstが無いとassets側が/v1/*へのPOSTに405を返す(assetsは
+	// GET/HEAD以外をWorkerへ迂回させないため必須)。
+	// distは `pnpm --filter web build` の生成物(E2E/デプロイ前にビルドする)
+	"assets": {
+		"directory": "../web/dist",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": ["/v1/*"]
+	},
+
 	// D1(リレーショナルDB・docs/04 §2)
 	"d1_databases": [
 		{

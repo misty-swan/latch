@@ -39,6 +39,16 @@ export const logoutRequestSchema = z.object({
 });
 
 /**
+ * POST /v1/dev/idp-token のリクエスト(開発/テスト専用サインイン・F2'計画Task 2)。
+ * テスト鍵(docs/04 §4)で署名したIdPトークンを返すdev専用エンドポイントで、
+ * prodでは404+起動ガードで二重に拒否される(docs/10 §2)。製品API(docs/05 §3.2)には
+ * 存在しないためwebはimport.meta.env.DEVでのみ呼ぶ
+ */
+export const devIdpTokenRequestSchema = z.object({
+	subject: z.string().min(1).max(64),
+});
+
+/**
  * 生年月日('YYYY-MM-DD'書式+実在日付)。
  * 正規表現で書式を固定してからDateの往復一致で実在性を見る
  * (2026-02-30等の不在日を拒否し、うるう年のみ正当な2/29を通す)。
