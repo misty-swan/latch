@@ -65,7 +65,8 @@ const readJsonBody = async (c: Context<AppEnv>): Promise<unknown> => {
 };
 
 devRoutes.post("/idp-token", async (c) => {
-	// 存在を隠す検査をボディ検証より先に行う(存在しないルートと同じ振る舞いに見せる)。
+	// 存在を隠す検査をボディ検証より先に行う(存在しないルートと同じステータス(404)に
+	// 見せる。ボディ検証の400を出さないことで、ルートの存在を確かめさせない)。
 	// 公開JWKSの未設定も404に含める(署名できても検証できない構成では入口として無意味)
 	if (
 		c.env.LATCH_ENV === "production" ||

@@ -19,6 +19,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      # worker E2Eの前にwebのビルド生成物(apps/web/dist)を用意する。
+      # wrangler.jsoncのassets.directory=../web/distが存在しないとwrangler devが起動しない
+      - run: pnpm --filter web build
       # F1ゲート: 認証E2E・テスト鍵起動ガード
       - run: pnpm --filter worker test:e2e
       # staging自動デプロイはCloudflareトークン手配時に追加(docs/04 §6)
