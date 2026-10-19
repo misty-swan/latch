@@ -63,6 +63,7 @@ import { createLlm } from "../llm/mode";
 import { createLogger } from "../logging/logger";
 import { emitMatchEvent } from "../pipeline/events";
 import { createVectorStore } from "../vectorstore";
+import { syncVectorStatus } from "../vectorstore/sync-status";
 
 /** 構造化ロガー(docs/08 §6: 許可フィールドのみ)。raw_text・topic・座標は決して出力しない */
 const logger = createLogger();
@@ -266,41 +267,8 @@ const intentMeaningChanged = (
 	JSON.stringify(updated.negativeConstraints) !==
 		JSON.stringify(row.negativeConstraints);
 
-/**
- * Vectorizeのmetadata.statusを同期する(docs/06 §2「pauseはVectorize metadataの
- * statusを即時更新して新規候補化を停止する」)。既存ベクトルをgetByIdsで取得し、
- * 同じvaluesでmetadata.statusだけを書き替えてupsertする(再埋め込みはしない)。
- * ベクトルが無い(埋め込み未実施・削除済み)場合は何もしない。
- * 同期はベストエフォートで、失敗しても呼び出し元(pause/resume)の応答は成功のまま
- * (06 §2「metadata更新の失敗はCronのバックフィルで回収する」)。
- * 失敗時はwarnログのみ(許可フィールド: intent_id・status・error_code・docs/08 §6)
- */
-const syncVectorStatus = async (
-	env: Env,
-	intentId: string,
-	status: "active" | "paused",
-): Promise<void> => {
-	try {
-		const store = createVectorStore(env);
-		const [existing] = await store.getByIds([intentId]);
-		if (existing === null) {
-			return;
-		}
-		await store.upsert([
-			{
-				id: existing.id,
-				values: existing.values,
-				metadata: { ...existing.metadata, status },
-			},
-		]);
-	} catch (error) {
-		logger.warn("vector.sync.failed", {
-			intent_id: intentId,
-			status,
-			error_code: error instanceof Error ? error.name : "UNKNOWN",
-		});
-	}
-};
+// metadata.statusの同期(syncVectorStatus)はvectorstore/sync-status.tsの共通ヘルパーを使う
+// (pause/resumeとCronの期限切れ2窓走査の共用・docs/06 §2)
 
 intentRoutes.post("/parse", requireRegistered, async (c) => {
 	const parsed = parseIntentRequestSchema.safeParse(await readJsonBody(c));

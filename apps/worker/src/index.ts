@@ -6,6 +6,7 @@ import { ChatRoomDO } from "./do/chat";
 import { assertEnvSafety, type Env } from "./env";
 import { internalOnError } from "./http/errors";
 import { handleQueueBatch } from "./pipeline/consumer";
+import { runScheduledPipeline } from "./pipeline/cron";
 import { authRoutes } from "./routes/auth";
 import { devRoutes } from "./routes/dev";
 import { iconRoutes } from "./routes/icons";
@@ -65,9 +66,14 @@ export default {
 		}
 		await handleQueueBatch(batch, env, ctx, systemClock);
 	},
-	// TODO(F3で実装): Cronハンドラ(bucket走査・期限切れバッチ等)。F0では何もしない
-	scheduled: async () => {
-		// 空実装
+	// Cron(毎分・docs/04 §4・docs/06 §2)。bucket走査・catch-up・期限切れ2窓・
+	// 埋め込みバックフィル・未評価回収・遅延再評価・保持期間削除を実行する
+	scheduled: async (
+		_controller: ScheduledController,
+		env: Env,
+		_ctx: ExecutionContext,
+	): Promise<void> => {
+		await runScheduledPipeline(env, systemClock);
 	},
 };
 
