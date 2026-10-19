@@ -178,6 +178,8 @@ export const intents = sqliteTable(
 		lastEvaluatedAt: integer("last_evaluated_at", { mode: "timestamp_ms" }),
 		/** ベクトル削除実行記録(2窓走査用・docs/05 §2.6) */
 		vectorDeletedAt: integer("vector_deleted_at", { mode: "timestamp_ms" }),
+		/** active化後10分の1回きり遅延再評価の実行済み記録(docs/06 §2(h)) */
+		delayedReevalAt: integer("delayed_reeval_at", { mode: "timestamp_ms" }),
 		createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 		updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 	},

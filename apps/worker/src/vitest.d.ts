@@ -5,3 +5,9 @@ declare module "*.jwk?raw" {
 	const value: string;
 	export default value;
 }
+
+// テストが戻しマイグレーションSQLをviteの?rawで文字列として読むための宣言
+declare module "*.sql?raw" {
+	const value: string;
+	export default value;
+}

@@ -1,10 +1,27 @@
 import { env } from "cloudflare:test";
 import { expect, it } from "vitest";
+import rollback0002Sql from "../migrations_rollback/0002_rollback.sql?raw";
 
 /**
  * マイグレーション適用結果の検証。
  * テーブル集合の正本は docs/05 §2.1(23テーブル)・§2.2(定義)・§2.4(索引)。
  */
+
+/**
+ * SQL文字列を実行文の配列に分解する。
+ * D1のexec()は行単位で文を解釈するためコメント行があると落ちる。
+ * そこでコメント行を除いた上でセミコロンで分割し、prepare().run()で1文ずつ適用する。
+ */
+function toStatements(sql: string): string[] {
+	const withoutComments = sql
+		.split("\n")
+		.filter((line) => !line.trimStart().startsWith("--"))
+		.join("\n");
+	return withoutComments
+		.split(";")
+		.map((statement) => statement.trim())
+		.filter((statement) => statement.length > 0);
+}
 
 /** docs/05 §2.1の23テーブル */
 const TABLES = [
@@ -100,4 +117,34 @@ it("refresh_families に previous_hash 列と current_hash UNIQUE索引がある
 	).toBeDefined();
 	expect(index?.sql, "current_hash を含むこと").toContain("current_hash");
 	expect(index?.sql, "UNIQUE索引であること").toContain("UNIQUE");
+});
+
+it("intents に delayed_reeval_at 列がある(active化後10分の1回きり遅延再評価の実行済みマーカー・docs/06 §2(h))", async () => {
+	// 列の存在(PRAGMAのテーブル名はバインドできないためリテラルで指定)
+	const columns = await env.DB.prepare("PRAGMA table_info(intents)").all<{
+		name: string;
+		type: string;
+		notnull: number;
+	}>();
+	const column = columns.results.find(
+		(column) => column.name === "delayed_reeval_at",
+	);
+	expect(column, "delayed_reeval_at 列が存在すること").toBeDefined();
+	expect(
+		column?.type.toLowerCase(),
+		"timestamp_ms(integer)型であること(PRAGMAは型名を大文字で返す)",
+	).toBe("integer");
+	expect(column?.notnull, "null許容(未実行はnull)であること").toBe(0);
+});
+
+it("戻しマイグレーション適用で intents の delayed_reeval_at 列が消える(docs/11 §3の対マイグレーション)", async () => {
+	for (const statement of toStatements(rollback0002Sql)) {
+		await env.DB.prepare(statement).run();
+	}
+
+	const columns = await env.DB.prepare("PRAGMA table_info(intents)").all<{
+		name: string;
+	}>();
+	const columnNames = columns.results.map((column) => column.name);
+	expect(columnNames).not.toContain("delayed_reeval_at");
 });

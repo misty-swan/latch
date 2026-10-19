@@ -1,0 +1,1 @@
+ALTER TABLE `intents` ADD `delayed_reeval_at` integer;
