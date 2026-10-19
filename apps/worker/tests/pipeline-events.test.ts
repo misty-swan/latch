@@ -349,6 +349,48 @@ describe("POST /v1/intentsのイベント発行(docs/06 §2: 作成は即時投�
 		expect(rows).toHaveLength(1);
 		expect(rows[0].eventType).toBe("intent_created");
 	});
+
+	it("activeのparticipants_includes_owner変更のみでもintent_updatedを発行する(遅延10秒)", async () => {
+		const accessToken = await registerUser("emit-includes-owner");
+		const sendSpy = spySend();
+		// 作成直後のparticipantsは{min:2, max:2, includes_owner:true}(docs/05 §3.2)。
+		// min/maxは変えずincludes_ownerだけを切り替えて発行条件を単独で検証する
+		const created = await createActiveConnection(
+			accessToken,
+			"募集形を変える学習仲間",
+		);
+		expect(created.participants).toEqual({
+			min: 2,
+			max: 2,
+			includes_owner: true,
+		});
+		await vi.waitUntil(() => sendSpy.mock.calls.length >= 1, WAIT);
+		const res = await patchJson(
+			`/v1/intents/${created.id}`,
+			{ participants: { min: 2, max: 2, includes_owner: false } },
+			accessToken,
+		);
+		expect(res.status).toBe(200);
+		const updated = (await res.json()) as IntentDTO;
+		expect(updated.version).toBe(2);
+		expect(updated.participants).toEqual({
+			min: 2,
+			max: 2,
+			includes_owner: false,
+		});
+		await vi.waitUntil(() => sendSpy.mock.calls.length >= 2, WAIT);
+		const rows = await eventsOfType(created.id, "intent_updated");
+		expect(rows).toHaveLength(1);
+		const row = rows[0];
+		// versionは更新後の値
+		expect(row.version).toBe(2);
+		expect(row.status).toBe("pending");
+		// sendは遅延10秒(docs/06 §2: 更新のみ10秒の遅延配信)
+		expect(sendSpy.mock.calls[1][0]).toEqual({ event_id: row.id });
+		expect(sendSpy.mock.calls[1][1]).toEqual({
+			delaySeconds: PIPELINE.UPDATE_EVENT_DELAY_SECONDS,
+		});
+	});
 });
 
 describe("POST /v1/intents/{id}/pause・resumeのイベント発行(docs/06 §2)", () => {

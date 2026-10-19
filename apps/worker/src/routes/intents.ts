@@ -228,10 +228,11 @@ export const toIntentDto = (row: typeof intents.$inferSelect): IntentDTO => ({
 /**
  * active更新での意味フィールド変更判定(docs/06 §2のintent_updated発行条件)。
  * 更新前の行(row)と更新後の行(updated)を比較し、topic・time(starts_at/ends_atの
- * エポックms)・geo(lat/lng/radiusの3値)・participants(min/max)・budget(min/max)・
- * constraints 3種(JSON文字列比較)のいずれかが変わったときtrue。
- * notification_level・participants_includes_owner・currency等の表示・補助設定の
- * 変更は再評価の起点にしないため発行条件に含めない
+ * エポックms)・geo(lat/lng/radiusの3値)・participants(min/max/includes_owner)・
+ * budget(min/max)・constraints 3種(JSON文字列比較)のいずれかが変わったときtrue。
+ * participantsはdocs/05 §3.2の可変フィールドどおりincludes_owner込み
+ * (正規化テキストの「募集2〜4人」表記に反映されるため)。notification_level・
+ * currency等の表示・補助設定の変更は再評価の起点にしないため発行条件に含めない
  */
 const intentMeaningChanged = (
 	row: typeof intents.$inferSelect,
@@ -245,6 +246,7 @@ const intentMeaningChanged = (
 	updated.geoRadiusM !== row.geoRadiusM ||
 	updated.participantsMin !== row.participantsMin ||
 	updated.participantsMax !== row.participantsMax ||
+	updated.participantsIncludesOwner !== row.participantsIncludesOwner ||
 	updated.budgetMin !== row.budgetMin ||
 	updated.budgetMax !== row.budgetMax ||
 	JSON.stringify(updated.hardConstraints) !==
