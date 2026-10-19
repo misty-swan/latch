@@ -18,6 +18,8 @@ export interface Env {
 	DB: D1Database;
 	REVOCATION_KV: KVNamespace;
 	ICONS: R2Bucket;
+	/** Layer 2 Candidate Retrieval用ベクトルインデックス(docs/05 §2.3・docs/07 §1)。localでは使わずインメモリ実装へ倒す(vectorstore/index.ts) */
+	VECTORS: VectorizeIndex;
 	LATCH_LLM_MODE: string;
 	LATCH_ENV: string;
 	JWT_SECRET?: string;
