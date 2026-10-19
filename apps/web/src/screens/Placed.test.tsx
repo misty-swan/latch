@@ -19,6 +19,7 @@ import { authSession } from "../auth/session";
 import { readComposeState, saveComposeState } from "../intents/composeState";
 import { appRoutes } from "../router";
 import { PATHS } from "../routes/paths";
+import { withQueryClient } from "../test/helpers";
 
 const WORDS =
 	"イラストを描く人と、月1くらいで雑に絵を見せ合える関係になれたら嬉しい。初心者です。";
@@ -36,13 +37,24 @@ const parse = {
 	warnings: [],
 } satisfies ParseIntentResponse;
 
+/** 着地するhome一覧(Task 6)は空で返す(fetchの実体は使わない) */
+const fetchMock = vi.fn(
+	async (): Promise<Response> =>
+		new Response(JSON.stringify({ items: [], next_cursor: null }), {
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+		}),
+);
+
 const setup = (path: string = PATHS.placed) => {
 	const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
-	const utils = render(<RouterProvider router={router} />);
+	const utils = render(withQueryClient(<RouterProvider router={router} />));
 	return { router, container: utils.container };
 };
 
 beforeEach(() => {
+	vi.stubGlobal("fetch", fetchMock);
+	fetchMock.mockClear();
 	localStorage.clear();
 	sessionStorage.clear();
 	authSession.clear();
@@ -53,6 +65,7 @@ beforeEach(() => {
 afterEach(() => {
 	cleanup();
 	vi.useRealTimers();
+	vi.unstubAllGlobals();
 	authSession.clear();
 	localStorage.clear();
 	sessionStorage.clear();

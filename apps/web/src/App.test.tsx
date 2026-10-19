@@ -1,13 +1,28 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { createMemoryRouter } from "react-router";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { authSession } from "./auth/session";
 import { appRoutes } from "./router";
 import { PATHS } from "./routes/paths";
 
+/** homeの一覧取得(Task 6)は空で返す(未認証試験では呼ばれない) */
+const fetchMock = vi.fn(
+	async (): Promise<Response> =>
+		new Response(JSON.stringify({ items: [], next_cursor: null }), {
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+		}),
+);
+
+beforeEach(() => {
+	vi.stubGlobal("fetch", fetchMock);
+	fetchMock.mockClear();
+});
+
 afterEach(() => {
 	cleanup();
+	vi.unstubAllGlobals();
 	authSession.clear();
 	localStorage.clear();
 });
@@ -46,7 +61,7 @@ describe("App", () => {
 		expect(router.state.location.pathname).toBe(PATHS.welcome);
 	});
 
-	it("認証済みならhomeのプレースホルダを表示する", async () => {
+	it("認証済みならhome(預けている)を表示する", async () => {
 		authSession.setTokens("access-1", "refresh-1");
 		const router = createMemoryRouter(appRoutes, {
 			initialEntries: [PATHS.home],
@@ -54,7 +69,12 @@ describe("App", () => {
 
 		render(<App router={router} />);
 
-		expect(await screen.findByText("home")).toBeTruthy();
+		// 一覧は空(空状態)で・homeに留まる
+		expect(
+			await screen.findByRole("heading", {
+				name: "まだ、何も置いていません。",
+			}),
+		).toBeTruthy();
 		expect(router.state.location.pathname).toBe(PATHS.home);
 	});
 });

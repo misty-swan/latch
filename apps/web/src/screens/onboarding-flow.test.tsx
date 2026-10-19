@@ -45,6 +45,10 @@ const fetchMock = vi.fn(
 		if (url === "/v1/users") {
 			return usersResponse;
 		}
+		// 着地するhome一覧(Task 6)は空で返す
+		if (url === "/v1/intents?limit=50") {
+			return jsonResponse(200, { items: [], next_cursor: null });
+		}
 		throw new Error(`想定外のfetch: ${url}`);
 	},
 );
@@ -138,8 +142,12 @@ describe("はじめる画面群の一本道", () => {
 			await screen.findByRole("button", { name: "同意して進む" }),
 		);
 
-		// home(プレースホルダ)に到達する
-		expect(await screen.findByText("home")).toBeTruthy();
+		// home(空状態)に到達する
+		expect(
+			await screen.findByRole("heading", {
+				name: "まだ、何も置いていません。",
+			}),
+		).toBeTruthy();
 		expect(router.state.location.pathname).toBe("/home");
 
 		// APIの呼び出し内容(順にdev/idp-token→auth/token→users)
@@ -205,7 +213,11 @@ describe("はじめる画面群の一本道", () => {
 
 		await signinViaDev();
 
-		expect(await screen.findByText("home")).toBeTruthy();
+		expect(
+			await screen.findByRole("heading", {
+				name: "まだ、何も置いていません。",
+			}),
+		).toBeTruthy();
 		expect(router.state.location.pathname).toBe("/home");
 		expect(authSession.accessToken).toBe("access-ok");
 		// 登録APIは呼ばない

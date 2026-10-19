@@ -9,6 +9,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../auth/session";
 import { appRoutes } from "../router";
 import { PATHS } from "../routes/paths";
+import { withQueryClient } from "../test/helpers";
+
+/** 同意後の着地home一覧(Task 6)は空で返す */
+const jsonResponse = (status: number, body: unknown): Response =>
+	new Response(JSON.stringify(body), {
+		status,
+		headers: { "Content-Type": "application/json" },
+	});
+
+const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+	const url = String(input);
+	if (url === "/v1/intents?limit=50") {
+		return jsonResponse(200, { items: [], next_cursor: null });
+	}
+	throw new Error(`想定外のfetch: ${url}`);
+});
 
 /** consentは要認証ガードの内側のため・トークンを注入して置く */
 const setup = () => {
@@ -16,11 +32,13 @@ const setup = () => {
 	const router = createMemoryRouter(appRoutes, {
 		initialEntries: [PATHS.consent],
 	});
-	render(<RouterProvider router={router} />);
+	render(withQueryClient(<RouterProvider router={router} />));
 	return router;
 };
 
 beforeEach(() => {
+	vi.stubGlobal("fetch", fetchMock);
+	fetchMock.mockClear();
 	localStorage.clear();
 	authSession.clear();
 });

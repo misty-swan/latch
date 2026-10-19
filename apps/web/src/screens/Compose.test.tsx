@@ -22,6 +22,7 @@ import { authSession } from "../auth/session";
 import { readComposeState } from "../intents/composeState";
 import { appRoutes } from "../router";
 import { PATHS } from "../routes/paths";
+import { withQueryClient } from "../test/helpers";
 
 const WORDS =
 	"イラストを描く人と、月1くらいで雑に絵を見せ合える関係になれたら嬉しい。初心者です。";
@@ -96,6 +97,10 @@ const fetchMock = vi.fn(
 		if (url === `/v1/intents/${draftIntent.id}` && method === "PATCH") {
 			return patchResponse;
 		}
+		// 下書き保存などの後に着地するhome一覧(Task 6)は空で返す
+		if (url === "/v1/intents?limit=50" && method === "GET") {
+			return jsonResponse(200, { items: [], next_cursor: null });
+		}
 		throw new Error(`想定外のfetch: ${method} ${url}`);
 	},
 );
@@ -104,7 +109,7 @@ const setup = (path: string = PATHS.compose) => {
 	const router = createMemoryRouter(appRoutes, {
 		initialEntries: [path],
 	});
-	render(<RouterProvider router={router} />);
+	render(withQueryClient(<RouterProvider router={router} />));
 	return router;
 };
 
@@ -284,7 +289,13 @@ describe("Compose", () => {
 		await waitFor(() => {
 			expect(router.state.location.pathname).toBe(PATHS.home);
 		});
-		expect(fetchMock).not.toHaveBeenCalled();
+		// homeの一覧取得(limit=50)のみが走り・空欄の下書き保存はしない
+		await waitFor(() => {
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+		});
+		const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(url).toBe("/v1/intents?limit=50");
+		expect(init.method ?? "GET").toBe("GET");
 	});
 
 	it("?draft=<id>付きで開くと下書きの文章を復元し・下書きに残すはPATCHで更新する", async () => {
