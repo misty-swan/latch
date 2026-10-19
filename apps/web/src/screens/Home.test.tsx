@@ -190,6 +190,23 @@ describe("Home", () => {
 		expect(document.querySelector(".arrival")).toBeNull();
 	});
 
+	it("カードにはentranceのrise基底クラスと遅延クラスを両方付ける(ボードどおり)", async () => {
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent, occasionIntent, draftIntent],
+			next_cursor: null,
+		});
+		setup();
+
+		await screen.findByText(connectionIntent.raw_text);
+		const cards = document.querySelectorAll(".intent");
+		expect(cards.length).toBe(3);
+		for (const card of cards) {
+			// .riseがアニメーション本体・.rise-Nは遅延のみ(latch.css)。ボードは両クラスを持つ
+			expect(` ${card.className} `).toContain(" rise ");
+			expect(card.className).toMatch(/rise-[1-5]( |$)/);
+		}
+	});
+
 	it("下書きカードは/compose?draft=<id>へのリンクで・下書き・期限切れの区分に置かれる", async () => {
 		listResponse = jsonResponse(200, {
 			items: [connectionIntent, draftIntent],

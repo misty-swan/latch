@@ -168,7 +168,8 @@ function IntentTime({ intent, now }: { intent: IntentDTO; now: Date }) {
 	);
 }
 
-/** 一覧の1カード。下書きだけ既存のcomposeへの再開リンクになる */
+/** 一覧の1カード。下書きだけ既存のcomposeへの再開リンクになる。
+ * riseClassはentranceの「rise rise-N」の両クラス(.riseがアニメーション本体・.rise-Nは遅延) */
 function IntentCard({
 	intent,
 	now,
@@ -220,7 +221,7 @@ function IntentCard({
 	return (
 		<li>
 			{/* 詳細画面はF3以降のため・表示のみのカードにする */}
-			<div className={`intent ${dim ? "is-dim" : ""} ${riseClass}`}>{body}</div>
+			<div className={`intent${dim ? " is-dim" : ""} ${riseClass}`}>{body}</div>
 		</li>
 	);
 }
@@ -413,7 +414,7 @@ export function Home() {
 							key={intent.id}
 							intent={intent}
 							now={now}
-							riseClass={`rise-${Math.min(5, index + 1)}`}
+							riseClass={`rise rise-${Math.min(5, index + 1)}`}
 						/>
 					))}
 				</ul>
@@ -426,7 +427,7 @@ export function Home() {
 									key={intent.id}
 									intent={intent}
 									now={now}
-									riseClass={`rise-${Math.min(5, index + 4)}`}
+									riseClass={`rise rise-${Math.min(5, index + 4)}`}
 								/>
 							))}
 						</ul>
