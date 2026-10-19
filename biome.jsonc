@@ -14,7 +14,9 @@
 			// Playwrightの実行生成物(test-results・gitignore済み・test:e2e実行時に作られる)
 			"!apps/worker/test-results",
 			// prototypeから不改変で移植したデザイン定義(docs/04 §3.2・D-A-07)。整形・リント対象外とする
-			"!apps/web/src/styles/latch.css"
+			"!apps/web/src/styles/latch.css",
+			// prototypeから不改変で移植したPWAアイコン(F2' Task 7)。整形・リント対象外とする
+			"!apps/web/public/icon.svg"
 		]
 	}
 }
