@@ -19,9 +19,12 @@ import {
 	underAgeBirthDate,
 } from "./helpers";
 
-test("1. welcome→サインイン→登録→同意→homeの空状態", async ({ page }) => {
+test("1. welcome→サインイン→登録→同意→compose→homeの空状態", async ({
+	page,
+}) => {
+	// signInAndRegisterは同意後の着地compose(#c-text)を確認してからhomeへ戻る
 	await signInAndRegister(page);
-	// 同意まで通るとhomeの空状態(HomeEmpty)に出る
+	// homeの空状態(HomeEmpty)に出る
 	await expect(page.getByText("まだ、何も置いていません。")).toBeVisible();
 	await expect(
 		page.getByText("いま、預けている意思はありません。"),

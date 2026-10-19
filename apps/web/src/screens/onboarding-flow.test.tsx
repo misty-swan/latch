@@ -1,7 +1,8 @@
 /**
  * はじめる画面群の一本道(F2'計画Task 3 Step 1)。
  * welcome→signin→(テストサインイン「ゆき」)→token→registration_requiredでregisterへ /
- * 登録(18歳)→users→consent→home / 17歳で422 UNDER_AGE表示 / 登録済なら直接home。
+ * 登録(18歳)→users→consent→compose(最初の1件を預ける導線)→閉じるでhome /
+ * 17歳で422 UNDER_AGE表示 / 登録済なら直接home。
  * fetchだけをモックし・apiFetchとルーターは実物を使う(実APIは叩かない)
  */
 
@@ -128,7 +129,7 @@ const submitRegister = async (birthDate: string): Promise<void> => {
 };
 
 describe("はじめる画面群の一本道", () => {
-	it("welcome→サインイン→登録→同意→homeまで進み・各APIの呼び出しと同意の記録が仕様どおり", async () => {
+	it("welcome→サインイン→登録→同意→compose→homeまで進み・各APIの呼び出しと同意の記録が仕様どおり", async () => {
 		preregistrationResponses();
 		const router = createMemoryRouter(appRoutes, { initialEntries: ["/"] });
 		render(<App router={router} />);
@@ -142,7 +143,14 @@ describe("はじめる画面群の一本道", () => {
 			await screen.findByRole("button", { name: "同意して進む" }),
 		);
 
-		// home(空状態)に到達する
+		// 同意後の着地はcompose(最初の1件を預ける導線・ボードConsent.dc.htmlどおり)
+		expect(
+			await screen.findByText("どんな人と、どんなふうに繋がりたいですか。"),
+		).toBeTruthy();
+		expect(router.state.location.pathname).toBe("/compose");
+
+		// composeを閉じるとhome(空状態)に着く
+		fireEvent.click(screen.getByRole("link", { name: "閉じる" }));
 		expect(
 			await screen.findByRole("heading", {
 				name: "まだ、何も置いていません。",

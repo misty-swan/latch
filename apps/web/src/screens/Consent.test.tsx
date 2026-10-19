@@ -11,7 +11,7 @@ import { appRoutes } from "../router";
 import { PATHS } from "../routes/paths";
 import { withQueryClient } from "../test/helpers";
 
-/** 同意後の着地home一覧(Task 6)は空で返す */
+/** 同意後の着地はcomposeで・compose自体はfetchしない(home遷移時の一覧用に残す) */
 const jsonResponse = (status: number, body: unknown): Response =>
 	new Response(JSON.stringify(body), {
 		status,
@@ -87,12 +87,12 @@ describe("Consent", () => {
 		expect(screen.getByText("2 / 2")).toBeTruthy();
 	});
 
-	it("同意して進むでlatch.consent=trueを記録しhomeへ進む", () => {
+	it("同意して進むでlatch.consent=trueを記録しcompose(最初の1件を預ける導線)へ進む", () => {
 		const router = setup();
 
 		fireEvent.click(screen.getByRole("button", { name: "同意して進む" }));
 
-		expect(router.state.location.pathname).toBe(PATHS.home);
+		expect(router.state.location.pathname).toBe(PATHS.compose);
 		expect(localStorage.getItem("latch.consent")).toBe("true");
 	});
 

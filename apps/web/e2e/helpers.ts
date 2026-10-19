@@ -42,13 +42,20 @@ export const signIn = async (page: Page): Promise<void> => {
 	await expect(page.locator("#r-name")).toBeVisible();
 };
 
-/** サインイン→登録(18歳以上)→同意をUIで通し・home(空状態)まで進む */
+/**
+ * サインイン→登録(18歳以上)→同意をUIで通し・home(空状態)まで進む。
+ * 同意後の着地はcompose(最初の1件を預ける導線・ボードConsent.dc.htmlどおり)のため・
+ * #c-textが出ることを確認してから閉じるでhomeへ戻る
+ */
 export const signInAndRegister = async (page: Page): Promise<void> => {
 	await signIn(page);
 	await page.locator("#r-name").fill("E2Eユーザー");
 	await page.locator("#r-birth").fill("2000-01-01");
 	await page.getByRole("button", { name: "次へ" }).click();
 	await page.getByRole("button", { name: "同意して進む" }).click();
+	await expect(page.locator("#c-text")).toBeVisible();
+	await page.getByRole("link", { name: "閉じる" }).click();
+	await expect(page.getByText("まだ、何も置いていません。")).toBeVisible();
 };
 
 /** homeの「ひとこと置く」からcomposeへ入り・文章を書いて「読み解く」でconfirmまで進む */

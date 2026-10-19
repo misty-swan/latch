@@ -1,8 +1,9 @@
 /**
  * 外部送信の同意画面(ボード: Consent.dc.htmlの移植)。
  * - docs/07 §8の3系統(Parser/Jev/Embedding)の同意文言をボード表現どおり置く
- * - 「同意して進む」でlocalStorage(latch.consent=true)に記録してhomeへ進む
- *   (同意したユーザーのみがIntentを作成できる・07 §8。「同意しないで進む」は記録せずhomeへ)
+ * - 「同意して進む」でlocalStorage(latch.consent=true)に記録してcomposeへ進む
+ *   (同意後は最初の1件を預ける導線・ボードConsent.dc.htmlのリンク先どおり)
+ * - 「同意しないで進む」は記録せずhomeへ(同意したユーザーのみがIntentを作成できる・07 §8)
  * 文言・構造・クラス名はボードどおり。記録と遷移の細部だけ実装の裁量
  */
 
@@ -40,7 +41,8 @@ export function Consent() {
 		} catch {
 			// 保存できない環境では次回の起動時にまた問うだけとする
 		}
-		navigate(PATHS.home);
+		// 同意後は最初の1件を預ける導線へ(ボードConsent.dc.htmlのリンク先どおり)
+		navigate(PATHS.compose);
 	};
 
 	return (
