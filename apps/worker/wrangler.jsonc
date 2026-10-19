@@ -15,11 +15,14 @@
 	// GET/HEAD以外をWorkerへ迂回させないため必須)。/healthzも含めるのは
 	// SPAフォールバックのindex.htmlで代替応答に隠れないようにするため
 	// (E2E/監視のヘルスチェックがWorkerに届く)。
+	// /__scheduledも含めるのは、wrangler dev --test-scheduledのCron強制発火
+	// (GET /__scheduled・F3計画Task 14)がassetsのSPAフォールバックで代替され、
+	// scheduledハンドラに届かなくなるのを防ぐため(/v1/*と同じ理由)。
 	// distは `pnpm --filter web build` の生成物(E2E/デプロイ前にビルドする)
 	"assets": {
 		"directory": "../web/dist",
 		"not_found_handling": "single-page-application",
-		"run_worker_first": ["/v1/*", "/healthz"]
+		"run_worker_first": ["/v1/*", "/healthz", "/__scheduled"]
 	},
 
 	// D1(リレーショナルDB・docs/04 §2)

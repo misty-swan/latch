@@ -99,3 +99,35 @@ export const registerUser = async (
 	};
 	return { access_token: registered.access_token, user: registered.user };
 };
+
+/**
+ * 条件を満たすまで一定間隔でpredicateを再試行するポーラ(E2E用・docs/10 §3の
+ * 実時間)。タイムアウト経過でも満たされなければ例外で失敗する。
+ * パイプラインのキュー消費やCron発火の反映待ちに使う
+ */
+export const waitFor = async (
+	predicate: () => Promise<boolean>,
+	timeout: number,
+	interval = 1_000,
+): Promise<void> => {
+	const deadline = Date.now() + timeout;
+	for (;;) {
+		if (await predicate()) {
+			return;
+		}
+		if (Date.now() >= deadline) {
+			throw new Error(`waitForがtimeout(${timeout}ms)に達しました`);
+		}
+		await new Promise((resolve) => setTimeout(resolve, interval));
+	}
+};
+
+/**
+ * Cronを強制発火する(wrangler dev --test-scheduledが提供するGET /__scheduled)。
+ * scheduledハンドラの完了を待って応答が返るため、返却後は毎分Cronの全走査
+ * (期限切れ遷移・バックフィル等・docs/06 §2)の効果がD1へ反映済みである
+ */
+export const runCron = async (request: APIRequestContext): Promise<void> => {
+	const res = await request.get("/__scheduled");
+	expect(res.status(), "GET /__scheduled(Cron強制発火)").toBe(200);
+};

@@ -5,6 +5,10 @@
  * --localはwrangler.jsoncのAIバインディングが引き起こすリモートプロキシセッション
  * (アカウント認証が必要)を無効化し、全バインディングをローカルエミュレータで完結
  * させるための指定(AGENTS.mdの環境方針・CIではトークン不要)。
+ * --test-scheduledはCronの強制発火(GET /__scheduled・F3計画Task 14)のための指定で、
+ * 付けないとローカルではscheduledハンドラが一度も走らない。
+ * clean-e2e-data.mjsは過去回のE2E由来の残置Intentをexpiredへ倒す(パイプラインE2Eの
+ * 検索取り出し幅を汚染しないようにするため・スクリプト冒頭コメント参照)。
  * 統合試験(vitest)とは別の起動経路であり、CIでは既存サーバーの再利用をしない
  */
 
@@ -16,8 +20,12 @@ const e2ePort = process.env.LATCH_E2E_PORT ?? "8787";
 
 export default defineConfig({
 	testDir: "./e2e",
+	// 直列実行にする(specファイル間でwrangler devの1プロセス=インメモリの
+	// ベクトルストア・Cron発火を共有するため。並列だとパイプラインE2Eの
+	// 取得件数の観測が他specのIntent作成と交差して非決定になる・docs/10 §3)
+	workers: 1,
 	webServer: {
-		command: `node scripts/prepare-dev-vars.mjs && wrangler d1 migrations apply DB --local && wrangler dev --local --port ${e2ePort}`,
+		command: `node scripts/prepare-dev-vars.mjs && wrangler d1 migrations apply DB --local && node scripts/clean-e2e-data.mjs && wrangler dev --local --test-scheduled --port ${e2ePort}`,
 		url: `http://localhost:${e2ePort}/healthz`,
 		reuseExistingServer: !process.env.CI,
 		stdout: "ignore",
