@@ -23,6 +23,15 @@ const FORM_LABELS = {
 	occasion: "機会",
 } as const;
 
+/** 灯り(lamp)に入る状態=提案が届いて回答を待っている間のみ。
+ * README §3・DSColor/DSLatchボードの規定(「提案が届いたときにしか使わない色」)であり・
+ * Homeボードでlampになるのは「回答を待っています」のカードだけ。
+ * proposed/partial_acceptはLatch側の状態語で・提案カードの表示はF4以降(F2'の一覧は入らない) */
+const LAMP_STATUSES: ReadonlySet<string> = new Set([
+	"proposed",
+	"partial_accept",
+]);
+
 /** 下書き・期限切れの区分に入る状態(薄表示。取り下げも同じ控えめ扱いにする) */
 const QUIET_STATUSES: ReadonlySet<IntentStatus> = new Set([
 	"draft",
@@ -59,18 +68,20 @@ const formatRemain = (ms: number): string => {
 	return hours > 0 ? `${hours}時間${minutes}分` : `${minutes}分`;
 };
 
-/** 状態チップの色分け(ボードどおり・つながりの預かりはランプ色) */
+/** 状態チップの色分け。灯りは提案が届いた(回答待ち)のみ・activeは通常の墨色
+ * (README §3・DSLatchボードの規定) */
 const statusClass = (intent: IntentDTO): string => {
 	if (QUIET_STATUSES.has(intent.status)) {
 		return "status status--quiet";
 	}
-	if (intent.status === "active" && intent.form === "connection") {
+	if (LAMP_STATUSES.has(intent.status)) {
 		return "status status--lamp";
 	}
 	return "status";
 };
 
-/** カードの半円グリフ(状態ごとにボードの意匠を出し分ける) */
+/** カードの半円グリフ(状態ごとにボードの意匠を出し分ける)。
+ * activeはformを問わずgt/gm(DSLatchボードのactive表現)・灯りのgl/gmは回答待ちのみ */
 function GlyphPaths({ intent }: { intent: IntentDTO }) {
 	if (intent.status === "draft") {
 		return <path className="gd" d="M9.4 2.4A7.6 7.6 0 0 0 9.4 17.6Z" />;
@@ -86,18 +97,18 @@ function GlyphPaths({ intent }: { intent: IntentDTO }) {
 			</>
 		);
 	}
-	if (intent.form === "occasion") {
+	if (LAMP_STATUSES.has(intent.status)) {
 		return (
 			<>
-				<path className="gt" d="M10.9 1.5A8.5 8.5 0 0 1 10.9 18.5" />
-				<path className="gm" d="M9.1 1.5A8.5 8.5 0 0 0 9.1 18.5Z" />
+				<path className="gl" d="M11.3 1.5A8.5 8.5 0 0 1 11.3 18.5Z" />
+				<path className="gm" d="M8.7 1.5A8.5 8.5 0 0 0 8.7 18.5Z" />
 			</>
 		);
 	}
 	return (
 		<>
-			<path className="gl" d="M11.3 1.5A8.5 8.5 0 0 1 11.3 18.5Z" />
-			<path className="gm" d="M8.7 1.5A8.5 8.5 0 0 0 8.7 18.5Z" />
+			<path className="gt" d="M10.9 1.5A8.5 8.5 0 0 1 10.9 18.5" />
+			<path className="gm" d="M9.1 1.5A8.5 8.5 0 0 0 9.1 18.5Z" />
 		</>
 	);
 }

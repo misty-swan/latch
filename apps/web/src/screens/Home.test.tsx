@@ -190,6 +190,23 @@ describe("Home", () => {
 		expect(document.querySelector(".arrival")).toBeNull();
 	});
 
+	it("activeカードは灯り(status--lamp・glグリフ)を使わない(README §3の規定)", async () => {
+		// つながり・機会のどちらのactiveも通常の墨色+gt/gm。灯りは提案が届いたとき(F4以降)のみ
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent, occasionIntent],
+			next_cursor: null,
+		});
+		setup();
+
+		await screen.findByText(connectionIntent.raw_text);
+		expect(document.querySelectorAll(".status--lamp").length).toBe(0);
+		expect(document.querySelectorAll(".glyph .gl").length).toBe(0);
+		// activeの意匠(gt/gm)は状態チップぶんだけ出る(カード左の大グリフにもgt/gmを使う)
+		expect(
+			document.querySelectorAll(".status .glyph .gt").length,
+		).toBeGreaterThanOrEqual(2);
+	});
+
 	it("カードにはentranceのrise基底クラスと遅延クラスを両方付ける(ボードどおり)", async () => {
 		listResponse = jsonResponse(200, {
 			items: [connectionIntent, occasionIntent, draftIntent],
