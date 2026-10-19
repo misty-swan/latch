@@ -1,0 +1,5 @@
+/*
+ * アプリ側の追加分スタイルの置き場所(docs/04 §3.2・D-A-07)。
+ * デザイントークン等の正は latch.css(prototype/project/latch.css の移植・改変禁止)にあり、
+ * このファイルはapps/web固有の追記のみに使う。読み込み順はmain.tsxでlatch.cssの後とする
+ */

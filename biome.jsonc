@@ -12,7 +12,9 @@
 			// wrangler dev/デプロイの一時生成物(gitignore済み・E2Eのwrangler dev起動時に作られる)
 			"!apps/worker/.wrangler",
 			// Playwrightの実行生成物(test-results・gitignore済み・test:e2e実行時に作られる)
-			"!apps/worker/test-results"
+			"!apps/worker/test-results",
+			// prototypeから不改変で移植したデザイン定義(docs/04 §3.2・D-A-07)。整形・リント対象外とする
+			"!apps/web/src/styles/latch.css"
 		]
 	}
 }
