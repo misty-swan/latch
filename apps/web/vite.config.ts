@@ -1,6 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
 	plugins: [
@@ -31,5 +31,8 @@ export default defineConfig({
 	test: {
 		environment: "happy-dom",
 		setupFiles: ["./src/test/setup.ts"],
+		// e2e/はPlaywrightが担う(test:e2e)。既定のincludeは**/*.spec.tsまで
+		// 見るため外す(apps/worker/vitest.config.tsと同じ方針)
+		exclude: [...configDefaults.exclude, "e2e/**"],
 	},
 });

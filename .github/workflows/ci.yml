@@ -13,7 +13,9 @@ jobs:
       - uses: pnpm/action-setup@v4 # versionはpackage.jsonのpackageManagerフィールドから自動参照
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          # react-router 8.4.0がnode>=22.22.0を要求する(F2'計画Task 1の申し送り)。
+          # メジャー指定(22)では要求を満たさない版に当たる可能性があるため明示版に固定する
+          node-version: 22.22.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
@@ -22,6 +24,24 @@ jobs:
       # worker E2Eの前にwebのビルド生成物(apps/web/dist)を用意する。
       # wrangler.jsoncのassets.directory=../web/distが存在しないとwrangler devが起動しない
       - run: pnpm --filter web build
-      # F1ゲート: 認証E2E・テスト鍵起動ガード
+      # F1ゲート: 認証E2E・テスト鍵起動ガード(既定ポート8787)
       - run: pnpm --filter worker test:e2e
       # staging自動デプロイはCloudflareトークン手配時に追加(docs/04 §6)
+
+  # 画面フローのブラウザE2E(F2'計画Task 8)。worker E2Eとは別ジョブで、
+  # 既定ポートも分離している(web=8788・worker=8787・LATCH_E2E_PORTで上書き可)
+  web-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # chromiumのみインストールする(worker E2EはAPIレベルでブラウザ不要・CIはAPIレベル専用)
+      - run: pnpm --filter web exec playwright install --with-deps chromium
+      # webServerが「VITE_DEV_AUTH=1でのvite build→.dev.vars生成→D1マイグレーション→
+      # wrangler dev(8788)」まで自動で行う(詳細はapps/web/playwright.config.ts)
+      - run: pnpm --filter web test:e2e
