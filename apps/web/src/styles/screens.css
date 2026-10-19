@@ -1,0 +1,38 @@
+/*
+ * はじめる画面群(Welcome・Intro・SignIn・Register・Consent)の追加分スタイル。
+ * デザイン定義の正は latch.css(prototype移植・改変禁止)にあり・このファイルは
+ * 配信(実ブラウザ)への適合分と・ボードに無いdev専用UI・エラー表示のみを置く
+ */
+
+/* ボードの固定プレビュー(390x844)に対し・実配信では画面の高さいっぱいに広げる */
+.screen {
+	min-height: 100dvh;
+}
+
+/* Registerのようにformでbody+footを包む画面のための土台(latch.cssの .screen と同じ縦積み) */
+.screen__form {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+/* SignInのdev専用テストサインイン(本番ビルドでは出現しない) */
+.dev-signin {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	margin-top: 28px;
+}
+.dev-signin__caption {
+	font-size: 12.5px;
+	line-height: 1.7;
+	color: var(--ink-3);
+}
+
+/* フォーム・APIエラーの表示(ボードにエラー状態が無いため・helpの色違いとして置く) */
+.field__error {
+	font-size: 12.5px;
+	line-height: 1.7;
+	color: var(--danger);
+}

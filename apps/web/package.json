@@ -10,11 +10,14 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
+		"@hookform/resolvers": "5.9.2",
 		"@latch/shared": "workspace:*",
 		"@tanstack/react-query": "5.104.4",
 		"react": "19.3.1",
 		"react-dom": "19.3.1",
-		"react-router": "8.4.0"
+		"react-hook-form": "7.90.0",
+		"react-router": "8.4.0",
+		"zod": "4.6.7"
 	},
 	"devDependencies": {
 		"@testing-library/react": "16.3.3",

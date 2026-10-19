@@ -83,6 +83,34 @@ describe("authSession", () => {
 		expect(authSession.accessToken).toBeNull();
 	});
 
+	it("restoreはリフレッシュ失敗時にlocalStorageの失効トークンを除去する(無駄な再試行の防止)", async () => {
+		localStorage.setItem(REFRESH_KEY, "stale-refresh");
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(401, {
+				error: { code: "TOKEN_EXPIRED", message: "期限切れです", details: {} },
+			}),
+		);
+
+		await expect(authSession.restore()).resolves.toBe(false);
+
+		expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
+	});
+
+	it("restoreの成功時は保存値を除去しない", async () => {
+		localStorage.setItem(REFRESH_KEY, "refresh-1");
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(200, {
+				access_token: "access-2",
+				refresh_token: "refresh-2",
+				expires_in: 3600,
+			}),
+		);
+
+		await expect(authSession.restore()).resolves.toBe(true);
+
+		expect(localStorage.getItem(REFRESH_KEY)).toBe("refresh-2");
+	});
+
 	it("refreshの同時多発は1回のfetchに収束する(単一フライト)", async () => {
 		localStorage.setItem(REFRESH_KEY, "refresh-1");
 		fetchMock.mockResolvedValue(

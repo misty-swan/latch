@@ -3,3 +3,8 @@
  * デザイントークン等の正は latch.css(prototype/project/latch.css の移植・改変禁止)にあり、
  * このファイルはapps/web固有の追記のみに使う。読み込み順はmain.tsxでlatch.cssの後とする
  */
+
+/* ページ土台(ボードの body{margin:0} 相当) */
+body {
+	margin: 0;
+}

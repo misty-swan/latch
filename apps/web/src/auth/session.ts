@@ -79,11 +79,20 @@ export const authSession = {
 		accessToken = null;
 		localStorage.removeItem(REFRESH_STORAGE_KEY);
 	},
-	/** 起動時の復元。保存済みリフレッシュトークンがあればリフレッシュを試みる */
+	/**
+	 * 起動時の復元。保存済みリフレッシュトークンがあればリフレッシュを試みる。
+	 * 失敗時はlocalStorageのトークンを除去する(失効済みの保存値による無駄な再試行の防止)
+	 */
 	restore(): Promise<boolean> {
-		return readStoredRefreshToken() === null
-			? Promise.resolve(false)
-			: refreshTokens();
+		if (readStoredRefreshToken() === null) {
+			return Promise.resolve(false);
+		}
+		return refreshTokens().then((restored) => {
+			if (!restored) {
+				localStorage.removeItem(REFRESH_STORAGE_KEY);
+			}
+			return restored;
+		});
 	},
 	/** リフレッシュトークンを回転させる(同時呼び出しは単一フライトに収束) */
 	refresh: refreshTokens,
