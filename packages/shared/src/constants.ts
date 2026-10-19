@@ -169,3 +169,54 @@ export const GEO_RADIUS_MAX_M = 100_000 as const;
 
 /** 予算の上限(円)。docs/05 §2.2(budget_min/max) */
 export const BUDGET_MAX = 9_999_999 as const;
+
+/**
+ * マッチングパイプラインの定数。値の正本は docs/06(§2〜§4)・05 §2.3(ベクトル削除)・
+ * §2.6(候補保持)・07 §4(埋め込み)。単位は名前の接尾辞どおり
+ * (MS=ミリ秒・SECONDS=秒・DAYS=日)。
+ */
+export const PIPELINE = {
+	// Layer 2 Candidate Retrievalの取り出し幅(topK)。docs/06 §3
+	TOP_K_RETRIEVAL: 100,
+	// Layer 1通過後の次層への引き渡し上限(K_v)。docs/06 §3
+	LAYER1_OUTPUT_MAX: 50,
+	// Layer 3のLayer 4への引き渡し上限(K_c)。docs/06 §3
+	LAYER3_OUTPUT_MAX: 20,
+	// 更新イベントの遅延配信(秒)。docs/06 §2・04 §4
+	UPDATE_EVENT_DELAY_SECONDS: 10,
+	// 同一Intentの再評価抑制(30分・last_evaluated_at)。docs/06 §4
+	REEVALUATION_SUPPRESSION_MS: 30 * 60_000,
+	// catch-upの対象とする期限前の窓(expires_atまで2時間以内)。docs/06 §4
+	CATCH_UP_WINDOW_MS: 2 * 60 * 60_000,
+	// 機会IntentのBucket幅(starts_atの30分刻み)。docs/06 §4
+	BUCKET_WIDTH_MS: 30 * 60_000,
+	// 機会の時間重なり判定の下限(15分以上)。docs/06 §3
+	TIME_OVERLAP_MIN_MS: 15 * 60_000,
+	// 期限切れIntentのベクトル削除までの猶予(期限+7日)。docs/05 §2.3・§2.6
+	VECTOR_DELETE_DELAY_DAYS: 7,
+	// 評価確定後の候補行の保持期間(30日)。docs/05 §2.6
+	CANDIDATE_RETENTION_DAYS: 30,
+	// つながりIntentの遅延再評価までの経過(active化後10分・1回きり)。docs/06 §4
+	DELAYED_REEVAL_AFTER_MS: 10 * 60_000,
+	// バックフィル回収の対象とする生成後の経過(5分)。docs/06 §4
+	BACKFILL_GRACE_MS: 5 * 60_000,
+	// Embedding呼び出しのtimeout(5秒・再試行なし)。docs/07 §4
+	EMBEDDING_TIMEOUT_MS: 5_000,
+	// Vectorizeのupsert完了確認のポーリング間隔。docs/06 §2
+	EMBED_CONFIRM_INTERVAL_MS: 500,
+	// Vectorizeのupsert完了確認のtimeout(超過時はバックフィルで回収)。docs/06 §2
+	EMBED_CONFIRM_TIMEOUT_MS: 5_000,
+	// Cron各処理の1実行あたり処理上限。docs/04 §4
+	CRON_BATCH_LIMIT: 500,
+} as const;
+
+/** Queuesのキューメッセージ本体。event_type等の詳細はD1のmatch_events行から読む */
+export interface MatchQueueMessage {
+	event_id: string;
+}
+
+/** Embeddingモデル識別子(real=Workers AI)。intents.embedding_modelへ記録する。docs/07 §4 */
+export const EMBEDDING_MODEL_REAL = "@cf/baai/bge-m3" as const;
+
+/** Embeddingモデル識別子(stub=決定的擬似ベクトル)。intents.embedding_modelへ記録する。docs/07 §4 */
+export const EMBEDDING_MODEL_STUB = "stub-sha256-v1" as const;
