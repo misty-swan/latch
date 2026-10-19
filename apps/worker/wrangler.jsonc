@@ -78,9 +78,23 @@
 				"queue": "match-events",
 				"max_retries": 3,
 				"dead_letter_queue": "match-events-dlq"
+			},
+			{
+				// DLQを見る最小consumer(docs/04 §4)。match_eventsのstatusをdeadへ
+				// 反映して警報する。再試行は1回で打ち切り(隔離済みの再隔離を避ける)
+				"queue": "match-events-dlq",
+				"max_retries": 1
 			}
 		]
 	},
+
+	// パイプラインのメトリクス送信先(Analytics Engine・docs/04 §4)
+	"analytics_engine_datasets": [
+		{
+			"binding": "PIPELINE_AX",
+			"dataset": "latch_metrics"
+		}
+	],
 
 	// 毎分Cron(bucket走査・期限切れバッチ等・docs/04 §2)
 	"triggers": {
@@ -105,6 +119,8 @@
 
 	"vars": {
 		"LATCH_LLM_MODE": "stub",
+		// Embeddingの動作モード(既定stub・07 §2)。Parser/JevのLATCH_LLM_MODEとは独立
+		"LATCH_EMBEDDING_MODE": "stub",
 		// 実行環境の識別(docs/10 §1)。local既定で、デプロイ時にstaging/productionへ上書き
 		"LATCH_ENV": "local"
 	}

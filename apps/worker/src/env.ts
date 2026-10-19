@@ -2,6 +2,7 @@
  * Workerの環境変数・バインディングの型と、prod起動ガード(docs/04 §4・docs/10 §2)。
  * assertEnvSafetyはfetchの先頭でisolateごとに1回だけ呼ぶ(Workersに起動フックはないため)。
  */
+import type { MatchQueueMessage } from "@latch/shared";
 
 /**
  * 開発/テスト専用のJWT署名鍵フォールバック(wrangler dev・単体/統合テスト用)。
@@ -20,7 +21,15 @@ export interface Env {
 	ICONS: R2Bucket;
 	/** Layer 2 Candidate Retrieval用ベクトルインデックス(docs/05 §2.3・docs/07 §1)。localでは使わずインメモリ実装へ倒す(vectorstore/index.ts) */
 	VECTORS: VectorizeIndex;
+	/** Workers AI(Embedding=bge-m3・docs/07 §1)。LATCH_EMBEDDING_MODE=real時のみ使用する(llm/embedding.ts) */
+	AI: Ai;
+	/** マッチングパイプラインのイベントキュー(docs/04 §2・§4)。メッセージ本体=sharedのMatchQueueMessage */
+	MATCH_QUEUE: Queue<MatchQueueMessage>;
+	/** パイプラインのメトリクス送信先(docs/04 §4)。dataset=latch_metrics */
+	PIPELINE_AX: AnalyticsEngineDataset;
 	LATCH_LLM_MODE: string;
+	/** Embeddingの動作モード(既定stub・llm/embedding.ts)。Parser/JevのLATCH_LLM_MODEとは独立に切り替える(07 §2) */
+	LATCH_EMBEDDING_MODE?: string;
 	LATCH_ENV: string;
 	JWT_SECRET?: string;
 	LATCH_TEST_IDP_JWKS?: string;
