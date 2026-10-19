@@ -290,6 +290,51 @@ describe("Confirm(form切替)", () => {
 		).toBeTruthy();
 		expect(screen.queryByText(/^開始から3時間後/)).toBeNull();
 	});
+
+	it("つながりで足した条件は・機会へ切替えて預ける際には送らない(機会に条件行は無いため)", async () => {
+		saveComposeState({
+			raw_text: WORDS,
+			draft_id: null,
+			parse: connectionParse,
+		});
+		const router = setup();
+
+		fireEvent.click(screen.getByRole("button", { name: "条件を足す" }));
+		const input = screen.getByLabelText("条件を入力") as HTMLInputElement;
+		fireEvent.change(input, { target: { value: "初心者歓迎" } });
+		fireEvent.keyDown(input, { key: "Enter" });
+		expect(
+			screen.getByRole("button", { name: "初心者歓迎を外す" }),
+		).toBeTruthy();
+
+		// 機会へ切替ると条件は空になる(戻しても復活しない)
+		fireEvent.click(screen.getByRole("radio", { name: /^機会として預ける/ }));
+		fireEvent.click(
+			screen.getByRole("radio", { name: /^つながりとして預ける/ }),
+		);
+		expect(
+			screen.queryByRole("button", { name: "初心者歓迎を外す" }),
+		).toBeNull();
+
+		// 機会のまま日時を入れて預けると・条件は空配列で送られる
+		fireEvent.click(screen.getByRole("radio", { name: /^機会として預ける/ }));
+		fireEvent.click(screen.getByLabelText("日時を直す"));
+		fireEvent.change(screen.getByLabelText("日時"), {
+			target: { value: jstLocal(26 * HOUR_MS) },
+		});
+		fireEvent.blur(screen.getByLabelText("日時"));
+		fireEvent.click(screen.getByRole("button", { name: "預ける" }));
+
+		await waitFor(() => {
+			expect(router.state.location.pathname).toBe(PATHS.placed);
+		});
+		const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+		expect(url).toBe("/v1/intents");
+		expect(init.method).toBe("POST");
+		const body = JSON.parse(init.body as string) as Record<string, unknown>;
+		expect(body.form).toBe("occasion");
+		expect(body.soft_constraints).toEqual([]);
+	});
 });
 
 describe("Confirm(条件の編集)", () => {

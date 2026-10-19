@@ -165,6 +165,11 @@ export function Confirm() {
 	const onFormChange = (next: ConfirmValues["form"]): void => {
 		setForm(next);
 		setEditing(null);
+		if (next === "occasion") {
+			// 機会には条件の行が無い(ボードConfirmOccasionどおり)。
+			// UIから消えた条件を送らないよう・切替時に空にする
+			setSoftConstraints([]);
+		}
 	};
 
 	const commitTopic = (): void => {
