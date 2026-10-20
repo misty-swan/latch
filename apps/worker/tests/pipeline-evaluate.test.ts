@@ -1120,6 +1120,24 @@ describe("Layer 4・Layer 5・提案化の連結(F4a設計 §2.6・§3.1)", () =
 		expect(row?.status).toBe("proposed");
 	});
 
+	it("提案済みペアを反対側のIntentから再評価しても候補行はproposedのまま", async () => {
+		const { origin, other } = await seedConnectionPair();
+		const first = await evaluateIntent(testEnv, origin.id, directClock);
+		expect(first?.proposed).toBe(1);
+
+		// 相手側はlast_evaluated_atが未設定のため抑制されずに評価される。
+		// 同一version同士のため同じ候補行へのupsert(ON CONFLICT)になる
+		const second = await evaluateIntent(testEnv, other.id, directClock);
+		expect(second?.l3Pass).toBe(1);
+		// jev_resultは再利用され、つながりの既存履歴により再提案はしない
+		expect(second?.jevReused).toBe(1);
+		expect(second?.proposed).toBe(0);
+
+		const rows = await candidatesInvolving(origin.id);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.status).toBe("proposed");
+	});
+
 	it("#14: 候補25件でもJev呼び出しは1イベント8回以下", async () => {
 		const originUserId = ulid();
 		await insertUserRow(originUserId);

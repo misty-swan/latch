@@ -257,7 +257,7 @@ export const evaluateIntent = async (
 		.slice(0, PIPELINE.LAYER3_OUTPUT_MAX);
 
 	// match_candidatesへupsert(docs/05 §2.2): a<b正規化。UNIQUE(a,b,va,vb)の
-	// 衝突はON CONFLICT DO UPDATEで再評価の結果を上書きする(行は増やさない)
+	// 衝突はON CONFLICT DO UPDATEで再評価のスコアを上書きする(行は増やさない・statusは保持)
 	const rows = l3Scored.map((item) => {
 		const originFirst = intent.id < item.candidate.id;
 		return {
@@ -288,7 +288,8 @@ export const evaluateIntent = async (
 				set: {
 					retrievalScore: sql`excluded.retrieval_score`,
 					cheapJudgeScore: sql`excluded.cheap_judge_score`,
-					status: "candidate",
+					// statusは上書きしない(新規INSERTの行だけがcandidateになり、
+					// 提案済み・クローズ済みの既存行は状態を保つ)
 					updatedAt: now,
 				},
 			});
