@@ -17,7 +17,7 @@ import { intents, matchCandidates } from "../db/schema";
 import type { Env } from "../env";
 import { newUlid } from "../ids";
 import type { JevHeldReason } from "../jev/runner";
-import { proposePair } from "../latches/propose";
+import { blockedForProposal, proposePair } from "../latches/propose";
 import type { JevFn } from "../llm/types";
 import { createLogger } from "../logging/logger";
 import { createVectorStore } from "../vectorstore";
@@ -42,6 +42,8 @@ export interface Stage2Result {
 	exclusions: Record<string, number>;
 	/** Layer 3通過(上位K_c)でmatch_candidatesへ保存した件数 */
 	l3Pass: number;
+	/** 提案履歴(既存行・抑制期間)により提案できずLayer 4へ渡さなかった件数(docs/06 §5) */
+	l4SkippedHistory: number;
 	/** Jevの実呼び出し数(フォールバック含む・K_j以下・#14) */
 	jevCalls: number;
 	/** jev_resultを再利用してJevを呼ばなかった件数 */
@@ -326,10 +328,24 @@ export const evaluateIntent = async (
 			rowIdByKey.set(candidateKey(r), r.id);
 		}
 	}
+	// 提案履歴により今は提案できない相手(既存行あり かつ 再提案不可・抑制期間中)は
+	// Layer 4へ渡さない(Jevの枠と予算を使わない・docs/06 §5)。Layer 1の恒久排除とは
+	// 別に数える。proposePair側の判定も残す(並行時の正)
+	const historyBlocked = await blockedForProposal(
+		db,
+		intent,
+		l3Scored.map((item) => item.candidate),
+		now,
+	);
 	// Layer 4 Jev(F4a設計 §2.3): Layer 3降順のまま、起点=evaluateIntentの対象・
 	// 相手=候補Intentで渡す(予算計上が起点基準のため行の向きに依らない)
 	const l4Candidates: L4Candidate[] = [];
+	let l4SkippedHistory = 0;
 	for (const [index, item] of l3Scored.entries()) {
+		if (historyBlocked.has(item.candidate.id)) {
+			l4SkippedHistory += 1;
+			continue;
+		}
 		const row = rows[index];
 		const rowId =
 			row === undefined ? undefined : rowIdByKey.get(candidateKey(row));
@@ -418,6 +434,7 @@ export const evaluateIntent = async (
 		l1Pass: l1Top.length,
 		exclusions,
 		l3Pass: rows.length,
+		l4SkippedHistory,
 		jevCalls: l4.run.calls,
 		jevReused: l4.reused,
 		jevHeld: l4.run.held,

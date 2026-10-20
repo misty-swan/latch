@@ -459,6 +459,7 @@ describe("統合パターン(SELF.fetch→イベント→第1段→第2段)", ()
 			l1_pass: 1,
 			l1_exclusions: {},
 			l3_pass: 1,
+			l4_skipped_history: 0,
 			jev_calls: 1,
 			jev_reused: 0,
 			jev_held: NO_JEV_HELD,
@@ -560,6 +561,7 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			l1Pass: 1,
 			exclusions: {},
 			l3Pass: 1,
+			l4SkippedHistory: 0,
 			...ONE_PROPOSED,
 		});
 		expect(await candidatesInvolving(a.id)).toHaveLength(1);
@@ -606,6 +608,7 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			l1Pass: 2,
 			exclusions: {},
 			l3Pass: 2,
+			l4SkippedHistory: 0,
 			jevCalls: 2,
 			jevReused: 0,
 			jevHeld: NO_JEV_HELD,
@@ -660,6 +663,7 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			l1_pass: 0,
 			l1_exclusions: { form_mismatch: 1 },
 			l3_pass: 0,
+			l4_skipped_history: 0,
 			jev_calls: 0,
 			jev_reused: 0,
 			jev_held: NO_JEV_HELD,
@@ -812,6 +816,7 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 				geo_no_overlap: 1,
 			},
 			l3_pass: 1,
+			l4_skipped_history: 0,
 			// 閾値は超えるが、機会の開始時刻=現在で対象時刻まで75分未満のため
 			// 提案しない(docs/01 §8)
 			jev_calls: 1,
@@ -1023,6 +1028,7 @@ describe("計測(Analytics Engine・docs/06 §7)", () => {
 			l1Pass: 1,
 			exclusions: {},
 			l3Pass: 1,
+			l4SkippedHistory: 0,
 			...ONE_PROPOSED,
 		});
 		expect(fakeAx.writeDataPoint).toHaveBeenCalledTimes(1);
@@ -1129,13 +1135,49 @@ describe("Layer 4・Layer 5・提案化の連結(F4a設計 §2.6・§3.1)", () =
 		// 同一version同士のため同じ候補行へのupsert(ON CONFLICT)になる
 		const second = await evaluateIntent(testEnv, other.id, directClock);
 		expect(second?.l3Pass).toBe(1);
-		// jev_resultは再利用され、つながりの既存履歴により再提案はしない
-		expect(second?.jevReused).toBe(1);
+		// つながりの既存履歴により提案できないペアはLayer 4へ渡さない(Jev枠・予算を使わない)
+		expect(second?.l4SkippedHistory).toBe(1);
+		expect(second?.jevReused).toBe(0);
+		expect(second?.jevCalls).toBe(0);
 		expect(second?.proposed).toBe(0);
 
 		const rows = await candidatesInvolving(origin.id);
 		expect(rows).toHaveLength(1);
 		expect(rows[0]?.status).toBe("proposed");
+	});
+
+	it("履歴がproposedのペアにはJevを呼ばず、payloadにl4_skipped_historyを記録する", async () => {
+		const { userA, userB, origin } = await seedConnectionPair();
+		const [low, high] = userA < userB ? [userA, userB] : [userB, userA];
+		await db.insert(proposalHistory).values({
+			id: ulid(),
+			userLow: low,
+			userHigh: high,
+			latchId: null,
+			outcome: "proposed",
+			createdAt: FIXED_NOW,
+			updatedAt: FIXED_NOW,
+		});
+
+		const eventId = await seedCompletedEvent(origin.id);
+		expectAcked(await runBatch("match-events", [eventId], directClock));
+
+		const [event] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		const payload = event?.payload as Record<string, unknown>;
+		expect(payload).toMatchObject({
+			l3_pass: 1,
+			jev_calls: 0,
+			jev_reused: 0,
+			l4_skipped_history: 1,
+			proposed: 0,
+		});
+		const [row] = await candidatesInvolving(origin.id);
+		expect(row?.jevResult).toBeNull();
+		expect(row?.latchScore).toBeNull();
+		expect(row?.status).toBe("candidate");
 	});
 
 	it("#14: 候補25件でもJev呼び出しは1イベント8回以下", async () => {

@@ -7,7 +7,7 @@
  */
 
 import { LATCH } from "@latch/shared";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import {
 	latches,
@@ -52,6 +52,106 @@ const prevLatchOf = async (
 	return row ?? null;
 };
 
+type HistoryOutcome = typeof proposalHistory.$inferSelect.outcome;
+
+/**
+ * 既存の提案履歴がある同ペアへ再提案し得るか(docs/01 §8・docs/06 §4)。
+ * つながり(targetAt=null)は既存行があれば一切再提案しない。機会もdeferred/expired以外は不可
+ */
+export const historyAllowsReproposal = (
+	outcome: HistoryOutcome,
+	targetAt: Date | null,
+): boolean =>
+	targetAt !== null && (outcome === "deferred" || outcome === "expired");
+
+/** 抑制期間中か: now < updated_at + min(24時間, (対象時刻 - updated_at)/2)(docs/01 §8) */
+export const isReproposalSuppressed = (
+	historyUpdatedAt: Date,
+	targetAt: Date,
+	now: Date,
+): boolean => {
+	const since = historyUpdatedAt.getTime();
+	const suppression = Math.min(
+		LATCH.REPROPOSAL_SUPPRESSION_MAX_MS,
+		(targetAt.getTime() - since) / 2,
+	);
+	return now.getTime() < since + suppression;
+};
+
+/** 照会のチャンク幅(user_low/user_highの2方向で2×48+α件のバインド・docs/06 §3の48件) */
+const PAIR_CHUNK_SIZE = 48;
+
+/**
+ * 履歴によりこの時点で提案できない相手Intentのid集合を返す(Layer 4の前の除外・docs/06 §5)。
+ * 判定は proposePair の履歴判定と同じ(既存行あり かつ 再提案不可、または抑制期間中)。
+ * スコア変化・Intent更新の条件はJev後のスコアに依るためここでは見ない(proposePairが判定する)。
+ * Layer 1の恒久排除(matched・rejected)とは別に数える。照会は相手ユーザー48件のチャンク
+ */
+export const blockedForProposal = async (
+	db: DrizzleD1Database,
+	origin: IntentRow,
+	others: IntentRow[],
+	now: Date,
+): Promise<Set<string>> => {
+	const blocked = new Set<string>();
+	const otherUserIds = [...new Set(others.map((o) => o.userId))];
+	const historyByUser = new Map<
+		string,
+		{ outcome: HistoryOutcome; updatedAt: Date }
+	>();
+	for (let i = 0; i < otherUserIds.length; i += PAIR_CHUNK_SIZE) {
+		const chunk = otherUserIds.slice(i, i + PAIR_CHUNK_SIZE);
+		const rows = await db
+			.select({
+				userLow: proposalHistory.userLow,
+				userHigh: proposalHistory.userHigh,
+				outcome: proposalHistory.outcome,
+				updatedAt: proposalHistory.updatedAt,
+			})
+			.from(proposalHistory)
+			.where(
+				or(
+					and(
+						eq(proposalHistory.userLow, origin.userId),
+						inArray(proposalHistory.userHigh, chunk),
+					),
+					and(
+						eq(proposalHistory.userHigh, origin.userId),
+						inArray(proposalHistory.userLow, chunk),
+					),
+				),
+			);
+		for (const row of rows) {
+			const other = row.userLow === origin.userId ? row.userHigh : row.userLow;
+			historyByUser.set(other, {
+				outcome: row.outcome,
+				updatedAt: row.updatedAt,
+			});
+		}
+	}
+	for (const other of others) {
+		const history = historyByUser.get(other.userId);
+		if (history === undefined) continue;
+		if (
+			origin.form === "occasion" &&
+			(origin.startsAt === null || other.startsAt === null)
+		) {
+			// 不変条件違反(activeの機会はstarts_at必須)。判定はproposePairに委ねる
+			continue;
+		}
+		const targetAt =
+			origin.form === "occasion" ? occasionTargetAt(origin, other) : null;
+		if (
+			!historyAllowsReproposal(history.outcome, targetAt) ||
+			(targetAt !== null &&
+				isReproposalSuppressed(history.updatedAt, targetAt, now))
+		) {
+			blocked.add(other.id);
+		}
+	}
+	return blocked;
+};
+
 export const proposePair = async (
 	db: DrizzleD1Database,
 	input: ProposeInput,
@@ -78,11 +178,7 @@ export const proposePair = async (
 			),
 		);
 	if (existing !== undefined) {
-		// つながりIntentは既存行があれば一切再提案しない。機会もdeferred/expired以外は不可
-		if (targetAt === null) return "skipped";
-		if (existing.outcome !== "deferred" && existing.outcome !== "expired") {
-			return "skipped";
-		}
+		if (!historyAllowsReproposal(existing.outcome, targetAt)) return "skipped";
 		const prev = await prevLatchOf(db, existing.latchId);
 		if (prev !== null) {
 			// 再提案判定用に前回LATCHのscoreを記録する(再提案でもスキップでも)
@@ -91,13 +187,12 @@ export const proposePair = async (
 				.set({ prevLatchScore: prev.score })
 				.where(eq(matchCandidates.id, rowId));
 		}
-		// 抑制: now >= updated_at + min(24時間, (対象時刻 - updated_at)/2)(docs/01 §8)
-		const since = existing.updatedAt.getTime();
-		const suppression = Math.min(
-			LATCH.REPROPOSAL_SUPPRESSION_MAX_MS,
-			(targetAt.getTime() - since) / 2,
-		);
-		if (now.getTime() < since + suppression) return "skipped";
+		if (
+			targetAt === null ||
+			isReproposalSuppressed(existing.updatedAt, targetAt, now)
+		) {
+			return "skipped";
+		}
 		// 前回LATCHが無い場合は変化の有無を判定できないため再提案しない
 		if (prev === null) return "skipped";
 		const changed =

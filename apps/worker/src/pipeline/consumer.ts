@@ -228,6 +228,7 @@ const consumeEvent = async (
 						l1_pass: result.l1Pass,
 						l1_exclusions: result.exclusions,
 						l3_pass: result.l3Pass,
+						l4_skipped_history: result.l4SkippedHistory,
 						jev_calls: result.jevCalls,
 						jev_reused: result.jevReused,
 						jev_held: result.jevHeld,
