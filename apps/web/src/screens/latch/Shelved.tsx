@@ -42,6 +42,7 @@ export function Shelved({ form, onSaveReason }: ShelvedProps) {
 	const [saved, setSaved] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [toast, setToast] = useState(false);
+	const [failed, setFailed] = useState(false);
 
 	useEffect(() => {
 		if (!toast) return;
@@ -52,11 +53,15 @@ export function Shelved({ form, onSaveReason }: ShelvedProps) {
 	const save = async () => {
 		if (reason === null || busy) return;
 		setBusy(true);
+		setFailed(false);
 		try {
 			await onSaveReason(reason);
 			setSaved(true);
 			setSheet(false);
 			setToast(true);
+		} catch {
+			// 保存に失敗したらシートを開いたまま知らせ・選び直さず再送できるようにする
+			setFailed(true);
 		} finally {
 			setBusy(false);
 		}
@@ -181,6 +186,11 @@ export function Shelved({ form, onSaveReason }: ShelvedProps) {
 									</label>
 								))}
 							</div>
+							{failed ? (
+								<p className="t-caption" role="status">
+									送れませんでした。もう一度お試しください。
+								</p>
+							) : null}
 							<div className="sheet__actions">
 								<button
 									className="btn btn--primary btn--block"

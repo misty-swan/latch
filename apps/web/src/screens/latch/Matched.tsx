@@ -10,7 +10,7 @@ import { Link } from "react-router";
 import { formatMatchedAt, formatWhen, formatYen } from "../../latches/format";
 import { PATHS } from "../../routes/paths";
 import { ScreenGrain } from "../shared";
-import { Avatar, GroupDisc, LatchArt } from "./art";
+import { AVATAR_TONE_FILLS, Avatar, GroupDisc, LatchArt } from "./art";
 
 /** 押してからはまるまで・にじみが引くまで(prototypeの650ms・1700ms) */
 const PRESS_MS = 650;
@@ -171,14 +171,23 @@ export function Matched({ latch, now, fresh }: MatchedProps) {
 			<div className="screen__body" style={{ paddingBottom: 16 }}>
 				<div className="matched__stage">
 					{group ? (
-						// 他メンバーの色(prototypeのAV)はlatch.cssに変数として無いため自分(墨)だけ塗る
-						<GroupDisc count={size} size={200} />
+						<GroupDisc
+							count={size}
+							size={200}
+							fills={[
+								"var(--ink)",
+								...members.map(
+									(_, i) => AVATAR_TONE_FILLS[TONES[i % TONES.length]],
+								),
+							]}
+						/>
 					) : (
 						<LatchArt
 							ref={artRef}
 							state={fresh ? "pressed" : "latched"}
 							size={184}
 							gap={20}
+							theirsFill={AVATAR_TONE_FILLS.b}
 							ring
 						/>
 					)}

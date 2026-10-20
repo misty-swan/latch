@@ -163,6 +163,14 @@ export function Tategaki({ text, className, style }: TategakiProps) {
 	);
 }
 
+/** アバターの色調ごとの塗り(prototype/app/app.jsのAV・latch.cssの.avatar--Xの--c1と同値) */
+export const AVATAR_TONE_FILLS = {
+	b: "#6B4E2E",
+	c: "#2F5A55",
+	d: "#5B3F5E",
+	e: "#48552F",
+} as const;
+
 type AvatarProps = {
 	userId?: string;
 	hasIcon: boolean;

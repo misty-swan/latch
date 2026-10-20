@@ -52,31 +52,64 @@ describe("Shelved", () => {
 		expect(screen.queryByText("この相手との提案は今後届きません。")).toBeNull();
 	});
 
-	it("理由を選んで残すと保存・トースト表示・導線が消える", async () => {
-		vi.useFakeTimers();
-		const onSave = view("connection");
+	it.each([
+		["いまは余裕がない", "no_capacity"],
+		["日時や場所が合わない", "schedule_mismatch"],
+		["なんとなく、今回は", "just_not_now"],
+		["その他", "other"],
+	])(
+		"理由「%s」を残すと%sで保存・トースト表示・導線が消える",
+		async (label, value) => {
+			vi.useFakeTimers();
+			const onSave = view("connection");
+			fireEvent.click(
+				screen.getByRole("button", { name: /見送った理由を残す/ }),
+			);
+			const keep = screen.getByRole("button", {
+				name: "残す",
+			}) as HTMLButtonElement;
+			expect(keep.disabled).toBe(true);
+			fireEvent.click(screen.getByLabelText(label));
+			expect(keep.disabled).toBe(false);
+			await act(async () => {
+				fireEvent.click(keep);
+			});
+			expect(onSave).toHaveBeenCalledWith(value);
+			expect(screen.getByRole("status").textContent).toBe(
+				"ありがとうございます。相手には伝わりません。",
+			);
+			expect(
+				screen.queryByRole("button", { name: /見送った理由を残す/ }),
+			).toBeNull();
+			expect(screen.queryByRole("dialog")).toBeNull();
+			act(() => {
+				vi.advanceTimersByTime(2400);
+			});
+			expect(screen.queryByRole("status")).toBeNull();
+		},
+	);
+
+	it("保存が失敗したらシートを開いたまま・トーストは出さず・失敗を知らせる", async () => {
+		const onSave = view(
+			"connection",
+			vi.fn().mockRejectedValue(new Error("x")),
+		);
 		fireEvent.click(screen.getByRole("button", { name: /見送った理由を残す/ }));
-		const keep = screen.getByRole("button", {
-			name: "残す",
-		}) as HTMLButtonElement;
-		expect(keep.disabled).toBe(true);
-		fireEvent.click(screen.getByLabelText("日時や場所が合わない"));
-		expect(keep.disabled).toBe(false);
+		fireEvent.click(screen.getByLabelText("その他"));
 		await act(async () => {
-			fireEvent.click(keep);
+			fireEvent.click(screen.getByRole("button", { name: "残す" }));
 		});
-		expect(onSave).toHaveBeenCalledWith("schedule_mismatch");
+		expect(onSave).toHaveBeenCalledWith("other");
+		expect(screen.getByRole("dialog")).toBeTruthy();
 		expect(screen.getByRole("status").textContent).toBe(
-			"ありがとうございます。相手には伝わりません。",
+			"送れませんでした。もう一度お試しください。",
 		);
 		expect(
-			screen.queryByRole("button", { name: /見送った理由を残す/ }),
+			screen.queryByText("ありがとうございます。相手には伝わりません。"),
 		).toBeNull();
-		expect(screen.queryByRole("dialog")).toBeNull();
-		act(() => {
-			vi.advanceTimersByTime(2400);
-		});
-		expect(screen.queryByRole("status")).toBeNull();
+		expect(
+			screen.getByRole("button", { name: /見送った理由を残す/ }),
+		).toBeTruthy();
 	});
 
 	it("スキップは保存せず閉じるだけ", () => {

@@ -81,6 +81,12 @@ describe("Matched", () => {
 		expect(screen.getByRole("link", { name: "あとで" })).toBeTruthy();
 	});
 
+	it("1対1は相手の色を--theirs-fillに渡す", () => {
+		const { container } = view(connection());
+		const art = container.querySelector(".latch") as HTMLElement;
+		expect(art.style.getPropertyValue("--theirs-fill")).toBe("#6B4E2E");
+	});
+
 	it("bioがnullなら自己紹介の段落が無い", () => {
 		const { container } = view(connection(null));
 		expect(container.querySelector(".partner__bio")).toBeNull();
@@ -127,9 +133,20 @@ describe("Matched", () => {
 				{ user_id: "u3", display_name: "そら", bio: null, has_icon: false },
 			],
 		} as unknown as LatchDTO;
-		view(l);
+		const { container } = view(l);
 		expect(screen.getByText("ひなた")).toBeTruthy();
 		expect(screen.getByText("そら")).toBeTruthy();
 		expect(screen.getByText("3人")).toBeTruthy();
+		const paths = Array.from(container.querySelectorAll(".group-disc path"));
+		expect(paths.map((p) => p.getAttribute("class"))).toEqual([
+			"g-mine",
+			"g-mine",
+			"g-mine",
+		]);
+		expect(paths.map((p) => (p as SVGElement).style.fill)).toEqual([
+			"var(--ink)",
+			"#6B4E2E",
+			"#2F5A55",
+		]);
 	});
 });
