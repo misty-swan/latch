@@ -9,6 +9,7 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import type { LatchDTO, LatchResponseValue } from "@latch/shared";
 import { type APIRequestContext, expect } from "@playwright/test";
 import { generateKeyPair, importJWK, SignJWT } from "jose";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
@@ -130,4 +131,123 @@ export const waitFor = async (
 export const runCron = async (request: APIRequestContext): Promise<void> => {
 	const res = await request.get("/__scheduled");
 	expect(res.status(), "GET /__scheduled(Cron強制発火)").toBe(200);
+};
+
+/** Bearer認証ヘッダー(F4aのLATCH系ヘルパー共通) */
+const bearer = (accessToken: string): Record<string, string> => ({
+	authorization: `Bearer ${accessToken}`,
+});
+
+/** POST /v1/intentsの応答のうちLATCH系E2Eが使う欄(docs/05 §3.3のIntentDTO) */
+export interface CreatedIntent {
+	id: string;
+	form: "connection" | "occasion" | null;
+	status: string;
+	version: number;
+	expires_at: string | null;
+}
+
+/**
+ * Intentを直接保存する(POST /v1/intents・status=activeの201を保証)。
+ * bodyはdocs/05 §3.2のリクエストをそのまま渡す(form・topic・time・geo等)
+ */
+export const createIntent = async (
+	request: APIRequestContext,
+	accessToken: string,
+	body: Record<string, unknown>,
+): Promise<CreatedIntent> => {
+	const res = await request.post("/v1/intents", {
+		data: body,
+		headers: bearer(accessToken),
+	});
+	expect(res.status(), `POST /v1/intents(${String(body.topic)})`).toBe(201);
+	return (await res.json()) as CreatedIntent;
+};
+
+/** GET /v1/dev/latchesの1項目(F4a計画Task 17の観測契約) */
+export interface DevLatchItem {
+	id: string;
+	form: string;
+	status: string;
+	intent_ids: string[];
+	response_deadline: string;
+	proposed_at: string | null;
+	score: number;
+}
+
+/** 指定Intentを含むLATCHを観測APIで取得する(1ケースあたり少数のためlimit=50の1ページで足りる) */
+export const listDevLatches = async (
+	request: APIRequestContext,
+	accessToken: string,
+	intentId: string,
+): Promise<DevLatchItem[]> => {
+	const res = await request.get(
+		`/v1/dev/latches?intent_id=${intentId}&limit=50`,
+		{ headers: bearer(accessToken) },
+	);
+	expect(res.status(), "GET /v1/dev/latches").toBe(200);
+	const body = (await res.json()) as { items: DevLatchItem[] };
+	return body.items;
+};
+
+/**
+ * 指定Intentを含み、matchを満たすLATCHが観測APIに現れるまで待って返す。
+ * 提案化はペアのどちら側の評価でも起こり得る(後から作った側の評価で先にある側が
+ * 候補になる・F4a設計 §3.1)ため、待つ条件はLATCHの出現そのものに置く
+ */
+export const waitForLatch = async (
+	request: APIRequestContext,
+	accessToken: string,
+	intentId: string,
+	match: (item: DevLatchItem) => boolean = () => true,
+	timeout = 60_000,
+): Promise<DevLatchItem> => {
+	let found: DevLatchItem | undefined;
+	await waitFor(
+		async () => {
+			found = (await listDevLatches(request, accessToken, intentId)).find(
+				match,
+			);
+			return found !== undefined;
+		},
+		timeout,
+		500,
+	);
+	return found as DevLatchItem;
+};
+
+/** POST /v1/latches/{id}/response(yes/defer/no・200の操作後LatchDTOを保証) */
+export const respond = async (
+	request: APIRequestContext,
+	accessToken: string,
+	latchId: string,
+	response: LatchResponseValue,
+): Promise<LatchDTO> => {
+	const res = await request.post(`/v1/latches/${latchId}/response`, {
+		data: { response },
+		headers: bearer(accessToken),
+	});
+	expect(res.status(), `POST /v1/latches/{id}/response(${response})`).toBe(200);
+	return (await res.json()) as LatchDTO;
+};
+
+/**
+ * POST /v1/dev/latches/{id}/backdate(時計を操作せずに期限経過・見送り後の抑制解除・
+ * 30分再評価抑制の解除を作る・F4a計画Task 17)。日時はISO 8601で渡す
+ */
+export const backdate = async (
+	request: APIRequestContext,
+	accessToken: string,
+	latchId: string,
+	body: {
+		response_deadline?: string;
+		history_updated_at?: string;
+		intents_last_evaluated_at?: string;
+	},
+): Promise<void> => {
+	const res = await request.post(`/v1/dev/latches/${latchId}/backdate`, {
+		data: body,
+		headers: bearer(accessToken),
+	});
+	expect(res.status(), "POST /v1/dev/latches/{id}/backdate").toBe(200);
 };
