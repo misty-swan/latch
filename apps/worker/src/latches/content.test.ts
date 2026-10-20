@@ -31,15 +31,22 @@ describe("baseIntentOf", () => {
 	it("created_atの早い方", () => {
 		const early = row({ id: "01B", createdAt: at("08:00") });
 		const late = row({ id: "01A", createdAt: at("09:00") });
-		expect(baseIntentOf(early, late)).toBe(early);
-		expect(baseIntentOf(late, early)).toBe(early);
+		expect(baseIntentOf([early, late])).toBe(early);
+		expect(baseIntentOf([late, early])).toBe(early);
 	});
 
 	it("同値はid昇順", () => {
 		const a = row({ id: "01A" });
 		const b = row({ id: "01B" });
-		expect(baseIntentOf(b, a)).toBe(a);
-		expect(baseIntentOf(a, b)).toBe(a);
+		expect(baseIntentOf([b, a])).toBe(a);
+		expect(baseIntentOf([a, b])).toBe(a);
+	});
+
+	it("3人: created_at最小", () => {
+		const early = row({ id: "01C", createdAt: at("07:00") });
+		const late = row({ id: "01A", createdAt: at("09:00") });
+		const mid = row({ id: "01B", createdAt: at("08:00") });
+		expect(baseIntentOf([late, early, mid])).toBe(early);
 	});
 });
 
@@ -83,23 +90,21 @@ describe("buildProposal", () => {
 			budget: { min: 3000, max: 5000 },
 		};
 		// 引数の順序に依らない
-		expect(buildProposal(occasionA, occasionB, "渋谷")).toEqual(expected);
-		expect(buildProposal(occasionB, occasionA, "渋谷")).toEqual(expected);
+		expect(buildProposal([occasionA, occasionB], "渋谷")).toEqual(expected);
+		expect(buildProposal([occasionB, occasionA], "渋谷")).toEqual(expected);
 		expect(latchProposalSchema.safeParse(expected).success).toBe(true);
 	});
 
 	it("予算は片方がnullまたは共通部分が空ならnull", () => {
 		expect(
 			buildProposal(
-				occasionA,
-				row({ ...occasionB, budgetMin: null, budgetMax: null }),
+				[occasionA, row({ ...occasionB, budgetMin: null, budgetMax: null })],
 				null,
 			).budget,
 		).toBeNull();
 		expect(
 			buildProposal(
-				occasionA,
-				row({ ...occasionB, budgetMin: 6000, budgetMax: 8000 }),
+				[occasionA, row({ ...occasionB, budgetMin: 6000, budgetMax: 8000 })],
 				null,
 			).budget,
 		).toBeNull();
@@ -107,7 +112,7 @@ describe("buildProposal", () => {
 
 	it("人数の共通部分が空なら基準Intent側の値(防御)", () => {
 		const b = row({ ...occasionB, participantsMin: 5, participantsMax: 6 });
-		expect(buildProposal(occasionA, b, null).participants).toEqual({
+		expect(buildProposal([occasionA, b], null).participants).toEqual({
 			min: 2,
 			max: 4,
 		});
@@ -131,7 +136,7 @@ describe("buildProposal", () => {
 			budgetMin: 1000,
 			budgetMax: 2000,
 		});
-		const p = buildProposal(a, b, null);
+		const p = buildProposal([a, b], null);
 		expect(p).toEqual({
 			form: "connection",
 			topic: "先",
@@ -140,6 +145,38 @@ describe("buildProposal", () => {
 			participants: { min: 2, max: 3 },
 			budget: null,
 		});
+		expect(latchProposalSchema.safeParse(p).success).toBe(true);
+	});
+
+	it("3人: 時間は全員の共通部分・人数は全員の共通部分・誰かが予算なしならbudgetはnull", () => {
+		const mk = (
+			id: string,
+			start: string,
+			end: string,
+			pMin: number,
+			pMax: number,
+			budget: [number, number] | null,
+		) =>
+			row({
+				id,
+				startsAt: at(start),
+				endsAt: at(end),
+				expiresAt: at("20:00"),
+				participantsMin: pMin,
+				participantsMax: pMax,
+				budgetMin: budget?.[0] ?? null,
+				budgetMax: budget?.[1] ?? null,
+			});
+		const a = mk("01A", "12:00", "15:00", 2, 4, [1000, 5000]);
+		const b = mk("01B", "12:30", "14:00", 3, 4, [1000, 5000]);
+		const c = mk("01C", "13:00", "14:30", 3, 3, null);
+		const p = buildProposal([a, b, c], null);
+		expect(p.time_window).toEqual({
+			start: "2026-06-01T13:00:00.000Z",
+			end: "2026-06-01T14:00:00.000Z",
+		});
+		expect(p.participants).toEqual({ min: 3, max: 3 });
+		expect(p.budget).toBeNull();
 		expect(latchProposalSchema.safeParse(p).success).toBe(true);
 	});
 });

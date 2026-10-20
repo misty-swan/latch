@@ -177,6 +177,43 @@ const insertLatch = async (
 	return id;
 };
 
+/** n人(3〜4人)の集合の保留LATCHを配置する(F4b設計 §2。proposal_historyは本試験の対象外) */
+const insertGroupLatch = async (members: IntentRow[]): Promise<string> => {
+	const expiresAt = new Date(
+		Math.min(...members.map((m) => m.expiresAt?.getTime() ?? 0)),
+	);
+	const id = ulid();
+	await db.insert(latches).values({
+		id,
+		form: "occasion",
+		intentIds: members.map((m) => m.id),
+		proposal: {
+			form: "occasion",
+			topic: "グループ保留試験",
+			time_window: {
+				start: later(4 * HOUR).toISOString(),
+				end: later(6 * HOUR).toISOString(),
+			},
+			region_name: null,
+			participants: { min: 3, max: 3 },
+			budget: null,
+		},
+		score: 0.9,
+		status: "candidate",
+		responseDeadline: expiresAt,
+		expiresAt,
+		lastMessageAt: ago(HOUR),
+		completedAt: null,
+		proposedAt: null,
+		createdAt: ago(HOUR),
+		updatedAt: ago(HOUR),
+	});
+	await db
+		.insert(latchMembers)
+		.values(members.map((m) => ({ latchId: id, userId: m.userId })));
+	return id;
+};
+
 /** 2ユーザー・2Intent・保留LATCH1件 */
 const setupPair = async (
 	form: Form,
@@ -391,6 +428,53 @@ describe("releaseHeld", () => {
 		expect(row?.proposedAt).toBeNull();
 		expect(await notificationsOf(latchId)).toHaveLength(0);
 		expect(await eventsOf(latchId)).toHaveLength(0);
+	});
+
+	it("3人の保留: 1人だけ通知上限(6件)なら昇格せず、0件なら3人全員にproposal通知を作る", async () => {
+		const users3 = [await insertUser(), await insertUser(), await insertUser()];
+		const intents3 = [];
+		for (const u of users3) intents3.push(await insertIntent(u, "occasion"));
+		const latchId = await insertGroupLatch(intents3);
+		await fillProposalNotifications(users3[1] ?? "", 6);
+
+		expect(await releaseHeld(db, NOW, users3)).toBe(0);
+		expect((await latchOf(latchId))?.status).toBe("candidate");
+		expect(await notificationsOf(latchId)).toHaveLength(0);
+
+		await db
+			.update(notifications)
+			.set({ createdAt: ago(24 * HOUR) })
+			.where(eq(notifications.userId, users3[1] ?? ""));
+		expect(await releaseHeld(db, NOW, users3)).toBe(1);
+		expect((await latchOf(latchId))?.status).toBe("proposed");
+		const notes = await notificationsOf(latchId);
+		expect(notes.map((n) => n.type)).toEqual([
+			"proposal",
+			"proposal",
+			"proposal",
+		]);
+		expect(new Set(notes.map((n) => n.userId))).toEqual(new Set(users3));
+	});
+
+	it("3人の保留: 1人がpausedなら保留のまま・1人がmatchedならcancelledで閉じる", async () => {
+		const users3 = [await insertUser(), await insertUser(), await insertUser()];
+		const paused = [
+			await insertIntent(users3[0] ?? "", "occasion"),
+			await insertIntent(users3[1] ?? "", "occasion"),
+			await insertIntent(users3[2] ?? "", "occasion", { status: "paused" }),
+		];
+		const pausedLatch = await insertGroupLatch(paused);
+		expect(await releaseHeld(db, NOW, users3)).toBe(0);
+		expect((await latchOf(pausedLatch))?.status).toBe("candidate");
+
+		const matched = [
+			await insertIntent(users3[0] ?? "", "occasion"),
+			await insertIntent(users3[1] ?? "", "occasion"),
+			await insertIntent(users3[2] ?? "", "occasion", { status: "matched" }),
+		];
+		const matchedLatch = await insertGroupLatch(matched);
+		await releaseHeld(db, NOW, users3);
+		expect((await latchOf(matchedLatch))?.status).toBe("cancelled");
 	});
 
 	it("userIds指定時は他ユーザーの保留に触れない", async () => {

@@ -140,7 +140,7 @@ export const blockedForProposal = async (
 			continue;
 		}
 		const targetAt =
-			origin.form === "occasion" ? occasionTargetAt(origin, other) : null;
+			origin.form === "occasion" ? occasionTargetAt([origin, other]) : null;
 		if (
 			!historyAllowsReproposal(history.outcome, targetAt) ||
 			(targetAt !== null &&
@@ -160,7 +160,7 @@ export const proposePair = async (
 	const { a, b, rowId, score } = input;
 	const form = a.form;
 	if (form === null) throw new Error("proposal intent without form");
-	const targetAt = form === "occasion" ? occasionTargetAt(a, b) : null;
+	const targetAt = form === "occasion" ? occasionTargetAt([a, b]) : null;
 
 	// 1. 機会で対象時刻まで75分未満なら提案しない(docs/01 §8)
 	if (targetAt !== null && isTooLate(targetAt, now)) return "skipped";
@@ -205,7 +205,7 @@ export const proposePair = async (
 	// 3. 提示か保留か(F4a設計 §3.3)
 	const present = await canPresent(db, [a.userId, b.userId], [a.id, b.id], now);
 
-	const base = baseIntentOf(a, b);
+	const base = baseIntentOf([a, b]);
 	const regionName =
 		base.geoCenterLat !== null &&
 		base.geoCenterLng !== null &&
@@ -215,8 +215,8 @@ export const proposePair = async (
 					lng: base.geoCenterLng,
 				})
 			: null;
-	const proposal = buildProposal(a, b, regionName);
-	const expiresAt = minExpiry(a, b);
+	const proposal = buildProposal([a, b], regionName);
+	const expiresAt = minExpiry([a, b]);
 	const status = present ? "proposed" : "candidate";
 	// 保留中の回答期限は暫定でexpires_at(提示時に計算し直す・F4a設計 §3.5)
 	const deadline = present

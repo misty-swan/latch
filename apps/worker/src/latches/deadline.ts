@@ -6,22 +6,34 @@
 import { type IntentForm, LATCH } from "@latch/shared";
 import type { IntentRow } from "../pipeline/consumer";
 
-/** 機会の対象時刻=双方のstarts_atの遅い方(重なりの開始)。starts_at欠落は不変条件違反 */
-export const occasionTargetAt = (a: IntentRow, b: IntentRow): Date => {
-	if (a.startsAt === null || b.startsAt === null) {
-		throw new Error("occasion intent without starts_at");
+/** 機会の対象時刻=全メンバーのstarts_atの最大値(重なりの開始)。starts_at欠落は不変条件違反 */
+export const occasionTargetAt = (members: IntentRow[]): Date => {
+	let target: Date | null = null;
+	for (const m of members) {
+		if (m.startsAt === null) {
+			throw new Error("occasion intent without starts_at");
+		}
+		if (target === null || m.startsAt.getTime() > target.getTime()) {
+			target = m.startsAt;
+		}
 	}
-	return a.startsAt.getTime() >= b.startsAt.getTime() ? a.startsAt : b.startsAt;
+	if (target === null) throw new Error("occasion target requires members");
+	return target;
 };
 
 /** 参加Intentのexpires_atの最小値(active化済みなら必ず非null) */
-export const minExpiry = (a: IntentRow, b: IntentRow): Date => {
-	if (a.expiresAt === null || b.expiresAt === null) {
-		throw new Error("active intent without expires_at");
+export const minExpiry = (members: IntentRow[]): Date => {
+	let min: Date | null = null;
+	for (const m of members) {
+		if (m.expiresAt === null) {
+			throw new Error("active intent without expires_at");
+		}
+		if (min === null || m.expiresAt.getTime() < min.getTime()) {
+			min = m.expiresAt;
+		}
 	}
-	return a.expiresAt.getTime() <= b.expiresAt.getTime()
-		? a.expiresAt
-		: b.expiresAt;
+	if (min === null) throw new Error("min expiry requires members");
+	return min;
 };
 
 /**

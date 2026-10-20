@@ -87,13 +87,11 @@ export const expireHeld = async (
 		.orderBy(asc(targetStart), asc(latches.id))
 		.limit(PIPELINE.CRON_BATCH_LIMIT);
 	for (const latch of occasions) {
-		const pair = await intentsOf(db, latch);
+		const members = await intentsOf(db, latch);
 		// 参加Intentが不在のものは releaseHeld が cancelled で閉じる
-		if (pair === null) continue;
-		const [a, b] = pair;
-		if (a === undefined || b === undefined) continue;
-		if (a.startsAt === null || b.startsAt === null) continue;
-		if (!isTooLate(occasionTargetAt(a, b), now)) continue;
+		if (members === null) continue;
+		if (members.some((m) => m.startsAt === null)) continue;
+		if (!isTooLate(occasionTargetAt(members), now)) continue;
 		if (
 			await closeLatch(db, latch.id, "expired", "release", ["candidate"], now)
 		) {
@@ -237,24 +235,19 @@ const releaseOne = async (
 		await closeLatch(db, latch.id, "expired", "release", ["candidate"], now);
 		return false;
 	}
-	const pair = await intentsOf(db, latch);
-	const [a, b] = pair ?? [];
+	const intentRows = await intentsOf(db, latch);
 	if (
 		latch.form === "occasion" &&
-		a !== undefined &&
-		b !== undefined &&
-		a.startsAt !== null &&
-		b.startsAt !== null &&
-		isTooLate(occasionTargetAt(a, b), now)
+		intentRows !== null &&
+		intentRows.every((i) => i.startsAt !== null) &&
+		isTooLate(occasionTargetAt(intentRows), now)
 	) {
 		await closeLatch(db, latch.id, "expired", "release", ["candidate"], now);
 		return false;
 	}
 	if (
-		pair === null ||
-		a === undefined ||
-		b === undefined ||
-		pair.some(
+		intentRows === null ||
+		intentRows.some(
 			(i) =>
 				i.status === "matched" ||
 				i.status === "expired" ||
@@ -265,7 +258,7 @@ const releaseOne = async (
 		return false;
 	}
 	// paused(と想定外の状態)は保留のまま残す
-	if (pair.some((i) => i.status !== "active")) return false;
+	if (intentRows.some((i) => i.status !== "active")) return false;
 
 	const members = await db
 		.select({ userId: latchMembers.userId })
@@ -274,8 +267,14 @@ const releaseOne = async (
 	const memberIds = members.map((m) => m.userId);
 	if (!(await canPresent(db, memberIds, latch.intentIds, now))) return false;
 
-	const targetAt = latch.form === "occasion" ? occasionTargetAt(a, b) : null;
-	const deadline = responseDeadline(latch.form, now, targetAt, minExpiry(a, b));
+	const targetAt =
+		latch.form === "occasion" ? occasionTargetAt(intentRows) : null;
+	const deadline = responseDeadline(
+		latch.form,
+		now,
+		targetAt,
+		minExpiry(intentRows),
+	);
 	return promote(db, latch, memberIds, deadline, now);
 };
 

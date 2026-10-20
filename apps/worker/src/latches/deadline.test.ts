@@ -92,17 +92,25 @@ describe("isTooLate", () => {
 });
 
 describe("occasionTargetAt・minExpiry", () => {
-	it("対象時刻は双方のstarts_atの遅い方", () => {
+	it("対象時刻は全員のstarts_atの遅い方(順序に依らない)", () => {
 		const a = row({ startsAt: at("12:00") });
 		const b = row({ startsAt: at("13:00") });
-		expect(occasionTargetAt(a, b)).toEqual(at("13:00"));
-		expect(occasionTargetAt(b, a)).toEqual(at("13:00"));
+		expect(occasionTargetAt([a, b])).toEqual(at("13:00"));
+		expect(occasionTargetAt([b, a])).toEqual(at("13:00"));
 	});
 
 	it("Intent期限の最小値", () => {
 		const a = row({ expiresAt: at("15:00") });
 		const b = row({ expiresAt: at("14:00") });
-		expect(minExpiry(a, b)).toEqual(at("14:00"));
-		expect(minExpiry(b, a)).toEqual(at("14:00"));
+		expect(minExpiry([a, b])).toEqual(at("14:00"));
+		expect(minExpiry([b, a])).toEqual(at("14:00"));
+	});
+
+	it("3人: 対象時刻はstarts_atの最大・期限は最小", () => {
+		const a = row({ startsAt: at("12:00"), expiresAt: at("16:00") });
+		const b = row({ startsAt: at("13:00"), expiresAt: at("15:00") });
+		const c = row({ startsAt: at("12:30"), expiresAt: at("14:30") });
+		expect(occasionTargetAt([a, b, c])).toEqual(at("13:00"));
+		expect(minExpiry([a, b, c])).toEqual(at("14:30"));
 	});
 });
