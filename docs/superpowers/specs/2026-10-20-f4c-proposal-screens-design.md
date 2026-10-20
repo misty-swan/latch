@@ -91,6 +91,7 @@
 ## 2. API(worker)の追加
 
 - LatchDTOへ`my_intent_id: string`を追加する。`latches.intent_ids`のうち自分(`intents.user_id`)のものを返す。全状態で常に含める(自分のデータのため、成立前に相手の情報を出さない規律(#20)を崩さない)
+- LatchDTOへ`matched_at: string | null`(成立時刻・ISO 8601)を追加する。latch_status_eventsのto_status=matchedの記録の時刻を返し、成立を経ていなければnull。つながりました画面の「M月D日 H:MM につながりました」に使う(計画作成時に判明した不足・成立の事実は成立後にのみ意味を持ち、成立前は常にnullのため#20を崩さない)
 - `packages/shared`の`latchDtoSchema`と、worker の`toLatchDto`・`loadLatchDto`を更新する
 - 05 §3のLatchDTOの定義を改版する
 - 新しいAPIは作らない(アイコンは既存の`GET /v1/users/{user_id}/icon`)
