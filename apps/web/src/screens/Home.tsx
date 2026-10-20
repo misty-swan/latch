@@ -3,16 +3,20 @@
  * - 一覧はTanStack Query(useIntentsQuery)で取得(docs/05 §3.3・limit=50・F2'では次ページなし)
  * - カードは .intent(wordsは2行clamp)・formラベル(つながり/機会)・状態表示名(01 §10対照)
  * - 下書きカードは /compose?draft=<id> への再開導線・それ以外のカードの詳細はF3以降のため表示のみ
- * - 提案が届いていますカード(arrival)はF4スコープ外のため出さない
+ * - 進行中の提案は到着カード(arrival)として見出しの後に並べ・提案先の意思カードは「回答を待っています」にする(F4c設計)。
+ *   器の灯りは未回答の提案があるときだけ。提案の取得中・失敗時は到着カードを出さず意思の一覧だけ表示する
  * - お知らせ・自分のアイコンは表示のみ(遷移先はF7)
  * - 取得失敗時は再試行を出す(ボードに通信エラー画面がないための共通表示・実装の裁量)
  */
 
-import type { IntentDTO, IntentStatus } from "@latch/shared";
+import type { IntentDTO, IntentStatus, LatchDTO } from "@latch/shared";
 import type { CSSProperties } from "react";
 import { Link } from "react-router";
 import { INTENT_STATUS_LABELS, useIntentsQuery } from "../intents/queries";
-import { PATHS } from "../routes/paths";
+import { formatWhen } from "../latches/format";
+import { useProposalsQuery } from "../latches/queries";
+import { latchPath, PATHS } from "../routes/paths";
+import { LatchArt } from "./latch/art";
 import { ScreenGrain } from "./shared";
 
 const DAY_MS = 24 * 3_600_000;
@@ -22,15 +26,6 @@ const FORM_LABELS = {
 	connection: "つながり",
 	occasion: "機会",
 } as const;
-
-/** 灯り(lamp)に入る状態=提案が届いて回答を待っている間のみ。
- * README §3・DSColor/DSLatchボードの規定(「提案が届いたときにしか使わない色」)であり・
- * Homeボードでlampになるのは「回答を待っています」のカードだけ。
- * proposed/partial_acceptはLatch側の状態語で・提案カードの表示はF4以降(F2'の一覧は入らない) */
-const LAMP_STATUSES: ReadonlySet<string> = new Set([
-	"proposed",
-	"partial_accept",
-]);
 
 /** 下書き・期限切れの区分に入る状態(薄表示。取り下げも同じ控えめ扱いにする) */
 const QUIET_STATUSES: ReadonlySet<IntentStatus> = new Set([
@@ -69,12 +64,12 @@ const formatRemain = (ms: number): string => {
 };
 
 /** 状態チップの色分け。灯りは提案が届いた(回答待ち)のみ・activeは通常の墨色
- * (README §3・DSLatchボードの規定) */
-const statusClass = (intent: IntentDTO): string => {
+ * (README §3・DSLatchボードの規定)。Intentの状態に提案中は無いため・waitingで受ける */
+const statusClass = (intent: IntentDTO, waiting: boolean): string => {
 	if (QUIET_STATUSES.has(intent.status)) {
 		return "status status--quiet";
 	}
-	if (LAMP_STATUSES.has(intent.status)) {
+	if (waiting) {
 		return "status status--lamp";
 	}
 	return "status";
@@ -82,7 +77,13 @@ const statusClass = (intent: IntentDTO): string => {
 
 /** カードの半円グリフ(状態ごとにボードの意匠を出し分ける)。
  * activeはformを問わずgt/gm(DSLatchボードのactive表現)・灯りのgl/gmは回答待ちのみ */
-function GlyphPaths({ intent }: { intent: IntentDTO }) {
+function GlyphPaths({
+	intent,
+	waiting,
+}: {
+	intent: IntentDTO;
+	waiting: boolean;
+}) {
 	if (intent.status === "draft") {
 		return <path className="gd" d="M9.4 2.4A7.6 7.6 0 0 0 9.4 17.6Z" />;
 	}
@@ -97,7 +98,7 @@ function GlyphPaths({ intent }: { intent: IntentDTO }) {
 			</>
 		);
 	}
-	if (LAMP_STATUSES.has(intent.status)) {
+	if (waiting) {
 		return (
 			<>
 				<path className="gl" d="M11.3 1.5A8.5 8.5 0 0 1 11.3 18.5Z" />
@@ -185,17 +186,19 @@ function IntentCard({
 	intent,
 	now,
 	riseClass,
+	waiting,
 }: {
 	intent: IntentDTO;
 	now: Date;
 	riseClass: string;
+	waiting: boolean;
 }) {
 	const dim = QUIET_STATUSES.has(intent.status);
 	const body = (
 		<>
 			<span className="intent__glyph">
 				<svg className="glyph glyph--l" viewBox="0 0 20 20" aria-hidden="true">
-					<GlyphPaths intent={intent} />
+					<GlyphPaths intent={intent} waiting={waiting} />
 				</svg>
 			</span>
 			<span className="stack">
@@ -204,11 +207,13 @@ function IntentCard({
 					{intent.form !== null && (
 						<span className="t-label">{FORM_LABELS[intent.form]}</span>
 					)}
-					<span className={statusClass(intent)}>
+					<span className={statusClass(intent, waiting)}>
 						<svg className="glyph" viewBox="0 0 20 20" aria-hidden="true">
-							<GlyphPaths intent={intent} />
+							<GlyphPaths intent={intent} waiting={waiting} />
 						</svg>
-						{INTENT_STATUS_LABELS[intent.status]}
+						{waiting && !dim
+							? "回答を待っています"
+							: INTENT_STATUS_LABELS[intent.status]}
 					</span>
 				</span>
 				<span className="intent__time">
@@ -234,6 +239,36 @@ function IntentCard({
 			{/* 詳細画面はF3以降のため・表示のみのカードにする */}
 			<div className={`intent${dim ? " is-dim" : ""} ${riseClass}`}>{body}</div>
 		</li>
+	);
+}
+
+/** 提案の到着カード(prototype arrivalBlock)。yes済みは相手の回答待ちで押した状態 */
+function ArrivalCard({ latch, now }: { latch: LatchDTO; now: Date }) {
+	const pressed = latch.my_response === "yes";
+	return (
+		<Link
+			className={`arrival${pressed ? " is-pressed" : ""} rise`}
+			to={latchPath(latch.id)}
+		>
+			<LatchArt state={pressed ? "pressed" : "arrived"} size={40} gap={5} />
+			<span className="stack" style={{ gap: 2 }}>
+				<span className="arrival__title">
+					{pressed ? "相手の回答を待っています" : "提案が届いています"}
+				</span>
+				<span className="t-meta">
+					{`回答期限 ${formatWhen(latch.response_deadline, now)} まで`}
+					{latch.participants_count > 2 && (
+						<>
+							<span className="sep">·</span>
+							{`${latch.participants_count}人`}
+						</>
+					)}
+				</span>
+			</span>
+			<svg className="ic ic--s" viewBox="0 0 24 24" aria-hidden="true">
+				<path d="M9.5 6l6 6-6 6" />
+			</svg>
+		</Link>
 	);
 }
 
@@ -299,6 +334,14 @@ function HomeTabbar() {
 
 export function Home() {
 	const { data, isPending, isError, refetch } = useIntentsQuery();
+	// 提案の取得中・失敗は空として扱い・意思の一覧だけを出す
+	const proposals = useProposalsQuery().data?.items ?? [];
+	const waitingIntentIds = new Set(
+		proposals.flatMap((latch) =>
+			latch.my_intent_id === null ? [] : [latch.my_intent_id],
+		),
+	);
+	const hasUnanswered = proposals.some((latch) => latch.my_response === null);
 	// 相対表示(預けてN日・開始まで など)の基準時刻
 	const now = new Date();
 
@@ -341,7 +384,7 @@ export function Home() {
 		);
 	}
 
-	if (data.items.length === 0) {
+	if (data.items.length === 0 && proposals.length === 0) {
 		return (
 			<div className="screen home home--empty">
 				<ScreenGrain />
@@ -405,7 +448,7 @@ export function Home() {
 		<div className="screen home">
 			<ScreenGrain />
 			<div
-				className="vessel vessel--quiet is-lit"
+				className={`vessel vessel--quiet${hasUnanswered ? " is-lit" : ""}`}
 				style={{ width: 340, height: 340, right: -176, top: -128 }}
 				aria-hidden="true"
 			/>
@@ -419,6 +462,9 @@ export function Home() {
 							: `いま、${activeCount}つの意思を預けています。`}
 					</p>
 				</div>
+				{proposals.map((latch) => (
+					<ArrivalCard key={latch.id} latch={latch} now={now} />
+				))}
 				<ul>
 					{entrusted.map((intent, index) => (
 						<IntentCard
@@ -426,6 +472,7 @@ export function Home() {
 							intent={intent}
 							now={now}
 							riseClass={`rise rise-${Math.min(5, index + 1)}`}
+							waiting={waitingIntentIds.has(intent.id)}
 						/>
 					))}
 				</ul>
@@ -439,6 +486,7 @@ export function Home() {
 									intent={intent}
 									now={now}
 									riseClass={`rise rise-${Math.min(5, index + 4)}`}
+									waiting={false}
 								/>
 							))}
 						</ul>

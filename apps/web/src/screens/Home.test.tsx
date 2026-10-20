@@ -2,10 +2,10 @@
  * Home画面(ボード: Home.dc.html・HomeEmpty.dc.html)の単体試験。
  * 一覧カード(words・formラベル・状態表示名01 §10対照)・下書きカードの再開リンク・
  * 空状態のコピー・取得失敗時の再試行導線を確かめる(fetchはモック)
- * 提案が届いていますカード(arrival)はF4スコープ外のため・出ていないことも確かめる
+ * 提案の到着カード(arrival)・意思カードの「回答を待っています」・器の灯りも確かめる(F4c)
  */
 
-import type { IntentDTO } from "@latch/shared";
+import type { IntentDTO, LatchDTO } from "@latch/shared";
 import {
 	cleanup,
 	fireEvent,
@@ -117,6 +117,21 @@ const expiredIntent: IntentDTO = {
 	updated_at: iso(-6 * DAY_MS),
 };
 
+/** 進行中の提案(LatchDTO)。回答期限はnowから1日後 */
+const proposalOf = (over: Partial<LatchDTO> = {}): LatchDTO =>
+	({
+		id: "L1",
+		form: "connection",
+		status: "proposed",
+		response_deadline: iso(DAY_MS),
+		participants_count: 2,
+		my_response: null,
+		score: 0.5,
+		my_intent_id: connectionIntent.id,
+		matched_at: null,
+		...over,
+	}) as LatchDTO;
+
 const jsonResponse = (status: number, body: unknown): Response =>
 	new Response(JSON.stringify(body), {
 		status,
@@ -125,6 +140,8 @@ const jsonResponse = (status: number, body: unknown): Response =>
 
 /** テストが差し替える応答(GET /v1/intents?limit=50) */
 let listResponse: Response;
+/** テストが差し替える応答(GET /v1/latches?type=proposals&limit=50) */
+let proposalsResponse: Response;
 
 const fetchMock = vi.fn(
 	async (input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => {
@@ -132,9 +149,17 @@ const fetchMock = vi.fn(
 		if (url === "/v1/intents?limit=50") {
 			return listResponse;
 		}
+		if (url === "/v1/latches?type=proposals&limit=50") {
+			return proposalsResponse;
+		}
 		throw new Error(`想定外のfetch: ${url}`);
 	},
 );
+
+/** 意思一覧(GET /v1/intents)の呼び出し回数(提案の取得は数えない) */
+const intentListCalls = (): number =>
+	fetchMock.mock.calls.filter(([url]) => String(url) === "/v1/intents?limit=50")
+		.length;
 
 const setup = () => {
 	const router = createMemoryRouter(appRoutes, {
@@ -153,6 +178,7 @@ beforeEach(() => {
 	// homeは要認証ガードの内側のため・JWTを注入して置く
 	authSession.setTokens("access-home", null);
 	listResponse = jsonResponse(200, { items: [], next_cursor: null });
+	proposalsResponse = jsonResponse(200, { items: [], next_cursor: null });
 });
 
 afterEach(() => {
@@ -186,8 +212,139 @@ describe("Home", () => {
 		expect(screen.getByText("預けて12日")).toBeTruthy();
 		expect(screen.getByText("あと18日")).toBeTruthy();
 		expect(screen.getByText(/^開始まで/)).toBeTruthy();
-		// F4スコープ外の提案カードは出さない
+		// 提案が無ければ到着カードは出ない
 		expect(document.querySelector(".arrival")).toBeNull();
+	});
+
+	it("未回答の提案は到着カードとして出て、提案の画面へつながる", async () => {
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		proposalsResponse = jsonResponse(200, {
+			items: [proposalOf()],
+			next_cursor: null,
+		});
+		setup();
+
+		expect(await screen.findByText("提案が届いています")).toBeTruthy();
+		const card = document.querySelector(".arrival") as HTMLAnchorElement;
+		expect(card.getAttribute("href")).toBe("/latches/L1");
+		expect(card.className).not.toContain("is-pressed");
+		expect(card.textContent).toContain("回答期限");
+	});
+
+	it("yes済みは「相手の回答を待っています」でis-pressed", async () => {
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		proposalsResponse = jsonResponse(200, {
+			items: [proposalOf({ my_response: "yes" })],
+			next_cursor: null,
+		});
+		setup();
+
+		expect(await screen.findByText("相手の回答を待っています")).toBeTruthy();
+		expect(document.querySelector(".arrival.is-pressed")).not.toBeNull();
+	});
+
+	it("グループの到着カードは人数を出す", async () => {
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		proposalsResponse = jsonResponse(200, {
+			items: [proposalOf({ participants_count: 3 })],
+			next_cursor: null,
+		});
+		setup();
+
+		await screen.findByText("提案が届いています");
+		expect(document.querySelector(".arrival")?.textContent).toContain("·3人");
+	});
+
+	it("提案が届いている意思のカードは「回答を待っています」になる", async () => {
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent, occasionIntent],
+			next_cursor: null,
+		});
+		proposalsResponse = jsonResponse(200, {
+			items: [proposalOf({ my_intent_id: connectionIntent.id })],
+			next_cursor: null,
+		});
+		setup();
+
+		await screen.findByText("提案が届いています");
+		const lamps = document.querySelectorAll(".status--lamp");
+		expect(lamps.length).toBe(1);
+		expect(lamps[0]?.textContent).toBe("回答を待っています");
+		expect(lamps[0]?.closest(".intent")?.textContent).toContain(
+			connectionIntent.raw_text,
+		);
+	});
+
+	it("my_intent_idがnullの提案はどの意思カードにも当たらない", async () => {
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		proposalsResponse = jsonResponse(200, {
+			items: [proposalOf({ my_intent_id: null })],
+			next_cursor: null,
+		});
+		setup();
+
+		await screen.findByText("提案が届いています");
+		expect(document.querySelectorAll(".status--lamp").length).toBe(0);
+	});
+
+	const litVessel = async (items: LatchDTO[], waitText?: string) => {
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		proposalsResponse = jsonResponse(200, { items, next_cursor: null });
+		setup();
+		await screen.findByText(connectionIntent.raw_text);
+		if (waitText !== undefined) {
+			await screen.findByText(waitText);
+		}
+		return document.querySelector(".vessel")?.className ?? "";
+	};
+
+	it("器の灯りは提案がなければ点かない", async () => {
+		expect(await litVessel([])).not.toContain("is-lit");
+	});
+
+	it("器の灯りはyes済みの提案だけでは点かない", async () => {
+		expect(
+			await litVessel(
+				[proposalOf({ my_response: "yes" })],
+				"相手の回答を待っています",
+			),
+		).not.toContain("is-lit");
+	});
+
+	it("器の灯りは未回答の提案があると点く", async () => {
+		expect(await litVessel([proposalOf()], "提案が届いています")).toContain(
+			"is-lit",
+		);
+	});
+
+	it("提案の取得に失敗しても意思の一覧を表示する", async () => {
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		proposalsResponse = jsonResponse(500, {
+			error: { code: "INTERNAL", message: "HTTP 500", details: {} },
+		});
+		setup();
+
+		expect(await screen.findByText(connectionIntent.raw_text)).toBeTruthy();
+		expect(document.querySelector(".arrival")).toBeNull();
+		expect(screen.queryByText("一覧を読み込めませんでした。")).toBeNull();
 	});
 
 	it("activeカードは灯り(status--lamp・glグリフ)を使わない(README §3の規定)", async () => {
@@ -287,7 +444,7 @@ describe("Home", () => {
 		expect(
 			await screen.findByText("一覧を読み込めませんでした。"),
 		).toBeTruthy();
-		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(intentListCalls()).toBe(1);
 
 		listResponse = jsonResponse(200, {
 			items: [connectionIntent],
@@ -296,6 +453,6 @@ describe("Home", () => {
 		fireEvent.click(screen.getByRole("button", { name: "もう一度読み込む" }));
 
 		expect(await screen.findByText(connectionIntent.raw_text)).toBeTruthy();
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(intentListCalls()).toBe(2);
 	});
 });

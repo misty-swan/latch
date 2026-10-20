@@ -101,6 +101,10 @@ const fetchMock = vi.fn(
 		if (url === "/v1/intents?limit=50" && method === "GET") {
 			return jsonResponse(200, { items: [], next_cursor: null });
 		}
+		// homeの提案取得(F4c)も空で返す
+		if (url === "/v1/latches?type=proposals&limit=50" && method === "GET") {
+			return jsonResponse(200, { items: [], next_cursor: null });
+		}
 		throw new Error(`想定外のfetch: ${method} ${url}`);
 	},
 );
@@ -289,9 +293,9 @@ describe("Compose", () => {
 		await waitFor(() => {
 			expect(router.state.location.pathname).toBe(PATHS.home);
 		});
-		// homeの一覧取得(limit=50)のみが走り・空欄の下書き保存はしない
+		// homeの一覧取得(limit=50)と提案取得のみが走り・空欄の下書き保存はしない
 		await waitFor(() => {
-			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(fetchMock).toHaveBeenCalledTimes(2);
 		});
 		const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
 		expect(url).toBe("/v1/intents?limit=50");
