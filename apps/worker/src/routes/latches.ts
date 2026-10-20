@@ -22,6 +22,7 @@ import { Hono } from "hono";
 import { type AppEnv, requireRegistered } from "../auth/middleware";
 import { systemClock } from "../clock/clock";
 import {
+	intents,
 	latches,
 	latchMembers,
 	latchResponses,
@@ -128,11 +129,28 @@ const loadLatchDto = async (
 				isNull(latchResponses.retractedAt),
 			),
 		);
-	let revealed = latch.status === "matched";
-	if (!revealed && latch.status === "cancelled") {
-		// matched経由のcancelled(leave等)はlatch_status_eventsにto=matchedの記録がある
+	// 自分側のIntent: intent_idsのうちintents.user_idが自分のもの(F4c設計 §2)
+	const [myIntent] =
+		latch.intentIds.length === 0
+			? []
+			: await db
+					.select({ id: intents.id })
+					.from(intents)
+					.where(
+						and(
+							inArray(intents.id, latch.intentIds),
+							eq(intents.userId, userId),
+						),
+					)
+					.limit(1);
+	if (myIntent === undefined) {
+		return null;
+	}
+	// 成立時刻: to=matchedの状態記録のcreated_at。matched・matched経由のcancelled(leave等)にある
+	let matchedAt: Date | null = null;
+	if (latch.status === "matched" || latch.status === "cancelled") {
 		const [ev] = await db
-			.select({ id: latchStatusEvents.id })
+			.select({ createdAt: latchStatusEvents.createdAt })
 			.from(latchStatusEvents)
 			.where(
 				and(
@@ -141,11 +159,14 @@ const loadLatchDto = async (
 				),
 			)
 			.limit(1);
-		revealed = ev !== undefined;
+		matchedAt = ev?.createdAt ?? null;
 	}
+	const revealed = latch.status === "matched" || matchedAt !== null;
 	return toLatchDto(latch, {
 		participantsCount: memberRows.length,
 		myResponse: (mine?.response ?? null) as LatchResponseValue | null,
+		myIntentId: myIntent.id,
+		matchedAt,
 		members: revealed
 			? memberRows.filter((m) => m.user.id !== userId).map((m) => m.user)
 			: undefined,

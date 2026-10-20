@@ -3,7 +3,7 @@
  * 登録済みJWTは実フロー(auth/token→POST /v1/users)で取得し、LATCH行は直接INSERTで配置する。
  */
 import { env, SELF } from "cloudflare:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { importJWK, SignJWT } from "jose";
 import { ulid } from "ulid";
@@ -204,6 +204,8 @@ describe("GET /v1/latches/:id の表示範囲", () => {
 			[
 				"form",
 				"id",
+				"matched_at",
+				"my_intent_id",
 				"my_response",
 				"participants_count",
 				"response_deadline",
@@ -213,6 +215,108 @@ describe("GET /v1/latches/:id の表示範囲", () => {
 		);
 		expect(body.participants_count).toBe(2);
 		expect(body.my_response).toBeNull();
+	});
+
+	it("my_intent_idは自分側のIntent IDで、成立前のmatched_atはnull", async () => {
+		const { a, b, id } = await setup("proposed");
+		const mineOf = async (userId: string) => {
+			const rows = await db
+				.select({ id: intents.id })
+				.from(intents)
+				.where(eq(intents.userId, userId));
+			return rows[0]?.id;
+		};
+		for (const u of [a, b]) {
+			const res = await call("GET", `/v1/latches/${id}`, u.token);
+			const body = (await res.json()) as Record<string, unknown>;
+			expect(body.my_intent_id).toBe(await mineOf(u.id));
+			expect(body.matched_at).toBeNull();
+			expect(Object.keys(body).sort()).toEqual(
+				[
+					"id",
+					"form",
+					"status",
+					"response_deadline",
+					"participants_count",
+					"my_response",
+					"score",
+					"my_intent_id",
+					"matched_at",
+				].sort(),
+			);
+		}
+	});
+
+	it("双方yes後のmatched_atはmatchedの状態記録の時刻", async () => {
+		const { a, b, id } = await setup("proposed");
+		await yes(id, a.token);
+		await yes(id, b.token);
+		const [ev] = await db
+			.select()
+			.from(latchStatusEvents)
+			.where(
+				and(
+					eq(latchStatusEvents.latchId, id),
+					eq(latchStatusEvents.toStatus, "matched"),
+				),
+			);
+		expect(ev).toBeDefined();
+		const body = (await (
+			await call("GET", `/v1/latches/${id}`, a.token)
+		).json()) as { matched_at: string | null };
+		expect(body.matched_at).toBe(ev?.createdAt.toISOString());
+		const left = (await (
+			await call("POST", `/v1/latches/${id}/leave`, a.token)
+		).json()) as { status: string; matched_at: string | null };
+		expect(left.status).toBe("cancelled");
+		expect(left.matched_at).toBe(ev?.createdAt.toISOString());
+	});
+
+	it("グループでも各参加者のmy_intent_idは本人のIntent", async () => {
+		const [a, b, c] = [
+			await registerUser("甲"),
+			await registerUser("乙"),
+			await registerUser("丙"),
+		];
+		const ids = [await insertIntent(a.id), await insertIntent(b.id)];
+		ids.push(await insertIntent(c.id));
+		const id = ulid();
+		const now = new Date();
+		await db.insert(latches).values({
+			id,
+			form: "connection",
+			intentIds: ids,
+			proposal: {
+				form: "connection",
+				topic: "グループ",
+				time_window: null,
+				region_name: null,
+				participants: { min: 3, max: 4 },
+				budget: null,
+			},
+			score: 0.9,
+			status: "proposed",
+			responseDeadline: new Date(now.getTime() + HOUR),
+			expiresAt: new Date(now.getTime() + 24 * HOUR),
+			lastMessageAt: now,
+			completedAt: null,
+			proposedAt: now,
+			createdAt: now,
+			updatedAt: now,
+		});
+		await db
+			.insert(latchMembers)
+			.values([a, b, c].map((u) => ({ latchId: id, userId: u.id })));
+		for (const [u, intentId] of [
+			[a, ids[0]],
+			[b, ids[1]],
+			[c, ids[2]],
+		] as const) {
+			const body = (await (
+				await call("GET", `/v1/latches/${id}`, u.token)
+			).json()) as { my_intent_id: string };
+			expect(body.my_intent_id).toBe(intentId);
+		}
 	});
 
 	it("双方yes後はproposal.topicと相手のdisplay_nameが見え、自分は含まれない(#18・#20)", async () => {
