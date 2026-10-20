@@ -527,4 +527,8 @@
 ### 次の工程
 
 - F4b(グループLATCH・Pool最大15・集合選択・1対1最低4回保証の配分・#24)→ F4c(提案〜成立の画面・`prototype/`基準・#17のUI 2択)。Parser/Jevのreal接続と精度ゲートはF9前の独立工程(12 §2の決定記録)
-- 未解決の検討事項: Intentの意味フィールド(topic・constraints等)の更新で30分再評価抑制(intents.last_evaluated_at)を解除するか。現状は解除しない(E2Eの#12(b)はdev専用backdateのintents_last_evaluated_atで回避している)。扱いは未決
+- 検討事項の決着(オーナー裁定 2026-10-20・01冒頭の決定記録):
+  - Intentの意味フィールド(topic・time・geo・participants・budget・constraints)の更新で30分再評価抑制(intents.last_evaluated_at)を解除するか → 解除に決定・36ece4aで実装(05 §3.3・06 §3。E2Eの#12(b)はdev専用backdateのintents_last_evaluated_atを引き続き使う・10 §3)
+  - 未提示・システムの都合(機会の排他・Intent削除・条件変更)で閉じた提案は提案履歴を消費しない(新規確保の行は削除・再提案で確保した既存行はexpiredへ戻す)→ 36ece4aで実装(05 §2.2・06 §4)
+  - 地域名をEmbedding入力に含めるかはF4ではなくParser/Jevのreal接続と精度ゲートの工程で扱う(07 §4・12 §2)
+  - 文書反映: 01 v0.11・02 v0.5・04 v0.13・05〜08 v0.12・09 v0.11・10〜12 v0.12・00 v0.12(§1版数表)

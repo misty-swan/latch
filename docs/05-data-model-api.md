@@ -1,9 +1,9 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.11
+- 文書バージョン: v0.12
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.11更新: 2026-10-20)
+- 作成日: 2026-10-17(v0.12更新: 2026-10-20)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
@@ -14,7 +14,8 @@
 - v0.9の変更点: F3実装に伴い§2.2のintentsへdelayed_reeval_at列(つながりIntentの1回きり遅延再評価の実行済みマーカー)を追記し、§2.3へVectorizeのローカル代替(LATCH_ENV=localはインメモリ実装・取得系getByIdsの用途)を追記。§2.5へIntent削除時はベクトル削除を先に行い失敗時は500で中断する実行順序を追記。§3.3へdev専用観測API(GET /v1/dev/match-events・match-candidates)の応答形状を追記。前提文書欄の版数を更新
 - v0.10の変更点: F4a(1対1の提案〜成立)実装に伴い§2.2へlatches.proposed_at・proposal_history.updated_at(見送り時刻の基準)の列と、match_candidatesのupsertが既存行のstatusを上書きしない規定・機会LATCH成立時の参加Intentの更新範囲・geofeaturesのgrid_key書式と逆引き規則を追記し、§2.3へKVバインディングPIPELINE_KVのキーを、§2.4へ提案化・回答期限・通知上限の索引を追記。§3.2へGET /v1/latches/{id}・POST /v1/latches/{id}/defer-reasonを追加し、§3.3へLatchDTO(成立前はproposal・membersのキー自体を出さない表示範囲)・一覧のtype別の状態・回答系の理由コード・dev専用API(backdate・LATCH・提案履歴の観測)の確定形状を追記。前提文書欄の版数を更新
 - v0.11の変更点: F4aの最終レビューの修正に伴い§2.2のnotificationsへ成立後の離脱(leave)はclosedを作らない規定を、§3.2のPATCHへactive Intentの意味フィールドの変更・期限の短縮で進行中の提案を取り消す規定(01 §8の不成立経路「Hard Constraintが変化した」)を、§3.3の回答と取り消しの状態遷移へleaveの通知の扱いを追記。前提文書欄の版数を更新
-- 前提文書: 01 要件定義書 v0.10 / 02 スコープ・受け入れ条件合意書 v0.4 / 04 アーキテクチャ設計書 v0.12
+- v0.12の変更点: オーナー裁定(2026-10-20・01冒頭の決定記録)に伴い§2.2のproposal_historyへ未提示・システムの都合で閉じた提案は履歴を消費しない規定(新規確保の行は削除・再提案で確保した既存行はexpiredへ戻す)を、intents.last_evaluated_atへ意味フィールドの更新で解除する旨を、§2.5の削除表へIntent削除で取り消した提案の履歴の解放を、§3.2・§3.3のPATCHへ取り消し時の履歴の解放と30分再評価抑制の解除を追記。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.11 / 02 スコープ・受け入れ条件合意書 v0.5 / 04 アーキテクチャ設計書 v0.13
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -109,7 +110,7 @@ version:            integer  # 更新ごと+1(01 §16)
 expires_at:         datetime  # つながり=既定30日(7/30/90選択)/機会=既定start+3h
 embedding_model:    string | null   # 埋め込み済みモデル識別子(01 §18)
 embedded_at:        datetime | null
-last_evaluated_at:  datetime | null  # 30分再評価抑制(§2.6)
+last_evaluated_at:  datetime | null  # 30分再評価抑制(§2.6)。active Intentの意味フィールドの更新でnullへ戻す(§3.3・01冒頭の決定記録 2026-10-20)
 delayed_reeval_at:  datetime | null  # つながりIntentの1回きり遅延再評価(06 §2の(h))の実行済みマーカー(実行時に刻印)
 vector_deleted_at:  datetime | null  # ベクトル削除実行記録(§2.6の2窓走査用)
 created_at / updated_at
@@ -160,12 +161,15 @@ latch_id:    FK latches | null
 outcome:     proposed | matched | rejected | expired | deferred
 # 恒久排除の判定は outcome が matched または rejected の行の存在のみ(01 §8裁定)。
 # deferred(見送り)・expired の行は機会Intentの条件付き再提案の参照に使う
+# 未提示・システムの都合で閉じた提案は履歴を消費しない(下記・01冒頭の決定記録 2026-10-20)
 created_at
 updated_at:  datetime   # outcome更新の時刻。見送り後の抑制期間の基準(06 §4)
 UNIQUE(user_low, user_high)
 ```
 
 Layer 1はoutcomeがmatchedまたはrejectedの行の存在で除外する(deferred・expiredの行は機会Intentの条件付き再提案の参照に使う・01 §8)。提案化の直列化(本表の確保を1文目に置く1バッチ)は06 §3に規定する。
+
+**履歴を消費しない閉じ方(オーナー裁定 2026-10-20・F4a実装確定)。** 一度も提示しないまま閉じた保留(保留中の期限切れ・機会で対象時刻まで75分を切ったもの・参加Intentの終了)と、システムの都合で閉じた提案(機会の排他によるcancelled・Intent削除・active Intentの意味フィールドの変更=Hard Constraintの変化・§3.3)は、本表を消費しない。そのLATCHのために新規に確保した行(created_atがLATCHの作成以降)は削除してペアを未提案に戻し、再提案で確保した既存行はoutcome=expiredに戻す(updated_atも更新する)。提示後の回答期限切れ(expired)・defer(deferred)・no(rejected)は従来どおり記録する。同ペアの行が別のLATCHへ移っていれば触らない。
 
 **latches**
 
@@ -270,7 +274,7 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 | match/group_candidates | 当該Intentを含む行を削除 | 同左 |
 | match_events | 当該Intentの行を削除(payloadにはraw_text・座標・識別子を格納しない) | 本人の全Intentに同じ |
 | latches・latch_members | 進行中の提案はcancelled | 退会者が参加するproposed/partial_acceptは即時cancelled。matchedは残置し表示名は「つながっていた相手」(終了の原因は画面に区別して見せない・01 §10・2026-10-19オーナー裁定)・チャットは全参加者読み取り専用 |
-| proposal_history | 残す(同一ペア排除のため・01 §8) | 本人を含む行を削除 |
+| proposal_history | 残す(同一ペア排除のため・01 §8)。削除で取り消した進行中の提案のために確保した行は解放する(§2.2) | 本人を含む行を削除 |
 | messages | 残す | 残す(表示名は「つながっていた相手」。本人からの削除要求には該当行の削除で応じる) |
 | latch_responses / latch_feedback | 残す(集計値のみ利用) | 同左ののちcalibration_recordsへ匿名集約 |
 | calibration_records | — | latch_idをnull化+粒度低下(時刻日付丸め・地域市区町村)のうえ anonymized=true |
@@ -328,7 +332,8 @@ PATCH  /v1/intents/{id}                  # 更新(version+1)・draft→active化
        # participants・budget・constraints(3種)・notification_levelのみ
        # (他のフィールド指定はfield_not_allowed=400・paused等へのPATCHは
        # invalid_status=400。詳細は§3.3)。topic・constraints等の意味フィールド変更時のみ
-       # Embedding再計算イベントを発行し、表示系のみの変更は再評価しない
+       # Embedding再計算イベントを発行し、表示系のみの変更は再評価しない。active宛の
+       # 意味フィールド変更は進行中の提案の取り消しと30分再評価抑制の解除を伴う(§3.3)
 DELETE /v1/intents/{id}
 POST   /v1/intents/{id}/pause / resume
 
@@ -377,7 +382,7 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 
 **GET /v1/intents** — 200 `{items: IntentDTO[], next_cursor: string|null}`。自Intentのみ・順序はid降順(ULID=新着順)。`?status=<単一値>`で絞り込み(不明な値は400)。limit=1..50(既定20・範囲外は400)。cursorは不透明(直前ページ最終idのbase64url化・復号できない値は400)
 
-**GET・PATCH・DELETE /v1/intents/{id}** — 200 IntentDTO / 200 IntentDTO(version+1) / 204。他人の・存在しないは一律404(§3.1)。PATCHの可変フィールド: draft=全項目+status:"active"(active化)・active=topic・time・geo・participants・budget・constraints(3種)・notification_levelのみ(他のフィールド指定は400 field_not_allowed)。draft・active以外(paused/matched/expired/cancelled)へのPATCHは400 invalid_status。draft宛のexpires_in_daysは同一リクエストがstatus:"active"を伴う場合を除き400 expires_choice_on_draft(status:"active"を伴う場合でも結果formが機会なら400 expires_in_days_not_allowed・つながりは期限の選択として有効)。active機会Intentのtime変更は範囲を再検証し、現在のexpires_at以降へは変更できない(400 starts_at_after_expires)。PATCH・pause・resumeのUPDATEは**version楽観ロック**(01 §16)を持ち、読み出し時のversionと一致する行のみ更新する(並行更新の後勝ち上書きを防止)。競合で更新が0行だった場合は1回だけ再読込して判定し、行が残っていれば400 VALIDATION_FAILED(理由コードversion_conflict)・消えていれば一律404(§3.1)を返す。**PATCHによる進行中の提案の取り消し(F4a実装確定)。** active Intentで意味フィールド(topic・time・geo・participants・budget・constraints=intent_updatedを発行する変更・06 §2)が変わった場合、または期限(expires_at)が短くなる場合は、当該Intentを含む進行中の提案(candidate・proposed・partial_accept)をIntent削除と同じ流れでcancelledに閉じる(proposal_historyのoutcomeはexpired・提示済みなら参加者へclosed通知・更新者以外の参加者の保留を解放する。01 §8の不成立経路「Hard Constraintが変化した」)。notification_level等の表示系だけの変更では閉じず、matchedは変えない。再評価は既存どおりintent_updatedで走り、新しい内容で再提案され得る
+**GET・PATCH・DELETE /v1/intents/{id}** — 200 IntentDTO / 200 IntentDTO(version+1) / 204。他人の・存在しないは一律404(§3.1)。PATCHの可変フィールド: draft=全項目+status:"active"(active化)・active=topic・time・geo・participants・budget・constraints(3種)・notification_levelのみ(他のフィールド指定は400 field_not_allowed)。draft・active以外(paused/matched/expired/cancelled)へのPATCHは400 invalid_status。draft宛のexpires_in_daysは同一リクエストがstatus:"active"を伴う場合を除き400 expires_choice_on_draft(status:"active"を伴う場合でも結果formが機会なら400 expires_in_days_not_allowed・つながりは期限の選択として有効)。active機会Intentのtime変更は範囲を再検証し、現在のexpires_at以降へは変更できない(400 starts_at_after_expires)。PATCH・pause・resumeのUPDATEは**version楽観ロック**(01 §16)を持ち、読み出し時のversionと一致する行のみ更新する(並行更新の後勝ち上書きを防止)。競合で更新が0行だった場合は1回だけ再読込して判定し、行が残っていれば400 VALIDATION_FAILED(理由コードversion_conflict)・消えていれば一律404(§3.1)を返す。**PATCHによる進行中の提案の取り消し(F4a実装確定)。** active Intentで意味フィールド(topic・time・geo・participants・budget・constraints=intent_updatedを発行する変更・06 §2)が変わった場合、または期限(expires_at)が短くなる場合は、当該Intentを含む進行中の提案(candidate・proposed・partial_accept)をIntent削除と同じ流れでcancelledに閉じる(proposal_historyは消費せず解放する=新規確保の行は削除・再提案で確保した既存行はexpiredへ戻す・§2.2。提示済みなら参加者へclosed通知・更新者以外の参加者の保留を解放する。01 §8の不成立経路「Hard Constraintが変化した」)。notification_level等の表示系だけの変更では閉じず、matchedは変えない。再評価は既存どおりintent_updatedで走り、新しい内容で再提案され得る。**意味フィールドの更新による30分再評価抑制の解除(オーナー裁定 2026-10-20・F4a実装確定)。** active Intentで意味フィールドが変わった場合はintents.last_evaluated_atをnullへ戻す(更新後のversionと一致する行のみ・並行更新で版が進んでいれば触らない)。表示系だけの変更では解除しない(06 §3・§6)
 
 **POST /v1/intents/{id}/pause・resume** — 200 IntentDTO(version+1)。pauseはactiveのみ実行可(他は400 invalid_status)・status=paused・期限は不変。resumeはpausedのみ実行可(他は400 invalid_status)・期限切れ(expires_at<=now)は400(理由コードexpired)・status=active・期限は据え置き(再計算しない)。参加中active数の上限5件は作成・draft→active化・resumeの3経路で検証し、超過は422 ACTIVE_INTENT_LIMIT(§3.1)
 
