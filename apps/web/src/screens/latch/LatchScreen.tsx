@@ -150,7 +150,8 @@ export function LatchScreen() {
 		freshRef.current = true;
 	}
 	if (view !== null && view !== "proposal") joiningRef.current = false;
-	if (view !== null) prevViewRef.current = view;
+	// キャッシュの古い表示(開き直した直後・取り直し前)は「見届けた」に数えない
+	if (view !== null && query.isFetchedAfterMount) prevViewRef.current = view;
 
 	/** 送信の共通処理。失敗したら取り直して一文を出す */
 	const run = async (action: () => Promise<unknown>, undo: () => void) => {
@@ -246,10 +247,17 @@ export function LatchScreen() {
 				/>
 			);
 		case "matched":
-			return <Matched latch={data} now={now} fresh={freshRef.current} />;
+			return (
+				<Matched
+					latch={data}
+					now={now}
+					fresh={freshRef.current}
+					notice={notice}
+				/>
+			);
 		case "ended":
-			return <NotEstablished variant="ended" />;
+			return <NotEstablished variant="ended" notice={notice} />;
 		case "closed":
-			return <NotEstablished variant="closed" />;
+			return <NotEstablished variant="closed" notice={notice} />;
 	}
 }

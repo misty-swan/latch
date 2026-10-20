@@ -187,7 +187,7 @@ export function Shelved({ form, onSaveReason }: ShelvedProps) {
 								))}
 							</div>
 							{failed ? (
-								<p className="t-caption" role="status">
+								<p className="t-caption" role="alert">
 									送れませんでした。もう一度お試しください。
 								</p>
 							) : null}

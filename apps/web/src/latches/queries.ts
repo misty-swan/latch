@@ -10,7 +10,7 @@ import {
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
-import { apiFetch } from "../api/client";
+import { ApiError, apiFetch } from "../api/client";
 import { INTENTS_QUERY_KEY } from "../intents/queries";
 
 export const LATCHES_QUERY_KEY = ["latches"] as const;
@@ -31,17 +31,40 @@ export const useProposalsQuery = () =>
 			apiFetch<LatchListResponse>("/latches?type=proposals&limit=50"),
 	});
 
-/** LATCH1件。相手の回答待ちなどで定期再取得したいときrefetchIntervalを渡す */
+/** 再試行の上限(QueryClientが既定を持たないときのTanStack Queryの既定と同じ3回) */
+const MAX_RETRIES = 3;
+
+/** QueryClientの既定の再試行(試験ではfalse)に従うか。404(NOT_FOUND)だけは常に再試行しない */
+const shouldRetry = (
+	base: unknown,
+	failureCount: number,
+	error: Error,
+): boolean => {
+	if (error instanceof ApiError && error.code === "NOT_FOUND") return false;
+	if (typeof base === "function") return Boolean(base(failureCount, error));
+	if (typeof base === "boolean") return base;
+	if (typeof base === "number") return failureCount < base;
+	return failureCount < MAX_RETRIES;
+};
+
+/**
+ * LATCH1件。相手の回答待ちなどで定期再取得したいときrefetchIntervalを渡す。
+ * 404(NOT_FOUND)は再試行しても変わらないため・すぐ見つからない表示へ進める
+ */
 export const useLatchQuery = (
 	id: string,
 	options?: { refetchInterval?: number | false },
-) =>
-	useQuery({
+) => {
+	const client = useQueryClient();
+	const base = client.getDefaultOptions().queries?.retry;
+	return useQuery({
 		queryKey: latchQueryKey(id),
 		queryFn: () => apiFetch<LatchDTO>(`/latches/${id}`),
+		retry: (failureCount, error) => shouldRetry(base, failureCount, error),
 		refetchOnWindowFocus: true,
 		refetchInterval: options?.refetchInterval ?? false,
 	});
+};
 
 /** 応答を個別キャッシュへ置き、関連する一覧を無効化する */
 const applyResult = (client: QueryClient, id: string, data: LatchDTO): void => {

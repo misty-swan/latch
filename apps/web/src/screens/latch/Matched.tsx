@@ -21,6 +21,8 @@ type MatchedProps = {
 	latch: LatchDTO;
 	now: Date;
 	fresh: boolean;
+	/** 送信失敗の一文(取り直しでこの表示へ移っても残す・F4c設計 §1.4) */
+	notice?: string | null;
 };
 
 /** 「重なったところ」の1行(prototype factRow・edit:false) */
@@ -44,7 +46,7 @@ function Fact({
 	);
 }
 
-export function Matched({ latch, now, fresh }: MatchedProps) {
+export function Matched({ latch, now, fresh, notice = null }: MatchedProps) {
 	const artRef = useRef<HTMLDivElement>(null);
 	useEffect(() => {
 		if (!fresh) return;
@@ -207,6 +209,11 @@ export function Matched({ latch, now, fresh }: MatchedProps) {
 				</div>
 			</div>
 			<div className="screen__foot m-rise m-rise-4">
+				{notice !== null ? (
+					<p className="t-caption" role="alert">
+						{notice}
+					</p>
+				) : null}
 				<Link className="btn btn--quiet" to={PATHS.home}>
 					あとで
 				</Link>

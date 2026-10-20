@@ -149,4 +149,19 @@ describe("Matched", () => {
 			"#2F5A55",
 		]);
 	});
+	it("noticeを渡すとalertとして出す", () => {
+		render(
+			<MemoryRouter>
+				<Matched
+					latch={connection()}
+					now={NOW}
+					fresh={false}
+					notice="この提案には、もう回答できません。"
+				/>
+			</MemoryRouter>,
+		);
+		expect(screen.getByRole("alert").textContent).toBe(
+			"この提案には、もう回答できません。",
+		);
+	});
 });

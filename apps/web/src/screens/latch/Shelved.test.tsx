@@ -101,7 +101,7 @@ describe("Shelved", () => {
 		});
 		expect(onSave).toHaveBeenCalledWith("other");
 		expect(screen.getByRole("dialog")).toBeTruthy();
-		expect(screen.getByRole("status").textContent).toBe(
+		expect(screen.getByRole("alert").textContent).toBe(
 			"送れませんでした。もう一度お試しください。",
 		);
 		expect(

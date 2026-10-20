@@ -11,7 +11,7 @@ import {
 	render,
 	screen,
 } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { createMemoryRouter, MemoryRouter, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Proposal } from "./Proposal";
 
@@ -93,7 +93,62 @@ describe("Proposal", () => {
 		expect(screen.getByText("あと2分")).toBeTruthy();
 	});
 
-	it("noticeは.screen__footの先頭にstatusとして出る", () => {
+	it("busy中は閉じる(あとで回答する)が効かない", () => {
+		const router = createMemoryRouter(
+			[
+				{
+					path: "/latches/l1",
+					element: (
+						<Proposal
+							latch={latchOf()}
+							now={NOW}
+							busy
+							notice={null}
+							onJoin={vi.fn()}
+							onDefer={vi.fn()}
+						/>
+					),
+				},
+				{ path: "/home", element: <p>home</p> },
+			],
+			{ initialEntries: ["/latches/l1"] },
+		);
+		render(<RouterProvider router={router} />);
+		const close = screen.getByRole("link", { name: "あとで回答する" });
+		expect(close.getAttribute("aria-disabled")).toBe("true");
+		expect(close.getAttribute("tabindex")).toBe("-1");
+		fireEvent.click(close);
+		expect(router.state.location.pathname).toBe("/latches/l1");
+	});
+
+	it("busyでなければ閉じるでHomeへ戻る", () => {
+		const router = createMemoryRouter(
+			[
+				{
+					path: "/latches/l1",
+					element: (
+						<Proposal
+							latch={latchOf()}
+							now={NOW}
+							busy={false}
+							notice={null}
+							onJoin={vi.fn()}
+							onDefer={vi.fn()}
+						/>
+					),
+				},
+				{ path: "/home", element: <p>home</p> },
+			],
+			{ initialEntries: ["/latches/l1"] },
+		);
+		render(<RouterProvider router={router} />);
+		const close = screen.getByRole("link", { name: "あとで回答する" });
+		expect(close.getAttribute("aria-disabled")).toBeNull();
+		fireEvent.click(close);
+		expect(router.state.location.pathname).toBe("/home");
+	});
+
+	it("noticeは.screen__footの先頭にalertとして出る", () => {
 		render(
 			<MemoryRouter>
 				<Proposal
@@ -106,6 +161,6 @@ describe("Proposal", () => {
 				/>
 			</MemoryRouter>,
 		);
-		expect(screen.getByRole("status").textContent).toBe("通信に失敗しました");
+		expect(screen.getByRole("alert").textContent).toBe("通信に失敗しました");
 	});
 });

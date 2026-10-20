@@ -25,6 +25,8 @@ type FrameProps = {
 	foot: ReactNode;
 	notice: string | null;
 	artRef?: Ref<HTMLDivElement>;
+	/** 送信の動きを待つ間は閉じるを効かなくする(離れても回答だけ送られるのを防ぐ) */
+	closeDisabled?: boolean;
 };
 
 export function ProposalFrame({
@@ -35,6 +37,7 @@ export function ProposalFrame({
 	foot,
 	notice,
 	artRef,
+	closeDisabled = false,
 }: FrameProps) {
 	const [tick, setTick] = useState(0);
 	useEffect(() => {
@@ -57,6 +60,11 @@ export function ProposalFrame({
 						className="icon-btn"
 						to={PATHS.home}
 						aria-label="あとで回答する"
+						aria-disabled={closeDisabled ? "true" : undefined}
+						tabIndex={closeDisabled ? -1 : undefined}
+						onClick={(event) => {
+							if (closeDisabled) event.preventDefault();
+						}}
 					>
 						<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
 							<path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
@@ -100,7 +108,7 @@ export function ProposalFrame({
 			</div>
 			<div className="screen__foot">
 				{notice !== null ? (
-					<p className="t-caption" role="status">
+					<p className="t-caption" role="alert">
 						{notice}
 					</p>
 				) : null}
@@ -137,6 +145,7 @@ export function Proposal({
 			pressed={false}
 			notice={notice}
 			artRef={artRef}
+			closeDisabled={busy}
 			text={
 				<>
 					<p className="t-eyebrow">提案</p>

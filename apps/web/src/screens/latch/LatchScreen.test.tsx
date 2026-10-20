@@ -5,6 +5,7 @@
  */
 
 import type { LatchDTO } from "@latch/shared";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
 	act,
 	cleanup,
@@ -17,7 +18,7 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../../auth/session";
 import { appRoutes } from "../../router";
-import { withQueryClient } from "../../test/helpers";
+import { createTestQueryClient, withQueryClient } from "../../test/helpers";
 import { selectLatchView } from "./LatchScreen";
 
 const latchOf = (over: Partial<LatchDTO> = {}): LatchDTO => ({
@@ -93,6 +94,17 @@ const getCalls = () =>
 const setup = (path = "/latches/L1") => {
 	const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
 	render(withQueryClient(<RouterProvider router={router} />));
+	return router;
+};
+
+/** 渡したQueryClientで描く(キャッシュの事前投入・既定の再試行の試験用) */
+const setupWith = (client: QueryClient, path = "/latches/L1") => {
+	const router = createMemoryRouter(appRoutes, { initialEntries: [path] });
+	render(
+		<QueryClientProvider client={client}>
+			<RouterProvider router={router} />
+		</QueryClientProvider>,
+	);
 	return router;
 };
 
@@ -202,6 +214,20 @@ describe("LatchScreen", () => {
 		expect(
 			await screen.findByText("この提案は見つかりませんでした。"),
 		).toBeTruthy();
+	});
+
+	it("404は本番と同じ既定の再試行でも1回の取得ですぐ見つかりませんでした", async () => {
+		getQueue = [
+			() =>
+				jsonResponse(404, {
+					error: { code: "NOT_FOUND", message: "not found" },
+				}),
+		];
+		setupWith(new QueryClient());
+		expect(
+			await screen.findByText("この提案は見つかりませんでした。"),
+		).toBeTruthy();
+		expect(getCalls()).toBe(1);
 	});
 
 	it("その他の取得失敗は読み込めませんでしたと再読み込み", async () => {
@@ -343,6 +369,29 @@ describe("LatchScreen", () => {
 		).toBe(false);
 	});
 
+	it("送信失敗の取り直しで成立しなかったと分かっても一文を残す", async () => {
+		postResponse = () =>
+			jsonResponse(400, {
+				error: {
+					code: "VALIDATION_FAILED",
+					message: "x",
+					details: { reasons: ["invalid_status"] },
+				},
+			});
+		getQueue = [
+			() => jsonResponse(200, latchOf()),
+			() => jsonResponse(200, latchOf({ status: "rejected" })),
+		];
+		setup();
+		fireEvent.click(await screen.findByRole("button", { name: "参加する" }));
+		expect(
+			await screen.findByText("この提案は成立しませんでした。"),
+		).toBeTruthy();
+		expect(screen.getByRole("alert").textContent).toBe(
+			"この提案には、もう回答できません。",
+		);
+	});
+
 	it("通信失敗では送れませんでしたと知らせる", async () => {
 		postResponse = () => {
 			throw new TypeError("network");
@@ -389,6 +438,23 @@ describe("LatchScreen", () => {
 		getQueue = [() => jsonResponse(200, matchedLatch())];
 		setup();
 		expect(await screen.findByText("つながりました。")).toBeTruthy();
+		expect(document.querySelector(".matched")).not.toBeNull();
+		expect(document.querySelector(".matched.is-fresh")).toBeNull();
+	});
+
+	it("キャッシュの回答待ちを開き直し・取り直しでmatchedでも演出しない", async () => {
+		const client = createTestQueryClient();
+		client.setDefaultOptions({
+			queries: { retry: false, gcTime: Number.POSITIVE_INFINITY, staleTime: 0 },
+		});
+		client.setQueryData(
+			["latches", "L1"],
+			latchOf({ status: "partial_accept", my_response: "yes" }),
+		);
+		getQueue = [() => jsonResponse(200, matchedLatch())];
+		setupWith(client);
+		expect(await screen.findByText("つながりました。")).toBeTruthy();
+		expect(getCalls()).toBe(1);
 		expect(document.querySelector(".matched")).not.toBeNull();
 		expect(document.querySelector(".matched.is-fresh")).toBeNull();
 	});

@@ -16,7 +16,14 @@ const HEADINGS: Record<Variant, string> = {
 	not_found: "この提案は見つかりませんでした。",
 };
 
-export function NotEstablished({ variant }: { variant: Variant }) {
+export function NotEstablished({
+	variant,
+	notice = null,
+}: {
+	variant: Variant;
+	/** 送信失敗の一文(取り直しでこの表示へ移っても残す・F4c設計 §1.4) */
+	notice?: string | null;
+}) {
 	return (
 		<div className="screen closed">
 			<ScreenGrain />
@@ -53,6 +60,11 @@ export function NotEstablished({ variant }: { variant: Variant }) {
 				</div>
 			</div>
 			<div className="screen__foot">
+				{notice !== null ? (
+					<p className="t-caption" role="alert">
+						{notice}
+					</p>
+				) : null}
 				<Link className="btn btn--secondary btn--block" to={PATHS.home}>
 					預けている一覧へ
 				</Link>
