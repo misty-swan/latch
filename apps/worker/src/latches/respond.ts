@@ -470,6 +470,7 @@ const onMatched = async (
 	]);
 
 	const related = new Set(members);
+	const cancelledIds: string[] = [];
 	if (latch.form === "occasion") {
 		await db
 			.update(intents)
@@ -494,7 +495,7 @@ const onMatched = async (
 		for (const { id } of others) {
 			for (const userId of await membersOf(db, id)) related.add(userId);
 			// 排他はシステムの都合の閉じ方のため履歴を消費しない(オーナー裁定 2026-10-20)
-			await closeLatch(
+			const closed = await closeLatch(
 				db,
 				id,
 				"cancelled",
@@ -502,8 +503,13 @@ const onMatched = async (
 				["candidate", "proposed", "partial_accept"],
 				now,
 			);
+			if (closed) cancelledIds.push(id);
 		}
 	}
 	await releaseHeld(db, now, [...related]);
 	await proposeNextGroupAfterClose(db, latchId, now);
+	// 排他で取り消したグループ提案も閉じた提案として次の集合を提案する(F4b設計 §3.5)
+	for (const id of cancelledIds) {
+		await proposeNextGroupAfterClose(db, id, now);
+	}
 };

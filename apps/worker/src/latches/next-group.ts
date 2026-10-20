@@ -3,8 +3,8 @@
  * 新たなJevは使わず、group_candidates(status=candidate・aggregate>0.60)の中から
  * rankByAggregateの順に再検証→提案化する。毎分Cronの全体走査では行わない。
  */
-import { LATCH } from "@latch/shared";
-import { and, eq, gt, inArray, sql } from "drizzle-orm";
+import { LATCH, PIPELINE } from "@latch/shared";
+import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { groupCandidates, intents, latches } from "../db/schema";
 import { createLogger } from "../logging/logger";
@@ -39,7 +39,10 @@ export const proposeNextGroup = async (
 				gt(groupCandidates.aggregateScore, LATCH.THRESHOLD),
 				sql`EXISTS (SELECT 1 FROM json_each(${groupCandidates.intentIds}) WHERE value IN (SELECT value FROM json_each(${idsJson})))`,
 			),
-		);
+		)
+		// json_eachの走査を有界にする。上位だけ残し、最終順はrankByAggregateが決める
+		.orderBy(desc(groupCandidates.aggregateScore), asc(groupCandidates.id))
+		.limit(PIPELINE.CRON_BATCH_LIMIT);
 	if (candidates.length === 0) return null;
 
 	const allIds = [...new Set(candidates.flatMap((c) => c.intentIds))];
@@ -103,7 +106,7 @@ export const proposeNextGroupAfterClose = async (
 		if (row === undefined) return;
 		await proposeNextGroup(db, row.intentIds, now);
 	} catch (error) {
-		logger.warn("cron.item.failed", {
+		logger.warn("latches.next_group.failed", {
 			latch_id: latchId,
 			error_code: errorCodeOf(error),
 		});

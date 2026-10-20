@@ -809,7 +809,7 @@ describe("次集合の提案(F4b設計 §3.5)", () => {
 		(await latchesWithAny(members)).filter((l) => l.id !== exceptId);
 
 	it("Cのdeferで{A,B,C}が閉じると、評価済みの{A,B,D}が提案される", async () => {
-		const { latchId, z } = await setupTrio("connection");
+		const { latchId } = await setupTrio("connection");
 		const [a, b, c] = await intentsOfTrio(latchId);
 		const [d] = await insertMembers(1, "connection");
 		const abd = [a, b, d];
@@ -818,7 +818,6 @@ describe("次集合の提案(F4b設計 §3.5)", () => {
 			ok: true,
 			latchId,
 		});
-		expect(z).toBe(c.userId);
 		const next = await nextLatchWith(abd, latchId);
 		expect(next.length).toBe(1);
 		expect(next[0].status).toBe("proposed");
@@ -859,14 +858,13 @@ describe("次集合の提案(F4b設計 §3.5)", () => {
 		vi.spyOn(testEnv.MATCH_QUEUE, "send").mockResolvedValue({
 			metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
 		});
-		const { latchId, x, y } = await setupTrio("occasion", {
+		const { latchId } = await setupTrio("occasion", {
 			status: "partial_accept",
 			deadline: ago(MIN),
 		});
-		const [a, b, c] = await intentsOfTrio(latchId);
+		const [a, b] = await intentsOfTrio(latchId);
 		await insertYes(latchId, a.userId);
 		await insertYes(latchId, b.userId);
-		expect([x, y]).toContain(a.userId);
 		const [d] = await insertMembers(1, "occasion");
 		await insertGroupCandidate([a, b, d], 0.9);
 		await runScheduledPipeline(testEnv, fixedClock(NOW));
@@ -874,6 +872,79 @@ describe("次集合の提案(F4b設計 §3.5)", () => {
 		const next = await nextLatchWith([a, b, d], latchId);
 		expect(next.length).toBe(1);
 		expect(next[0].status).toBe("proposed");
-		expect(c.id).toBeDefined();
+	});
+
+	it("閉じた集合自身のgroup_candidatesはproposedのまま再提案されない", async () => {
+		const { latchId } = await setupTrio("connection");
+		const [a, b, c] = await intentsOfTrio(latchId);
+		const own = await insertGroupCandidate([a, b, c], 0.95);
+		await db
+			.update(groupCandidates)
+			.set({ status: "proposed" })
+			.where(eq(groupCandidates.id, own));
+		await respond(db, latchId, c.userId, "defer", NOW);
+		expect((await groupCandidateOf(own))?.status).toBe("proposed");
+		expect((await latchesWithAny([a, b, c])).length).toBe(1);
+	});
+
+	it("最上位の集合が再検証で落ちる(メンバーがpaused) → 次の集合が提案される", async () => {
+		const { latchId } = await setupTrio("connection");
+		const [a, b, c] = await intentsOfTrio(latchId);
+		const [d, e] = await insertMembers(2, "connection");
+		await insertGroupCandidate([a, b, d], 0.95);
+		const second = await insertGroupCandidate([a, b, e], 0.8);
+		await db
+			.update(intents)
+			.set({ status: "paused" })
+			.where(eq(intents.id, d.id));
+		await respond(db, latchId, c.userId, "defer", NOW);
+		expect((await latchesWithAny([d])).length).toBe(0);
+		const next = await nextLatchWith([a, b, e], latchId);
+		expect(next.length).toBe(1);
+		expect((await groupCandidateOf(second))?.status).toBe("proposed");
+	});
+
+	it("機会の成立で排他取り消しになったグループ提案の後も、次の集合が提案される", async () => {
+		const { latchId } = await setupTrio("occasion", {
+			status: "partial_accept",
+		});
+		const [a, b, c] = await intentsOfTrio(latchId);
+		const [d, e, f] = await insertMembers(3, "occasion");
+		// 別の進行中グループ{A,D,E}(Aを共有)
+		const other = ulid();
+		await db.insert(latches).values({
+			id: other,
+			form: "occasion",
+			intentIds: [a.id, d.id, e.id].sort(),
+			proposal: {},
+			score: 0.9,
+			status: "proposed",
+			responseDeadline: later(HOUR),
+			expiresAt: later(7 * HOUR),
+			lastMessageAt: ago(HOUR),
+			completedAt: null,
+			proposedAt: ago(HOUR),
+			createdAt: ago(HOUR),
+			updatedAt: ago(HOUR),
+		});
+		await db.insert(latchMembers).values(
+			[a, d, e].map((m) => ({
+				latchId: other,
+				userId: m.userId,
+				leftAt: null,
+			})),
+		);
+		await insertGroupCandidate([d, e, f], 0.9);
+		await insertYes(latchId, a.userId);
+		await insertYes(latchId, b.userId);
+		expect(await respond(db, latchId, c.userId, "yes", NOW)).toEqual({
+			ok: true,
+			latchId,
+		});
+		expect((await latchOf(latchId))?.status).toBe("matched");
+		expect((await latchOf(other))?.status).toBe("cancelled");
+		const next = await nextLatchWith([d, e, f], other);
+		expect(next.length).toBe(1);
+		expect(next[0].status).toBe("proposed");
 	});
 });
