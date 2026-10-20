@@ -15,7 +15,9 @@ import {
 	notifications,
 } from "../db/schema";
 import { newUlid } from "../ids";
+import { createLogger } from "../logging/logger";
 import type { IntentRow } from "../pipeline/consumer";
+import { errorCodeOf } from "../pipeline/errors";
 import { canPresent } from "./caps";
 import { closeLatch } from "./close";
 import {
@@ -26,6 +28,8 @@ import {
 } from "./deadline";
 
 type LatchRow = typeof latches.$inferSelect;
+
+const logger = createLogger();
 
 /** 機会の対象時刻(proposal.time_window.start・ISO 8601は文字列順=時刻順) */
 const targetStart = sql`json_extract(${latches.proposal}, '$.time_window.start')`;
@@ -222,6 +226,60 @@ const heldTargets = async (
 };
 
 /**
+ * 保留1件を処理する(期限処理・取り消し・昇格)。昇格したらtrue
+ */
+const releaseOne = async (
+	db: DrizzleD1Database,
+	latch: LatchRow,
+	now: Date,
+): Promise<boolean> => {
+	if (latch.expiresAt.getTime() <= now.getTime()) {
+		await closeLatch(db, latch.id, "expired", "expired", ["candidate"], now);
+		return false;
+	}
+	const pair = await intentsOf(db, latch);
+	const [a, b] = pair ?? [];
+	if (
+		latch.form === "occasion" &&
+		a !== undefined &&
+		b !== undefined &&
+		a.startsAt !== null &&
+		b.startsAt !== null &&
+		isTooLate(occasionTargetAt(a, b), now)
+	) {
+		await closeLatch(db, latch.id, "expired", "expired", ["candidate"], now);
+		return false;
+	}
+	if (
+		pair === null ||
+		a === undefined ||
+		b === undefined ||
+		pair.some(
+			(i) =>
+				i.status === "matched" ||
+				i.status === "expired" ||
+				i.status === "cancelled",
+		)
+	) {
+		await closeLatch(db, latch.id, "cancelled", "expired", ["candidate"], now);
+		return false;
+	}
+	// paused(と想定外の状態)は保留のまま残す
+	if (pair.some((i) => i.status !== "active")) return false;
+
+	const members = await db
+		.select({ userId: latchMembers.userId })
+		.from(latchMembers)
+		.where(eq(latchMembers.latchId, latch.id));
+	const memberIds = members.map((m) => m.userId);
+	if (!(await canPresent(db, memberIds, latch.intentIds, now))) return false;
+
+	const targetAt = latch.form === "occasion" ? occasionTargetAt(a, b) : null;
+	const deadline = responseDeadline(latch.form, now, targetAt, minExpiry(a, b));
+	return promote(db, latch, memberIds, deadline, now);
+};
+
+/**
  * 保留(candidate)を順に走査し、提示の上限(F4a設計 §3.3)を満たすものを proposed へ昇格する。
  * 順序: 機会=対象時刻の近い順 → つながり=score降順(同点はid昇順)。1回の走査は最大500件。
  * 走査中の期限処理は対象範囲内だけで行う: 期限(latches.expires_at)到達・機会で対象時刻まで
@@ -239,62 +297,15 @@ export const releaseHeld = async (
 
 	let released = 0;
 	for (const latch of await heldTargets(db, userIds)) {
-		if (latch.expiresAt.getTime() <= now.getTime()) {
-			await closeLatch(db, latch.id, "expired", "expired", ["candidate"], now);
-			continue;
+		// 1件の失敗で走査全体を止めない(latch_id・error_codeのみをログ・docs/08 §6)
+		try {
+			if (await releaseOne(db, latch, now)) released++;
+		} catch (error) {
+			logger.warn("cron.item.failed", {
+				latch_id: latch.id,
+				error_code: errorCodeOf(error),
+			});
 		}
-		const pair = await intentsOf(db, latch);
-		const [a, b] = pair ?? [];
-		if (
-			latch.form === "occasion" &&
-			a !== undefined &&
-			b !== undefined &&
-			a.startsAt !== null &&
-			b.startsAt !== null &&
-			isTooLate(occasionTargetAt(a, b), now)
-		) {
-			await closeLatch(db, latch.id, "expired", "expired", ["candidate"], now);
-			continue;
-		}
-		if (
-			pair === null ||
-			a === undefined ||
-			b === undefined ||
-			pair.some(
-				(i) =>
-					i.status === "matched" ||
-					i.status === "expired" ||
-					i.status === "cancelled",
-			)
-		) {
-			await closeLatch(
-				db,
-				latch.id,
-				"cancelled",
-				"expired",
-				["candidate"],
-				now,
-			);
-			continue;
-		}
-		// paused(と想定外の状態)は保留のまま残す
-		if (pair.some((i) => i.status !== "active")) continue;
-
-		const members = await db
-			.select({ userId: latchMembers.userId })
-			.from(latchMembers)
-			.where(eq(latchMembers.latchId, latch.id));
-		const memberIds = members.map((m) => m.userId);
-		if (!(await canPresent(db, memberIds, latch.intentIds, now))) continue;
-
-		const targetAt = latch.form === "occasion" ? occasionTargetAt(a, b) : null;
-		const deadline = responseDeadline(
-			latch.form,
-			now,
-			targetAt,
-			minExpiry(a, b),
-		);
-		if (await promote(db, latch, memberIds, deadline, now)) released++;
 	}
 	return released;
 };

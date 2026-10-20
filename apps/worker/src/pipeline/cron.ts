@@ -736,10 +736,29 @@ const runPendingSweep = async (env: Env, clock: Clock): Promise<void> => {
 };
 
 /**
+ * F4aで追加した走査を隔離して実行する。失敗はwarnログ(cron.sweep.failed・layer=走査名・
+ * error_code)を出して握り、次の走査へ進む(1つの走査の失敗で後続の走査を止めない)
+ */
+const runIsolated = async (
+	layer: string,
+	sweep: () => Promise<void>,
+): Promise<void> => {
+	try {
+		await sweep();
+	} catch (error) {
+		logger.warn("cron.sweep.failed", {
+			layer,
+			error_code: errorCodeOf(error),
+		});
+	}
+};
+
+/**
  * 毎分Cronの入口(index.tsのscheduledハンドラから呼ぶ・docs/04 §4)。
  * 各走査を順に実行する。個々のIntent評価の例外は握って続行するが、
- * 走査のクエリ自体の失敗は呼び出し元へ伝播させる(Cron起動の失敗として
- * 可視化し、次回の実行でやり直す)
+ * 既存7走査(a〜h・保持期間)のクエリ自体の失敗は呼び出し元へ伝播させる(Cron起動の
+ * 失敗として可視化し、次回の実行でやり直す)。F4aで追加した4走査(回答期限切れ・保留・
+ * 予算アラート・pending残留)は互いに隔離し、失敗をログに出して続行する(docs/06 §2)
  */
 export const runScheduledPipeline = async (
 	env: Env,
@@ -752,8 +771,10 @@ export const runScheduledPipeline = async (
 	await runUnevaluatedSweep(env, clock);
 	await runDelayedReevalSweep(env, clock);
 	await runRetentionSweep(env, clock);
-	await runResponseDeadlineSweep(env, clock);
-	await runHeldSweep(env, clock);
-	await runBudgetAlert(env, clock);
-	await runPendingSweep(env, clock);
+	await runIsolated("response_deadline", () =>
+		runResponseDeadlineSweep(env, clock),
+	);
+	await runIsolated("held", () => runHeldSweep(env, clock));
+	await runIsolated("budget_alert", () => runBudgetAlert(env, clock));
+	await runIsolated("pending", () => runPendingSweep(env, clock));
 };

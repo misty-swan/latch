@@ -966,6 +966,59 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 		]);
 	});
 
+	it("走査の隔離: 予算アラートのKV getが例外でもpending残留の掃査は実行される", async () => {
+		const day = jstDayKey(FIXED_NOW);
+		await db.insert(usageCounters).values({
+			scope: "jev_global_daily",
+			key: "-",
+			period: day,
+			count: LIMITS.JEV_GLOBAL_DAILY,
+		});
+		const userId = ulid();
+		await insertUserRow(userId);
+		const target = intentFixture({ id: ulid(), userId, topic: "隔離試験" });
+		await insertIntentRow(target);
+		const staleId = ulid();
+		await db.insert(matchEvents).values({
+			id: staleId,
+			eventType: "intent_updated",
+			sourceIntentId: target.id,
+			version: 1,
+			payload: {},
+			status: "pending",
+			createdAt: new Date(BASE - 11 * MIN),
+			processedAt: null,
+		});
+		const brokenKv = {
+			get: async () => {
+				throw new Error("KV_GET_FAILED: 試験用の失敗");
+			},
+			put: async () => {
+				throw new Error("KV_PUT_FAILED: 試験用の失敗");
+			},
+		} as unknown as KVNamespace;
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runScheduledPipeline(
+			{ ...testEnv, PIPELINE_KV: brokenKv },
+			directClock,
+		);
+
+		const [event] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, staleId));
+		expect(event?.status).toBe("failed");
+		expect(logsOf(logSpy, "cron.sweep.failed")).toEqual([
+			{
+				level: "warn",
+				event: "cron.sweep.failed",
+				layer: "budget_alert",
+				error_code: "KV_GET_FAILED",
+			},
+		]);
+	});
+
 	it("バックフィル: 埋め込み後にembedding_completedイベント行を作らない(評価はCronが直接行う)", async () => {
 		const userId = ulid();
 		await insertUserRow(userId);
