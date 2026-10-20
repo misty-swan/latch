@@ -28,6 +28,6 @@ export const createLlm = (env: Env, clock: Clock): Llm => {
 	return {
 		parser: (raw_text) => stubParse(raw_text, clock),
 		embedding: stubEmbedding,
-		jev: stubJev,
+		jev: { primary: stubJev, fallback: stubJev },
 	};
 };

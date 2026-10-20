@@ -45,9 +45,30 @@ export interface JevInput {
 	normalizedB: string;
 }
 
+/** Jev呼び出しの失敗種別(07 §5)。切替対象かどうかは isFallbackEligible で判定する */
+export type JevFailureKind =
+	| "timeout"
+	| "rate_limited"
+	| "overloaded"
+	| "invalid_output"
+	| "other";
+
+/** Jev呼び出しの結果。失敗は例外でなく型付きで返す(07 §5) */
+export type JevOutcome =
+	| { ok: true; axes: JevAxes }
+	| { ok: false; kind: JevFailureKind };
+
+/** Jevの差し替え口。非同期・失敗型付き */
+export type JevFn = (input: JevInput) => Promise<JevOutcome>;
+
+/** fallbackモデルへ切り替える対象か。timeout/rate_limited/overloadedのみtrue(07 §5) */
+export const isFallbackEligible = (kind: JevFailureKind): boolean =>
+	kind === "timeout" || kind === "rate_limited" || kind === "overloaded";
+
 /** LLMの3系統を束ねたインターフェース。clockは構築時に注入する(04 §4の時刻規律) */
 export interface Llm {
 	parser: (raw_text: string) => ParserStubOutput;
 	embedding: (input: string) => Promise<number[]>;
-	jev: (input: JevInput) => JevAxes;
+	/** primary失敗(切替対象)時にfallbackへ切り替える(07 §5) */
+	jev: { primary: JevFn; fallback: JevFn };
 }
