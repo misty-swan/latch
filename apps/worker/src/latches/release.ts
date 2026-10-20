@@ -3,8 +3,8 @@
  * 呼び出し元は提案のクローズ時(関係ユーザー対象)と毎分Cron(全体対象)。
  */
 
-import { PIPELINE } from "@latch/shared";
-import { and, asc, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import { LATCH, PIPELINE } from "@latch/shared";
+import { and, asc, desc, eq, inArray, lt, lte, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import {
 	intents,
@@ -64,11 +64,21 @@ export const expireHeld = async (
 		}
 	}
 
-	// 機会は対象時刻の近い順に走査する(75分未満のものは先頭側に集まる)
+	// 機会は対象時刻(proposal.time_window.start=occasionTargetAtと同じ値)が now+75分 より前のものに
+	// SQLで先に絞る(参加Intentの読み出しを該当候補に限るための最適化)。判定の正は下のisTooLate
+	const leadLimit = new Date(
+		now.getTime() + LATCH.OCCASION_MIN_LEAD_MS,
+	).toISOString();
 	const occasions = await db
 		.select()
 		.from(latches)
-		.where(and(eq(latches.status, "candidate"), eq(latches.form, "occasion")))
+		.where(
+			and(
+				eq(latches.status, "candidate"),
+				eq(latches.form, "occasion"),
+				lt(targetStart, leadLimit),
+			),
+		)
 		.orderBy(asc(targetStart), asc(latches.id))
 		.limit(PIPELINE.CRON_BATCH_LIMIT);
 	for (const latch of occasions) {

@@ -416,6 +416,42 @@ describe("expireHeld", () => {
 		expect((await latchOf(justOk.latchId))?.status).toBe("candidate");
 	});
 
+	it("75分より十分先の機会の保留が多数あっても0件を返し、candidateのまま残す", async () => {
+		const far = [];
+		for (let i = 0; i < 5; i++) far.push(await setupPair("occasion"));
+		// 前日の時刻で走査する(他の試験が配置した保留もすべて期限・対象時刻の十分前になる)
+		expect(await expireHeld(db, ago(24 * HOUR))).toBe(0);
+		for (const { latchId } of far) {
+			expect((await latchOf(latchId))?.status).toBe("candidate");
+		}
+	});
+
+	it("対象時刻(proposal.time_window.start)が絞り込み条件に合わない保留は参加Intentを読まない", async () => {
+		// 参加Intentのstarts_atは75分未満だが、proposalの対象時刻は十分先という不整合な行を置く。
+		// 参加Intentを読んでisTooLateで判定していればexpiredになるので、残ればSQLで除外されている
+		const { latchId } = await setupPair("occasion", {
+			startsAt: later(74 * MIN),
+		});
+		const [row] = await db
+			.select({ proposal: latches.proposal })
+			.from(latches)
+			.where(eq(latches.id, latchId));
+		await db
+			.update(latches)
+			.set({
+				proposal: {
+					...(row?.proposal as object),
+					time_window: {
+						start: later(4 * HOUR).toISOString(),
+						end: later(6 * HOUR).toISOString(),
+					},
+				},
+			})
+			.where(eq(latches.id, latchId));
+		await expireHeld(db, NOW);
+		expect((await latchOf(latchId))?.status).toBe("candidate");
+	});
+
 	it("expires_atちょうどの保留はexpiredで閉じ、閉じた件数を返す", async () => {
 		const { latchId } = await setupPair(
 			"connection",
