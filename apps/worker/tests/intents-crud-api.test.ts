@@ -1048,7 +1048,8 @@ describe("DELETE・PATCH /v1/intents/{id}: 進行中の提案の取り消し(doc
 			.select()
 			.from(proposalHistory)
 			.where(eq(proposalHistory.latchId, latchId));
-		expect(hist?.outcome).toBe("expired");
+		// システムの都合(削除・条件変更)で閉じた提案は履歴を消費しない(オーナー裁定 2026-10-20)
+		expect(hist).toBeUndefined();
 	});
 
 	it("matchedのLATCHは変化しない", async () => {
@@ -1086,7 +1087,8 @@ describe("DELETE・PATCH /v1/intents/{id}: 進行中の提案の取り消し(doc
 			.select()
 			.from(proposalHistory)
 			.where(eq(proposalHistory.latchId, latchId));
-		expect(hist?.outcome).toBe("expired");
+		// システムの都合(削除・条件変更)で閉じた提案は履歴を消費しない(オーナー裁定 2026-10-20)
+		expect(hist).toBeUndefined();
 		// matchedは変えない
 		expect((await latchOf(matchedId))?.status).toBe("matched");
 	});
@@ -1106,6 +1108,46 @@ describe("DELETE・PATCH /v1/intents/{id}: 進行中の提案の取り消し(doc
 			.from(notifications)
 			.where(eq(notifications.latchId, latchId));
 		expect(notes).toHaveLength(0);
+	});
+
+	it("PATCHで意味フィールドを変えると30分の再評価抑制を解除する(last_evaluated_atをnullへ・オーナー裁定 2026-10-20)", async () => {
+		const { accessToken, mine } = await setup("patch-reeval");
+		const evaluatedAt = new Date(Date.UTC(2026, 0, 1));
+		await db
+			.update(intents)
+			.set({ lastEvaluatedAt: evaluatedAt })
+			.where(eq(intents.id, mine.intentId));
+		const res = await patchJson(
+			`/v1/intents/${mine.intentId}`,
+			{ topic: "変更後の主題" },
+			accessToken,
+		);
+		expect(res.status).toBe(200);
+		const [row] = await db
+			.select({ lastEvaluatedAt: intents.lastEvaluatedAt })
+			.from(intents)
+			.where(eq(intents.id, mine.intentId));
+		expect(row?.lastEvaluatedAt).toBeNull();
+	});
+
+	it("PATCHでnotification_levelだけを変えても再評価抑制は解除しない", async () => {
+		const { accessToken, mine } = await setup("patch-reeval-notify");
+		const evaluatedAt = new Date(Date.UTC(2026, 0, 1));
+		await db
+			.update(intents)
+			.set({ lastEvaluatedAt: evaluatedAt })
+			.where(eq(intents.id, mine.intentId));
+		const res = await patchJson(
+			`/v1/intents/${mine.intentId}`,
+			{ notification_level: "muted" },
+			accessToken,
+		);
+		expect(res.status).toBe(200);
+		const [row] = await db
+			.select({ lastEvaluatedAt: intents.lastEvaluatedAt })
+			.from(intents)
+			.where(eq(intents.id, mine.intentId));
+		expect(row?.lastEvaluatedAt?.getTime()).toBe(evaluatedAt.getTime());
 	});
 
 	it("保留(candidate)のLATCHもcancelledになり、通知は作られない", async () => {

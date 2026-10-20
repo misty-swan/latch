@@ -273,7 +273,7 @@ const intentMeaningChanged = (
 
 /**
  * 指定Intentを含む進行中の提案(candidate・proposed・partial_accept)を cancelled で閉じ
- * (proposal_history=expired・提示済みなら参加者へclosed通知)、操作者以外の参加者の保留を
+ * (proposal_historyは消費しない=release・提示済みなら参加者へclosed通知)、操作者以外の参加者の保留を
  * 解放する。matchedは成立済みのため変更しない。Intent削除(docs/05 §2.5)と、active更新での
  * 意味フィールドの変更・期限の短縮(docs/01 §8の不成立経路「Hard Constraintが変化した」・
  * docs/05 §3.2)が共有する
@@ -295,11 +295,12 @@ const cancelOpenLatchesOf = async (
 		);
 	const affectedUserIds = new Set<string>();
 	for (const l of openLatches) {
+		// 削除・条件変更はシステムの都合の閉じ方のため履歴を消費しない(オーナー裁定 2026-10-20)
 		const closed = await closeLatch(
 			db,
 			l.id,
 			"cancelled",
-			"expired",
+			"release",
 			["candidate", "proposed", "partial_accept"],
 			now,
 		);
@@ -913,6 +914,20 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 				result.row.expiresAt.getTime() < row.expiresAt.getTime()))
 	) {
 		await cancelOpenLatchesOf(db, result.row.id, sub, now);
+	}
+	// 意味フィールドの更新では30分の再評価抑制を解除する(オーナー裁定 2026-10-20・docs/06 §3)。
+	// 抑制は同じ内容の繰り返し評価を防ぐためのもので、内容が変われば理由がなくなる。費用は
+	// 更新6回/時(docs/04 §5)とJev予算で別に抑えられている。並行更新で版が進んでいれば触らない
+	if (row.status === "active" && intentMeaningChanged(row, result.row)) {
+		await db
+			.update(intents)
+			.set({ lastEvaluatedAt: null })
+			.where(
+				and(
+					eq(intents.id, result.row.id),
+					eq(intents.version, result.row.version),
+				),
+			);
 	}
 	// イベント発行(docs/06 §2): draft→active化はintent_createdを即時投入。activeは
 	// 意味フィールド(topic・time・geo・participants・budget・constraints)が変わったとき

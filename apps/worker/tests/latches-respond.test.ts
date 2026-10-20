@@ -440,8 +440,9 @@ describe("成立後処理", () => {
 		expect((await latchOf(l1))?.status).toBe("matched");
 		expect((await latchOf(l2))?.status).toBe("cancelled");
 		expect((await latchOf(l3))?.status).toBe("cancelled");
-		expect((await historyOf(l2))?.outcome).toBe("expired");
-		expect((await historyOf(l3))?.outcome).toBe("expired");
+		// 排他(システムの都合)で閉じた提案は履歴を消費しない(オーナー裁定 2026-10-20)
+		expect(await historyOf(l2)).toBeUndefined();
+		expect(await historyOf(l3)).toBeUndefined();
 		// 提示済みのL2のみclosed通知(保留のL3は未提示)
 		expect(await notificationsOf(l2, "closed")).toHaveLength(2);
 		expect(await notificationsOf(l3, "closed")).toHaveLength(0);

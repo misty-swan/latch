@@ -640,14 +640,15 @@ test("補助: PATCH後の候補は新versionで作られ・DELETEで候補とイ
 		topic: "渓流釣りの仲間を募集しています",
 	});
 	expect(patched.version).toBe(2);
-	// PATCH直後の自己再評価は30分抑制(docs/06 §4)でskipされる。
-	// v2のembedding_completedがprocessedになるまで待つことは、10秒遅延の
-	// 更新イベントが第1段(再埋め込み)まで処理されたことの確認にもなる。
-	// 実時間のE2Eでは30分待てない(10 §3)ため、新versionの候補化は
-	// 「PATCH後の別Intentの評価が新version行を作る」ことで証明する
+	// 意味フィールドの更新で30分の再評価抑制は解除されるため(オーナー裁定 2026-10-20・
+	// docs/06 §3)、PATCH後の自己再評価はskipされずに新versionで走る。v2の
+	// embedding_completedがprocessedになるまで待つことは、10秒遅延の更新イベントが
+	// 第1段(再埋め込み)まで処理されたことの確認にもなる。続けて
+	// 「PATCH後の別Intentの評価が新version行を作る」ことも確かめる
 	// (統合試験pipeline-evaluate.test.tsと同一の挙動)
 	const v2Event = await waitForEvaluation(request, userM.access_token, m.id, 2);
-	expect(v2Event.payload).toEqual({ skipped: "suppressed" });
+	expect(v2Event.payload).not.toHaveProperty("skipped");
+	expect(v2Event.payload).toHaveProperty("retrieval_count");
 	const userO = await registerUser(request, "E2E更新O");
 	const o = await createConnection(request, userO.access_token, {
 		topic: "渓流釣りのメンバーを募集しています",

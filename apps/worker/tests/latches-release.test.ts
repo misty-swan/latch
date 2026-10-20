@@ -19,6 +19,7 @@ import {
 } from "../src/db/schema";
 import type { Env as WorkerEnv } from "../src/env";
 import { closeLatch } from "../src/latches/close";
+import { proposePair } from "../src/latches/propose";
 import { expireHeld, releaseHeld } from "../src/latches/release";
 import type { IntentRow } from "../src/pipeline/consumer";
 
@@ -26,6 +27,7 @@ const db = drizzle((env as unknown as WorkerEnv).DB);
 const NOW = new Date("2026-06-01T03:00:00Z");
 const MIN = 60_000;
 const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
 const ago = (ms: number): Date => new Date(NOW.getTime() - ms);
 const later = (ms: number): Date => new Date(NOW.getTime() + ms);
 
@@ -320,7 +322,7 @@ describe("releaseHeld", () => {
 		expect((await latchOf(connLatch))?.status).toBe("candidate");
 	});
 
-	it("(c) 保留中に参加Intentの期限を過ぎたものはexpiredで閉じる(通知0・履歴expired)", async () => {
+	it("(c) 保留中に参加Intentの期限を過ぎたものはexpiredで閉じる(通知0・未提示のため履歴は解放)", async () => {
 		const { latchId, userIds } = await setupPair(
 			"occasion",
 			{},
@@ -329,7 +331,7 @@ describe("releaseHeld", () => {
 		expect(await releaseHeld(db, NOW, userIds)).toBe(0);
 		expect((await latchOf(latchId))?.status).toBe("expired");
 		expect(await notificationsOf(latchId)).toHaveLength(0);
-		expect((await historyOf(latchId))?.outcome).toBe("expired");
+		expect(await historyOf(latchId)).toBeUndefined();
 		const events = await eventsOf(latchId);
 		expect(events.map((e) => [e.fromStatus, e.toStatus])).toEqual([
 			["candidate", "expired"],
@@ -353,7 +355,7 @@ describe("releaseHeld", () => {
 		"cancelled",
 		"missing",
 	])(
-		"参加Intentが%sの保留はcancelledで閉じる(通知0・履歴expired)",
+		"参加Intentが%sの保留はcancelledで閉じる(通知0・未提示のため履歴は解放)",
 		async (state) => {
 			const ua = await insertUser();
 			const ub = await insertUser();
@@ -368,7 +370,7 @@ describe("releaseHeld", () => {
 			expect(await releaseHeld(db, NOW, [ua, ub])).toBe(0);
 			expect((await latchOf(latchId))?.status).toBe("cancelled");
 			expect(await notificationsOf(latchId)).toHaveLength(0);
-			expect((await historyOf(latchId))?.outcome).toBe("expired");
+			expect(await historyOf(latchId)).toBeUndefined();
 			const events = await eventsOf(latchId);
 			expect(events.map((e) => [e.fromStatus, e.toStatus])).toEqual([
 				["candidate", "cancelled"],
@@ -414,13 +416,13 @@ describe("releaseHeld", () => {
 		expect((await latchOf(othersTooLate.latchId))?.status).toBe("candidate");
 	});
 
-	it("userIds指定時、対象範囲内で対象時刻まで75分未満の機会の保留は昇格させずexpiredで閉じる", async () => {
+	it("userIds指定時、対象範囲内で対象時刻まで75分未満の機会の保留は昇格させずexpiredで閉じる(履歴は解放)", async () => {
 		const { latchId, userIds } = await setupPair("occasion", {
 			startsAt: later(74 * MIN),
 		});
 		expect(await releaseHeld(db, NOW, userIds)).toBe(0);
 		expect((await latchOf(latchId))?.status).toBe("expired");
-		expect((await historyOf(latchId))?.outcome).toBe("expired");
+		expect(await historyOf(latchId)).toBeUndefined();
 		expect(await notificationsOf(latchId)).toHaveLength(0);
 	});
 
@@ -446,7 +448,7 @@ describe("expireHeld", () => {
 		const closed = await expireHeld(db, NOW);
 		expect(closed).toBeGreaterThanOrEqual(1);
 		expect((await latchOf(tooLate.latchId))?.status).toBe("expired");
-		expect((await historyOf(tooLate.latchId))?.outcome).toBe("expired");
+		expect(await historyOf(tooLate.latchId)).toBeUndefined();
 		expect(await notificationsOf(tooLate.latchId)).toHaveLength(0);
 		expect((await latchOf(justOk.latchId))?.status).toBe("candidate");
 	});
@@ -653,5 +655,56 @@ describe("closeLatch", () => {
 		expect(history?.outcome).toBe("proposed");
 		// 古いLATCHのclosed通知は作られる(提示済み)
 		expect(await notificationsOf(old)).toHaveLength(2);
+	});
+});
+
+describe("履歴の解放(未提示・システムの都合で閉じた提案は履歴を消費しない・オーナー裁定 2026-10-20)", () => {
+	it("再提案で確保した既存の履歴行は削除せず expired に戻す", async () => {
+		const ua = await insertUser();
+		const ub = await insertUser();
+		const a = await insertIntent(ua, "occasion");
+		const b = await insertIntent(ub, "occasion", { status: "expired" });
+		const latchId = await insertLatch(a, b);
+		// 再提案の確保を模す: 履歴行はLATCHより前から存在する
+		await db
+			.update(proposalHistory)
+			.set({ createdAt: ago(2 * DAY) })
+			.where(eq(proposalHistory.latchId, latchId));
+
+		expect(await releaseHeld(db, NOW, [ua, ub])).toBe(0);
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		const history = await historyOf(latchId);
+		expect(history?.outcome).toBe("expired");
+		expect(history?.updatedAt.getTime()).toBe(NOW.getTime());
+	});
+
+	it("提示済みの提案が回答期限切れで閉じた場合は履歴を expired のまま残す", async () => {
+		const { latchId } = await setupPair(
+			"connection",
+			{},
+			{ status: "proposed" },
+		);
+		expect(
+			await closeLatch(db, latchId, "expired", "expired", ["proposed"], NOW),
+		).toBe(true);
+		expect((await historyOf(latchId))?.outcome).toBe("expired");
+	});
+
+	it("未提示のまま期限切れで閉じたつながりのペアには、改めて提案できる", async () => {
+		const { a, b, latchId } = await setupPair(
+			"connection",
+			{},
+			{ expiresAt: ago(MIN) },
+		);
+		await expireHeld(db, NOW);
+		expect((await latchOf(latchId))?.status).toBe("expired");
+		const [low, high] = a.id < b.id ? [a, b] : [b, a];
+		expect(
+			await proposePair(
+				db,
+				{ rowId: ulid(), a: low, b: high, score: 0.9 },
+				NOW,
+			),
+		).toBe("proposed");
 	});
 });

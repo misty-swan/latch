@@ -497,21 +497,14 @@ describe("統合パターン(SELF.fetch→イベント→第1段→第2段)", ()
 		);
 		await consumePendingEvents(a.id);
 
-		// 直前の評価から30分以内のため再評価は抑制され(docs/06 §4)・
-		// 呼び出し側はnullを受けてskippedをpayloadへ載せてprocessedにする
+		// 意味フィールドの更新で30分の再評価抑制は解除されるため(オーナー裁定 2026-10-20・
+		// docs/06 §3)、直前の評価から30分以内でも新versionで再評価される(skippedにならない)
 		const completedV2 = (await eventsOf(a.id)).find(
 			(e) => e.eventType === "embedding_completed" && e.version === 2,
 		);
 		expect(completedV2?.status).toBe("processed");
-		expect(completedV2?.payload).toEqual({ skipped: "suppressed" });
-
-		// 抑制の解除を擬似する(last_evaluated_atを空に=30分経過後のCron等の再評価相当)
-		await db
-			.update(intents)
-			.set({ lastEvaluatedAt: null })
-			.where(eq(intents.id, a.id));
-		const result = await evaluateIntent(testEnv, a.id, systemClock);
-		expect(result).not.toBeNull();
+		expect(completedV2?.payload).not.toHaveProperty("skipped");
+		expect(completedV2?.payload).toHaveProperty("retrieval_count");
 
 		// 新versionの候補行が作られ・旧versionの行も残る(docs/05 §2.2のUNIQUEは
 		// (a,b,va,vb)単位のため併存する)

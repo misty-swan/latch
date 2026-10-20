@@ -447,11 +447,12 @@ const onMatched = async (
 			);
 		for (const { id } of others) {
 			for (const userId of await membersOf(db, id)) related.add(userId);
+			// 排他はシステムの都合の閉じ方のため履歴を消費しない(オーナー裁定 2026-10-20)
 			await closeLatch(
 				db,
 				id,
 				"cancelled",
-				"expired",
+				"release",
 				["candidate", "proposed", "partial_accept"],
 				now,
 			);
