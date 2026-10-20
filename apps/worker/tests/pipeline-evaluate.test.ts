@@ -720,6 +720,7 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			latchId: null,
 			outcome: "matched",
 			createdAt: FIXED_NOW,
+			updatedAt: FIXED_NOW,
 		});
 
 		for (const row of [origin, selfPair, blocked, history, young, far, ok]) {

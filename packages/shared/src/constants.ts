@@ -210,6 +210,57 @@ export const PIPELINE = {
 	CRON_BATCH_LIMIT: 500,
 } as const;
 
+/**
+ * 提案化(Layer 4〜5・提案生成)の定数。値の正本は docs/06 §5〜§7・01 §8・§10。
+ * 1日6件の通知上限は LIMITS.NOTIFICATIONS_PER_DAY、Jev予算は LIMITS.JEV_* を使う。
+ * 単位は名前の接尾辞どおり(MS=ミリ秒・DAYS=日)。
+ */
+export const LATCH = {
+	// 提案する下限(L > 0.60。0.60ちょうどは提案しない)。docs/06 §5
+	THRESHOLD: 0.6,
+	// 較正係数C(MVPは1)。docs/06 §5
+	CALIBRATION_C: 1,
+	// 1イベントあたりのJev呼び出し上限(K_j)。docs/06 §5
+	JEV_CALLS_PER_EVENT: 8,
+	// 1Intentの同時進行LATCH数の上限。docs/01 §8
+	CONCURRENT_PER_INTENT: 3,
+	// 機会: 対象時刻まで75分未満なら提案しない。docs/01 §8
+	OCCASION_MIN_LEAD_MS: 75 * 60_000,
+	// 機会の回答期限: 提示+15分を下限とする。docs/01 §10
+	OCCASION_DEADLINE_MIN_MS: 15 * 60_000,
+	// 機会の回答期限: 提示+2時間を上限とする。docs/01 §10
+	OCCASION_DEADLINE_MAX_MS: 2 * 60 * 60_000,
+	// 機会の回答期限: 対象時刻の60分前を超えない。docs/01 §10
+	OCCASION_DEADLINE_BEFORE_START_MS: 60 * 60_000,
+	// つながりの回答期限: 提示+24時間。docs/01 §10
+	CONNECTION_DEADLINE_MS: 24 * 60 * 60_000,
+	// 見送り後の再提案抑制の上限(24時間)。docs/01 §8
+	REPROPOSAL_SUPPRESSION_MAX_MS: 24 * 60 * 60_000,
+	// circuit breaker: 失敗を数える窓(5分)。docs/06 §5
+	BREAKER_WINDOW_MS: 5 * 60_000,
+	// circuit breaker: 窓内の連続失敗でオープンする回数。docs/06 §5
+	BREAKER_FAILURES: 10,
+	// circuit breaker: オープンの継続(30分)。docs/06 §5
+	BREAKER_OPEN_MS: 30 * 60_000,
+	// Jev予算アラートの閾値(上限の80%)。docs/06 §6
+	BUDGET_ALERT_RATIO: 0.8,
+	// usage_countersの保持期間(90日)。docs/05 §2.6
+	COUNTER_RETENTION_DAYS: 90,
+	// pending(保留中)残留の掃査対象とする経過(10分)。docs/06 §4
+	PENDING_STALE_MS: 10 * 60_000,
+	// バックフィルで連続失敗が何件で打ち切るか。docs/06 §4
+	BACKFILL_FAILURE_ABORT: 5,
+} as const;
+
+/** 見送り(defer)の理由。回答APIのreasonに使う。docs/05 §3 */
+export const DEFER_REASONS = [
+	"no_capacity",
+	"schedule_mismatch",
+	"just_not_now",
+	"other",
+] as const;
+export type DeferReason = (typeof DEFER_REASONS)[number];
+
 /** Queuesのキューメッセージ本体。event_type等の詳細はD1のmatch_events行から読む */
 export interface MatchQueueMessage {
 	event_id: string;

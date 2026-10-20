@@ -5,6 +5,7 @@ import {
 	CONNECTION_DEFAULT_EXPIRY_DAYS,
 	CONSTRAINT_ITEM_MAX_LENGTH,
 	CONSTRAINT_MAX_ITEMS,
+	DEFER_REASONS,
 	EMBEDDING_MODEL_REAL,
 	EMBEDDING_MODEL_STUB,
 	ERROR_CODES,
@@ -12,6 +13,7 @@ import {
 	GEO_RADIUS_MAX_M,
 	GEO_RADIUS_MIN_M,
 	INTENT_FORMS,
+	LATCH,
 	LIMITS,
 	type MatchQueueMessage,
 	OCCASION_DEFAULT_TTL_HOURS,
@@ -130,5 +132,40 @@ describe("MatchQueueMessage", () => {
 			event_id: "01JAAAAAAAAAAAAAAAAAAAAAAA",
 		};
 		expect(message.event_id).toBe("01JAAAAAAAAAAAAAAAAAAAAAAA");
+	});
+});
+
+describe("LATCH(提案化の定数・docs/06 §5〜§7)", () => {
+	it("仕様どおりの値を持つ", () => {
+		expect(LATCH).toEqual({
+			THRESHOLD: 0.6,
+			CALIBRATION_C: 1,
+			JEV_CALLS_PER_EVENT: 8,
+			CONCURRENT_PER_INTENT: 3,
+			OCCASION_MIN_LEAD_MS: 75 * 60_000,
+			OCCASION_DEADLINE_MIN_MS: 15 * 60_000,
+			OCCASION_DEADLINE_MAX_MS: 2 * 60 * 60_000,
+			OCCASION_DEADLINE_BEFORE_START_MS: 60 * 60_000,
+			CONNECTION_DEADLINE_MS: 24 * 60 * 60_000,
+			REPROPOSAL_SUPPRESSION_MAX_MS: 24 * 60 * 60_000,
+			BREAKER_WINDOW_MS: 5 * 60_000,
+			BREAKER_FAILURES: 10,
+			BREAKER_OPEN_MS: 30 * 60_000,
+			BUDGET_ALERT_RATIO: 0.8,
+			COUNTER_RETENTION_DAYS: 90,
+			PENDING_STALE_MS: 10 * 60_000,
+			BACKFILL_FAILURE_ABORT: 5,
+		});
+	});
+});
+
+describe("DEFER_REASONS", () => {
+	it("見送り理由の4種をこの順で定義する", () => {
+		expect(DEFER_REASONS).toEqual([
+			"no_capacity",
+			"schedule_mismatch",
+			"just_not_now",
+			"other",
+		]);
 	});
 });

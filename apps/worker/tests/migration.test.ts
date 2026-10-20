@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { expect, it } from "vitest";
 import rollback0002Sql from "../migrations_rollback/0002_rollback.sql?raw";
+import rollback0003Sql from "../migrations_rollback/0003_rollback.sql?raw";
 
 /**
  * マイグレーション適用結果の検証。
@@ -147,4 +148,76 @@ it("戻しマイグレーション適用で intents の delayed_reeval_at 列が
 	}>();
 	const columnNames = columns.results.map((column) => column.name);
 	expect(columnNames).not.toContain("delayed_reeval_at");
+});
+
+/** PRAGMA table_infoの列名一覧(テーブル名はバインドできないためリテラルで渡す) */
+async function columnsOf(table: string) {
+	const result = await env.DB.prepare(`PRAGMA table_info(${table})`).all<{
+		name: string;
+		notnull: number;
+	}>();
+	return result.results;
+}
+
+async function indexNamesOf(table: string): Promise<string[]> {
+	const result = await env.DB.prepare(`PRAGMA index_list(${table})`).all<{
+		name: string;
+	}>();
+	return result.results.map((index) => index.name);
+}
+
+it("0003適用後、提案化の列(from_status null可・proposed_at・updated_at)と4索引が存在する(docs/05 §2.2・§2.4)", async () => {
+	const events = await columnsOf("latch_status_events");
+	const names = events.map((c) => c.name);
+	expect(names).toEqual(
+		expect.arrayContaining(["latch_id", "from_status", "to_status"]),
+	);
+	expect(events.find((c) => c.name === "from_status")?.notnull).toBe(0);
+	expect(events.find((c) => c.name === "to_status")?.notnull).toBe(1);
+
+	const latches = await columnsOf("latches");
+	const proposedAt = latches.find((c) => c.name === "proposed_at");
+	expect(proposedAt, "proposed_at 列が存在すること").toBeDefined();
+	expect(proposedAt?.notnull).toBe(0);
+
+	const history = await columnsOf("proposal_history");
+	const updatedAt = history.find((c) => c.name === "updated_at");
+	expect(updatedAt, "updated_at 列が存在すること").toBeDefined();
+	expect(updatedAt?.notnull).toBe(1);
+
+	expect(await indexNamesOf("latches")).toEqual(
+		expect.arrayContaining([
+			"latches_status_response_deadline_idx",
+			"latches_status_proposed_at_idx",
+		]),
+	);
+	expect(await indexNamesOf("notifications")).toContain(
+		"notifications_user_id_type_created_at_idx",
+	);
+	expect(await indexNamesOf("latch_status_events")).toContain(
+		"latch_status_events_latch_id_idx",
+	);
+});
+
+it("戻しマイグレーション0003の適用で追加列・索引が消える(docs/11 §3の対マイグレーション)", async () => {
+	for (const statement of toStatements(rollback0003Sql)) {
+		await env.DB.prepare(statement).run();
+	}
+	expect((await columnsOf("latches")).map((c) => c.name)).not.toContain(
+		"proposed_at",
+	);
+	expect(
+		(await columnsOf("proposal_history")).map((c) => c.name),
+	).not.toContain("updated_at");
+	expect(await indexNamesOf("latches")).not.toContain(
+		"latches_status_response_deadline_idx",
+	);
+	expect(await indexNamesOf("notifications")).not.toContain(
+		"notifications_user_id_type_created_at_idx",
+	);
+	expect(await indexNamesOf("latch_status_events")).not.toContain(
+		"latch_status_events_latch_id_idx",
+	);
+	const events = await columnsOf("latch_status_events");
+	expect(events.find((c) => c.name === "from_status")?.notnull).toBe(1);
 });

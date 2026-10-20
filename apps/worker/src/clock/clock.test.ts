@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { fixedClock, jstDayKey, jstHourKey, systemClock } from "./clock";
+import {
+	fixedClock,
+	jstDayKey,
+	jstDayStart,
+	jstHourKey,
+	jstMonthKey,
+	systemClock,
+} from "./clock";
 
 describe("fixedClock(04 §4: 単体試験は固定時刻で行う)", () => {
 	it("now()は何度呼んでも同一の時刻を返す", () => {
@@ -46,6 +53,30 @@ describe("jstHourKey(usage_countersのperiod・05 §2.2)", () => {
 	it("月・日・時のゼロ埋め", () => {
 		expect(jstHourKey(new Date("2026-01-01T15:30:00Z"))).toBe("2026-01-02-00");
 		expect(jstHourKey(new Date("2026-04-05T06:00:00Z"))).toBe("2026-04-05-15");
+	});
+});
+
+describe("jstMonthKey(月次バケット・Jev予算の1か月カウンタ)", () => {
+	it("JST換算で月が変わる境界(UTC 10/31 15:00は11月)", () => {
+		expect(jstMonthKey(new Date("2026-10-31T15:00:00Z"))).toBe("2026-11");
+		expect(jstMonthKey(new Date("2026-10-31T14:59:59Z"))).toBe("2026-10");
+	});
+});
+
+describe("jstDayStart(当日JST 0時のUTC時刻)", () => {
+	it("JST 1:00(UTC 前日16:00)でも当日JST 0時を返す", () => {
+		expect(jstDayStart(new Date("2026-10-20T16:00:00Z")).toISOString()).toBe(
+			"2026-10-20T15:00:00.000Z",
+		);
+	});
+
+	it("JST 0:00ちょうどはそのまま、直前は前日の0時", () => {
+		expect(jstDayStart(new Date("2026-10-19T15:00:00Z")).toISOString()).toBe(
+			"2026-10-19T15:00:00.000Z",
+		);
+		expect(jstDayStart(new Date("2026-10-19T14:59:59Z")).toISOString()).toBe(
+			"2026-10-18T15:00:00.000Z",
+		);
 	});
 });
 

@@ -52,3 +52,15 @@ export const jstHourKey = (d: Date): string => {
 	const { year, month, day, hour } = jstParts(d);
 	return `${year}-${pad2(month)}-${pad2(day)}-${pad2(hour)}`;
 };
+
+/** 月次バケットキー(usage_countersのperiod・docs/05 §2.2): YYYY-MM(JST基準) */
+export const jstMonthKey = (d: Date): string => {
+	const { year, month } = jstParts(d);
+	return `${year}-${pad2(month)}`;
+};
+
+/** 当日JST 0時のUTC時刻(日次集計・通知上限の窓の起点・docs/01 §20) */
+export const jstDayStart = (d: Date): Date => {
+	const { year, month, day } = jstParts(d);
+	return new Date(Date.UTC(year, month - 1, day) - JST_OFFSET_MS);
+};

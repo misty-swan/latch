@@ -662,6 +662,7 @@ describe("fetchL1Data(docs/06 §3・100件チャンクのD1一括取得)", () =>
 				latchId: null,
 				outcome: "matched",
 				createdAt: FIXED_NOW,
+				updatedAt: FIXED_NOW,
 			},
 			{
 				id: ulid(),
@@ -670,6 +671,7 @@ describe("fetchL1Data(docs/06 §3・100件チャンクのD1一括取得)", () =>
 				latchId: null,
 				outcome: "deferred",
 				createdAt: FIXED_NOW,
+				updatedAt: FIXED_NOW,
 			},
 			{
 				id: ulid(),
@@ -678,6 +680,7 @@ describe("fetchL1Data(docs/06 §3・100件チャンクのD1一括取得)", () =>
 				latchId: null,
 				outcome: "rejected",
 				createdAt: FIXED_NOW,
+				updatedAt: FIXED_NOW,
 			},
 		]);
 
@@ -730,6 +733,7 @@ describe("fetchL1Data(docs/06 §3・100件チャンクのD1一括取得)", () =>
 			latchId: null,
 			outcome: "rejected",
 			createdAt: FIXED_NOW,
+			updatedAt: FIXED_NOW,
 		});
 
 		const data = await fetchL1Data(

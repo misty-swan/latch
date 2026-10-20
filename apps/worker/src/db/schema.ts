@@ -296,6 +296,8 @@ export const proposalHistory = sqliteTable(
 		/** 恒久排除はmatched/rejected行の存在のみ。deferred/expiredは機会Intentの条件付き再提案の参照に使う */
 		outcome: text("outcome").$type<ProposalOutcome>().notNull(),
 		createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+		/** 同一ペアの再提案でoutcomeを更新した時刻(見送り後の再提案抑制の起点・docs/01 §8) */
+		updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 	},
 	(t) => [
 		uniqueIndex("proposal_history_user_low_user_high_uniq").on(
@@ -329,10 +331,19 @@ export const latches = sqliteTable(
 		}).notNull(),
 		/** 機会=対象時刻経過 / つながり=最終メッセージから90日経過 */
 		completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+		/** 保留中(candidate)から提案中(proposed)へ進めた時刻。pending残留の掃査・提示基準(docs/06 §4) */
+		proposedAt: integer("proposed_at", { mode: "timestamp_ms" }),
 		createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 		updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 	},
 	(t) => [
+		// 回答期限切れ走査(docs/06 §4)
+		index("latches_status_response_deadline_idx").on(
+			t.status,
+			t.responseDeadline,
+		),
+		// 保留中(candidate)の残留掃査(docs/06 §4)
+		index("latches_status_proposed_at_idx").on(t.status, t.proposedAt),
 		// つながり90日completed判定の走査(docs/05 §2.6)
 		index("latches_status_form_last_message_at_idx").on(
 			t.status,
@@ -376,13 +387,18 @@ export const latchResponses = sqliteTable(
 );
 
 /** LATCH状態遷移の観測点(MLR集計用) */
-export const latchStatusEvents = sqliteTable("latch_status_events", {
-	id: text("id", { length: 26 }).primaryKey(),
-	latchId: text("latch_id", { length: 26 }).notNull(),
-	fromStatus: text("from_status").$type<LatchStatus>().notNull(),
-	toStatus: text("to_status").$type<LatchStatus>().notNull(),
-	createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-});
+export const latchStatusEvents = sqliteTable(
+	"latch_status_events",
+	{
+		id: text("id", { length: 26 }).primaryKey(),
+		latchId: text("latch_id", { length: 26 }).notNull(),
+		/** 生成時の最初の遷移はnull */
+		fromStatus: text("from_status").$type<LatchStatus>(),
+		toStatus: text("to_status").$type<LatchStatus>().notNull(),
+		createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+	},
+	(t) => [index("latch_status_events_latch_id_idx").on(t.latchId)],
+);
 
 /** チャットメッセージの正。Durable Objectsは配信のみ(docs/04 §4) */
 export const messages = sqliteTable(
@@ -468,6 +484,12 @@ export const notifications = sqliteTable(
 	},
 	(t) => [
 		index("notifications_user_id_read_at_id_idx").on(t.userId, t.readAt, t.id),
+		// 1ユーザー1日6件の上限判定(docs/01 §20)
+		index("notifications_user_id_type_created_at_idx").on(
+			t.userId,
+			t.type,
+			t.createdAt,
+		),
 		uniqueIndex("notifications_latch_id_user_id_type_uniq").on(
 			t.latchId,
 			t.userId,
