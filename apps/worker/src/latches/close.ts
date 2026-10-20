@@ -37,7 +37,7 @@ export type HistoryRule =
 	| { kind: "non_yes"; outcome: "expired" };
 
 /**
- * 履歴の更新文(すべて closed 条件付き)。(1) 対象ペアのUPDATE (2) outcome='proposed' のまま
+ * 履歴の更新文(すべて closed 条件付き)。(1) 対象ペアのうち outcome='proposed' の行のUPDATE (2) outcome='proposed' のまま
  * 残った行のうちこのLATCHのために新規に確保した行(created_at が LATCH作成以降)を削除
  * (3) 残った outcome='proposed' の行(再提案で確保した既存行)を expired に戻す。release は(2)(3)のみ
  */
@@ -75,10 +75,12 @@ const historyStatementsOf = (
 				)
 			: sql`(${proposalHistory.userLow} NOT IN (${activeYesUsers(latchId)}) OR ${proposalHistory.userHigh} NOT IN (${activeYesUsers(latchId)}))`;
 	return [
+		// outcome='proposed'の行だけを対象にする。同じミリ秒・同じtoの二重クローズでは後着側にも
+		// closedが真に見えるため、先着側が書いた行を上書きしない(開いたLATCHの行は常にproposed)
 		db
 			.update(proposalHistory)
 			.set({ outcome: history.outcome, updatedAt: now })
-			.where(and(ofLatch, target, closed)),
+			.where(and(ofLatch, stillProposed, target, closed)),
 		...release,
 	];
 };

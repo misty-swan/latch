@@ -22,6 +22,7 @@ import {
 	users,
 } from "../src/db/schema";
 import type { Env as WorkerEnv } from "../src/env";
+import { closeLatch } from "../src/latches/close";
 import { proposeNextGroup } from "../src/latches/next-group";
 import { historyBlockedPairs, proposeSet } from "../src/latches/propose";
 import { leave, respond } from "../src/latches/respond";
@@ -433,6 +434,37 @@ const gatedDb = () => {
 	});
 	return { db: gated, reached, release: () => release() };
 };
+
+describe("同じミリ秒・同じ遷移先の二重クローズ(F4b設計 §3.2)", () => {
+	it("先に閉じた側が書いたペア行を、後から来た側の対象ペアUPDATEが上書きしない", async () => {
+		const { latchId, x, y, z } = await setupTrio("connection");
+		// Xのdefer側を読み出し後・バッチ前で止め、その間にYのnoが同じnow・同じtoで先に閉じる
+		const gated = gatedDb();
+		const loser = closeLatch(
+			gated.db,
+			latchId,
+			"rejected",
+			{ kind: "actor", userId: x, outcome: "deferred" },
+			["proposed", "partial_accept"],
+			NOW,
+		);
+		await gated.reached;
+		await closeLatch(
+			db,
+			latchId,
+			"rejected",
+			{ kind: "actor", userId: y, outcome: "rejected" },
+			["proposed", "partial_accept"],
+			NOW,
+		);
+		gated.release();
+		await loser;
+		// 勝者(Y)の規則だけが残る: Yを含む2行はrejected・X-Zの新規確保の行は削除
+		expect((await historyOf(x, y))?.outcome).toBe("rejected");
+		expect((await historyOf(y, z))?.outcome).toBe("rejected");
+		expect(await historyOf(x, z)).toBeUndefined();
+	});
+});
 
 describe("proposeSet(集合・F4b設計 §3.1)", () => {
 	it("3人: proposed・履歴3行・members 3・通知3・group_candidatesはproposed", async () => {
@@ -870,6 +902,97 @@ describe("次集合の提案(F4b設計 §3.5)", () => {
 		await runScheduledPipeline(testEnv, fixedClock(NOW));
 		expect((await latchOf(latchId))?.status).toBe("expired");
 		const next = await nextLatchWith([a, b, d], latchId);
+		expect(next.length).toBe(1);
+		expect(next[0].status).toBe("proposed");
+	});
+
+	it("回答期限切れの走査では、参加者の保留の解放が次集合の提案より先に行われる", async () => {
+		vi.spyOn(testEnv.MATCH_QUEUE, "send").mockResolvedValue({
+			metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+		});
+		const { latchId } = await setupTrio("occasion", {
+			status: "partial_accept",
+			deadline: ago(MIN),
+		});
+		const [a, b] = await intentsOfTrio(latchId);
+		await insertYes(latchId, a.userId);
+		await insertYes(latchId, b.userId);
+		const [d] = await insertMembers(1, "occasion");
+		await insertGroupCandidate([a, b, d], 0.9);
+		// Aの別Intentと相手Eの保留中の1対1(先に保留されていた提案)
+		const a2 = await insertIntent(a.userId, "occasion");
+		const [e] = await insertMembers(1, "occasion");
+		const heldId = ulid();
+		await db.insert(latches).values({
+			id: heldId,
+			form: "occasion",
+			intentIds: [a2.id, e.id].sort(),
+			proposal: {
+				form: "occasion",
+				topic: a2.topic,
+				time_window: null,
+				region_name: null,
+				participants: { min: 2, max: 4 },
+				budget: null,
+			},
+			score: 0.9,
+			status: "candidate",
+			responseDeadline: later(7 * HOUR),
+			expiresAt: later(7 * HOUR),
+			lastMessageAt: ago(HOUR),
+			completedAt: null,
+			proposedAt: null,
+			createdAt: ago(HOUR),
+			updatedAt: ago(HOUR),
+		});
+		await db.insert(latchMembers).values([
+			{ latchId: heldId, userId: a.userId, leftAt: null },
+			{ latchId: heldId, userId: e.userId, leftAt: null },
+		]);
+		const [low, high] = pairKey(a.userId, e.userId);
+		await db.insert(proposalHistory).values({
+			id: ulid(),
+			userLow: low,
+			userHigh: high,
+			latchId: heldId,
+			outcome: "proposed",
+			createdAt: ago(HOUR),
+			updatedAt: ago(HOUR),
+		});
+		// Aの当日の提案通知を上限の1件手前にする(提示できるのはあと1件)
+		for (let i = 0; i < 5; i++) {
+			await db.insert(notifications).values({
+				id: ulid(),
+				userId: a.userId,
+				type: "proposal",
+				latchId: null,
+				readAt: null,
+				createdAt: ago(HOUR),
+			});
+		}
+		await runScheduledPipeline(testEnv, fixedClock(NOW));
+		expect((await latchOf(latchId))?.status).toBe("expired");
+		// 先に保留されていた提案が残り1枠で提示され、次集合は保留になる
+		expect((await latchOf(heldId))?.status).toBe("proposed");
+		const next = (await nextLatchWith([a, b, d], latchId)).filter(
+			(l) => l.id !== heldId,
+		);
+		expect(next.length).toBe(1);
+		expect(next[0].status).toBe("candidate");
+	});
+
+	it("成立後の離脱で下限割れによりcancelledになった場合も、次の集合が提案される", async () => {
+		const { latchId, members } = await setupMatchedGroup(3);
+		const [a] = await intentsOfTrio(latchId);
+		const [d, e] = await insertMembers(2, "connection");
+		await insertGroupCandidate([a, d, e], 0.9);
+		const leaver = members.find((u) => u !== a.userId) as string;
+		expect(await leave(db, latchId, leaver, NOW)).toEqual({
+			ok: true,
+			latchId,
+		});
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		const next = await nextLatchWith([a, d, e], latchId);
 		expect(next.length).toBe(1);
 		expect(next[0].status).toBe("proposed");
 	});

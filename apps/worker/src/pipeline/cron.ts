@@ -567,12 +567,14 @@ const runRetentionSweep = async (env: Env, clock: Clock): Promise<void> => {
  * response_deadline≤now(ちょうどを含む)のLATCHを期限の古い順に最大500件expiredで閉じる
  * (proposal_history=expired・提示済みのため参加者へclosed通知)。閉じられた場合に限り、
  * 有効なyes(retracted_at IS NULL)を無効化する。参加者の保留(candidate)の解放は直後の
- * 保留走査(runHeldSweep)が全体で拾う。
+ * 保留走査(runHeldSweep)が全体で拾う。閉じたLATCHのidは closedIds へ積み、次集合の提案は
+ * 保留走査の後に runNextGroupSweep が行う(他のクローズ経路と同じく保留の解放を先にする)。
  * 1件の例外は握って続行する(latch_id・error_codeのみをログ・docs/08 §6)
  */
 const runResponseDeadlineSweep = async (
 	env: Env,
 	clock: Clock,
+	closedIds: string[],
 ): Promise<void> => {
 	const db = drizzle(env.DB);
 	const now = clock.now();
@@ -613,9 +615,9 @@ const runResponseDeadlineSweep = async (
 						isNull(latchResponses.retractedAt),
 					),
 				);
-			// 参加者の保留の解放は直後の保留走査(runHeldSweep)が全体で拾う。
-			// グループなら評価済みの次の集合を提案する(F4b設計 §3.5・失敗は内部でログへ)
-			await proposeNextGroupAfterClose(db, id, now);
+			// 参加者の保留の解放は直後の保留走査(runHeldSweep)が全体で拾い、
+			// 次集合の提案はその後に行う(runNextGroupSweep)
+			closedIds.push(id);
 			expired += 1;
 		} catch (error) {
 			logger.warn("cron.item.failed", {
@@ -640,6 +642,22 @@ const runHeldSweep = async (env: Env, clock: Clock): Promise<void> => {
 	const released = await releaseHeld(db, now);
 	if (released > 0) {
 		logger.info("cron.held.released", { count: released });
+	}
+};
+
+/**
+ * 回答期限切れで閉じたグループ提案ごとに、評価済みの次の集合を提案する(F4b設計 §3.5)。
+ * 保留走査の後に呼ぶ。1件の失敗はproposeNextGroupAfterClose内でログへ出して握る
+ */
+const runNextGroupSweep = async (
+	env: Env,
+	clock: Clock,
+	closedIds: string[],
+): Promise<void> => {
+	const db = drizzle(env.DB);
+	const now = clock.now();
+	for (const id of closedIds) {
+		await proposeNextGroupAfterClose(db, id, now);
 	}
 };
 
@@ -763,7 +781,8 @@ const runIsolated = async (
  * 各走査を順に実行する。個々のIntent評価の例外は握って続行するが、
  * 既存7走査(a〜h・保持期間)のクエリ自体の失敗は呼び出し元へ伝播させる(Cron起動の
  * 失敗として可視化し、次回の実行でやり直す)。F4aで追加した4走査(回答期限切れ・保留・
- * 予算アラート・pending残留)は互いに隔離し、失敗をログに出して続行する(docs/06 §2)
+ * 予算アラート・pending残留)と、回答期限切れで閉じたグループ提案の次集合の提案(保留走査の後・
+ * F4b設計 §3.5)は互いに隔離し、失敗をログに出して続行する(docs/06 §2)
  */
 export const runScheduledPipeline = async (
 	env: Env,
@@ -776,10 +795,15 @@ export const runScheduledPipeline = async (
 	await runUnevaluatedSweep(env, clock);
 	await runDelayedReevalSweep(env, clock);
 	await runRetentionSweep(env, clock);
+	// 回答期限切れで閉じたLATCHのid。走査が途中で失敗しても、閉じた分は次集合の提案へ渡す
+	const deadlineClosedIds: string[] = [];
 	await runIsolated("response_deadline", () =>
-		runResponseDeadlineSweep(env, clock),
+		runResponseDeadlineSweep(env, clock, deadlineClosedIds),
 	);
 	await runIsolated("held", () => runHeldSweep(env, clock));
+	await runIsolated("next_group", () =>
+		runNextGroupSweep(env, clock, deadlineClosedIds),
+	);
 	await runIsolated("budget_alert", () => runBudgetAlert(env, clock));
 	await runIsolated("pending", () => runPendingSweep(env, clock));
 };

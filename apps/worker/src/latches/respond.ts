@@ -396,7 +396,11 @@ export const leave = async (
 		now,
 		{ notify: false },
 	);
-	return closed ? { ok: true, latchId } : fail("invalid_status");
+	if (!closed) return fail("invalid_status");
+	// 閉じたグループとして評価済みの次の集合を提案する(F4b設計 §3.5の閉じ方にcancelledを含む)。
+	// 保留の解放は不要(matchedは提示の上限の進行中に数えないため、取り消しで枠は空かない)
+	await proposeNextGroupAfterClose(db, latchId, now);
+	return { ok: true, latchId };
 };
 
 /** 見送った本人が1回だけ見送り理由を保存する(F4a設計 §4.1) */
