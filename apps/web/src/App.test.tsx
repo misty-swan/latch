@@ -47,6 +47,8 @@ describe("App", () => {
 			"/parse-failed",
 			"/placed",
 			"/home",
+			"/latches/:id",
+			"/latches/:id/shelved",
 		]);
 	});
 

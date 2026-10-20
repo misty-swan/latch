@@ -13,6 +13,8 @@ import { Confirm } from "./screens/Confirm";
 import { Consent } from "./screens/Consent";
 import { Home } from "./screens/Home";
 import { Intro } from "./screens/Intro";
+import { LatchScreen } from "./screens/latch/LatchScreen";
+import { ShelvedScreen } from "./screens/latch/ShelvedScreen";
 import { ParseFailed } from "./screens/ParseFailed";
 import { Placed } from "./screens/Placed";
 import { Reading } from "./screens/Reading";
@@ -86,6 +88,22 @@ export const appRoutes = [
 		element: (
 			<RequireAuth>
 				<Home />
+			</RequireAuth>
+		),
+	},
+	{
+		path: PATHS.latch,
+		element: (
+			<RequireAuth>
+				<LatchScreen />
+			</RequireAuth>
+		),
+	},
+	{
+		path: PATHS.latchShelved,
+		element: (
+			<RequireAuth>
+				<ShelvedScreen />
 			</RequireAuth>
 		),
 	},

@@ -14,4 +14,14 @@ export const PATHS = {
 	parseFailed: "/parse-failed",
 	placed: "/placed",
 	home: "/home",
+	latch: "/latches/:id",
+	latchShelved: "/latches/:id/shelved",
 } as const;
+
+/** 提案1件の画面(F4c設計 §1.1) */
+export const latchPath = (id: string): string =>
+	`/latches/${encodeURIComponent(id)}`;
+
+/** 見送った直後の画面(F4c設計 §1.1) */
+export const latchShelvedPath = (id: string): string =>
+	`${latchPath(id)}/shelved`;
