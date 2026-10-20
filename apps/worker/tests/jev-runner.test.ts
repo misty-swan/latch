@@ -8,7 +8,7 @@ import { LATCH } from "@latch/shared";
 import { drizzle } from "drizzle-orm/d1";
 import { beforeEach, describe, expect, it } from "vitest";
 import { fixedClock, jstDayKey } from "../src/clock/clock";
-import { BREAKER_KEY, recordJevOutcome } from "../src/jev/breaker";
+import { BREAKER_KEY, recordJevOutcomes } from "../src/jev/breaker";
 import { type JevTarget, runJev } from "../src/jev/runner";
 import { JEV_TIMEOUT_MARKER, stubJev } from "../src/llm/stub/jev";
 import type { JevAxes, JevFn } from "../src/llm/types";
@@ -31,6 +31,27 @@ const run = (primary: JevFn, fallback: JevFn, ts: JevTarget[]) =>
 const failWith =
 	(kind: "timeout" | "invalid_output"): JevFn =>
 	async () => ({ ok: false, kind });
+
+/** KVのget/putを数えて本物へ委譲する記録用の薄いラッパー */
+const countingKv = (inner: KVNamespace) => {
+	const counts = { gets: 0, puts: 0 };
+	const wrapped = {
+		get: (...args: Parameters<KVNamespace["get"]>) => {
+			counts.gets += 1;
+			return (inner.get as (...a: unknown[]) => unknown)(...args);
+		},
+		put: (...args: Parameters<KVNamespace["put"]>) => {
+			counts.puts += 1;
+			return inner.put(...args);
+		},
+	} as unknown as KVNamespace;
+	return {
+		kv: wrapped,
+		get puts() {
+			return counts.puts;
+		},
+	};
+};
 
 /** axes.size + 保留の総和 = 対象数(1対象は1回だけ数える) */
 const accounted = (r: Awaited<ReturnType<typeof run>>) =>
@@ -83,9 +104,11 @@ describe("runJev", () => {
 	});
 
 	it("breakerが事前にopen: 呼ばずにheld.breaker=対象数", async () => {
-		for (let i = 0; i < LATCH.BREAKER_FAILURES; i++) {
-			await recordJevOutcome(kv, false, NOW);
-		}
+		await recordJevOutcomes(
+			kv,
+			Array.from({ length: LATCH.BREAKER_FAILURES }, () => false),
+			NOW,
+		);
 		const r = await run(stubJev, stubJev, targets(5));
 		expect(r.calls).toBe(0);
 		expect(r.held.breaker).toBe(5);
@@ -115,6 +138,70 @@ describe("runJev", () => {
 		expect(r.axes.size).toBe(2);
 		expect(r.held.budget).toBe(3);
 		expect(accounted(r)).toBe(5);
+	});
+
+	it("成功のみ8件の波: breakerの状態が変わらずKVへ書かない", async () => {
+		const counting = countingKv(kv);
+		const r = await runJev(
+			{
+				jev: { primary: stubJev, fallback: stubJev },
+				db,
+				kv: counting.kv,
+				clock,
+			},
+			origin,
+			targets(8),
+		);
+		expect(r.axes.size).toBe(8);
+		expect(counting.puts).toBe(0);
+	});
+
+	it("失敗を含む8件の波: KVへの書き込みは1波につき1回まで", async () => {
+		const counting = countingKv(kv);
+		const ts = targets(8);
+		const half: JevFn = async (input) =>
+			Number(input.normalizedA.slice(1)) % 2 === 0
+				? { ok: true, axes: {} as JevAxes }
+				: { ok: false, kind: "invalid_output" };
+		await runJev(
+			{ jev: { primary: half, fallback: half }, db, kv: counting.kv, clock },
+			origin,
+			ts,
+		);
+		expect(counting.puts).toBeLessThanOrEqual(1);
+	});
+
+	it("KVの読み書きが例外でもrunJevは結果を返す", async () => {
+		const broken = {
+			get: async () => {
+				throw new Error("KV_GET_FAILED: boom");
+			},
+			put: async () => {
+				throw new Error("KV_PUT_FAILED: 429");
+			},
+		} as unknown as KVNamespace;
+		const r = await runJev(
+			{
+				jev: { primary: failWith("invalid_output"), fallback: stubJev },
+				db,
+				kv: broken,
+				clock,
+			},
+			origin,
+			targets(3),
+		);
+		expect(r.calls).toBe(3);
+		expect(r.held.failed).toBe(3);
+	});
+
+	it("primaryがthrowしても対象はfailedとして数えrejectしない", async () => {
+		const throwing: JevFn = async () => {
+			throw new Error("JEV_CRASH: boom");
+		};
+		const r = await run(throwing, throwing, targets(2));
+		expect(r.calls).toBe(2);
+		expect(r.held.failed).toBe(2);
+		expect(accounted(r)).toBe(2);
 	});
 
 	it("8件の呼び出しは並列(全開始が最初の完了より前)", async () => {

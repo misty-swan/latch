@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	BREAKER_KEY,
 	isBreakerOpen,
-	recordJevOutcome,
+	recordJevOutcomes,
 } from "../src/jev/breaker";
 
 const kv = env.PIPELINE_KV;
@@ -15,7 +15,7 @@ const T0 = new Date("2026-10-20T00:00:00Z");
 const at = (ms: number) => new Date(T0.getTime() + ms);
 
 const fail = async (n: number, now: Date) => {
-	for (let i = 0; i < n; i++) await recordJevOutcome(kv, false, now);
+	for (let i = 0; i < n; i++) await recordJevOutcomes(kv, [false], now);
 };
 
 describe("circuit breaker", () => {
@@ -44,8 +44,31 @@ describe("circuit breaker", () => {
 
 	it("失敗9回→成功→失敗1回ではclosed", async () => {
 		await fail(9, T0);
-		await recordJevOutcome(kv, true, T0);
+		await recordJevOutcomes(kv, [true], T0);
 		await fail(1, T0);
 		expect(await isBreakerOpen(kv, T0)).toBe(false);
+	});
+
+	it("1波の結果をまとめて記録: 失敗9件→成功→失敗1件の順ではclosed", async () => {
+		await recordJevOutcomes(
+			kv,
+			[...Array.from({ length: 9 }, () => false), true, false],
+			T0,
+		);
+		expect(await isBreakerOpen(kv, T0)).toBe(false);
+	});
+
+	it("1波で10件失敗ならopen", async () => {
+		await recordJevOutcomes(
+			kv,
+			Array.from({ length: 10 }, () => false),
+			T0,
+		);
+		expect(await isBreakerOpen(kv, T0)).toBe(true);
+	});
+
+	it("初期状態で成功のみなら書き込まない(キーが作られない)", async () => {
+		await recordJevOutcomes(kv, [true, true, true], T0);
+		expect(await kv.get(BREAKER_KEY)).toBeNull();
 	});
 });

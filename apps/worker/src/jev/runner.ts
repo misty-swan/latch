@@ -12,8 +12,9 @@ import {
 	type JevAxes,
 	type JevFn,
 	type JevInput,
+	type JevOutcome,
 } from "../llm/types";
-import { isBreakerOpen, recordJevOutcome } from "./breaker";
+import { isBreakerOpen, recordJevOutcomes } from "./breaker";
 import { reserveJevCall } from "./budget";
 
 export interface JevTarget {
@@ -34,6 +35,18 @@ export interface JevRunResult {
 }
 
 type QueueItem = { target: JevTarget; useFallback: boolean };
+
+/**
+ * JevFnを呼ぶ。例外は失敗種別otherとして扱う(予約消費後にrunJev全体を
+ * rejectさせない・失敗は例外でなく型付きで返す規約の補強・docs/07 §5)
+ */
+const callSafely = async (fn: JevFn, input: JevInput): Promise<JevOutcome> => {
+	try {
+		return await fn(input);
+	} catch {
+		return { ok: false, kind: "other" };
+	}
+};
 
 export const runJev = async (
 	deps: {
@@ -87,18 +100,25 @@ export const runJev = async (
 
 		const outcomes = await Promise.all(
 			reserved.map((item) =>
-				(item.useFallback ? jev.fallback : jev.primary)(item.target.input),
+				callSafely(
+					item.useFallback ? jev.fallback : jev.primary,
+					item.target.input,
+				),
 			),
 		);
 		calls += reserved.length;
 		slots -= n;
 
-		// KVの読み書き競合を避けるため、結果の記録は順に行う
+		// breakerへの記録は1波につき1回にまとめる(KVの同一キー書き込みは1秒1回まで・docs/04 §5)
+		await recordJevOutcomes(
+			kv,
+			outcomes.map((o) => o.ok),
+			clock.now(),
+		);
 		const nextFallback: QueueItem[] = [];
 		for (let i = 0; i < reserved.length; i++) {
 			const item = reserved[i];
 			const outcome = outcomes[i];
-			await recordJevOutcome(kv, outcome.ok, clock.now());
 			if (outcome.ok) {
 				axes.set(item.target.key, outcome.axes);
 			} else if (!item.useFallback && isFallbackEligible(outcome.kind)) {
