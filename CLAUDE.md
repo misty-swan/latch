@@ -25,7 +25,7 @@ pnpm --filter web exec vitest run src/screens/Home.test.tsx -t "テスト名の�
 pnpm --filter web build
 pnpm --filter worker test:e2e                 # APIレベル・既定ポート8787・直列実行
 pnpm --filter web exec playwright install chromium   # 初回のみ
-pnpm --filter web test:e2e                    # ブラウザE2E・既定ポート8788
+pnpm --filter web test:e2e                    # ブラウザE2E・既定ポート8788・直列実行
 LATCH_E2E_PORT=9001 pnpm --filter worker test:e2e    # ポート競合時の回避
 pnpm --filter worker exec playwright test e2e/pipeline.spec.ts   # 単一spec
 
