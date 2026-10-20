@@ -398,6 +398,41 @@ describe("releaseHeld", () => {
 		expect((await latchOf(mine.latchId))?.status).toBe("proposed");
 		expect((await latchOf(others.latchId))?.status).toBe("candidate");
 	});
+
+	it("userIds指定時は他ユーザーの期限切れ保留を閉じない(全体の期限処理はCronが別に行う)", async () => {
+		const mine = await setupPair("connection");
+		const othersOverdue = await setupPair(
+			"connection",
+			{},
+			{ expiresAt: ago(MIN) },
+		);
+		const othersTooLate = await setupPair("occasion", {
+			startsAt: later(74 * MIN),
+		});
+		expect(await releaseHeld(db, NOW, mine.userIds)).toBe(1);
+		expect((await latchOf(othersOverdue.latchId))?.status).toBe("candidate");
+		expect((await latchOf(othersTooLate.latchId))?.status).toBe("candidate");
+	});
+
+	it("userIds指定時、対象範囲内で対象時刻まで75分未満の機会の保留は昇格させずexpiredで閉じる", async () => {
+		const { latchId, userIds } = await setupPair("occasion", {
+			startsAt: later(74 * MIN),
+		});
+		expect(await releaseHeld(db, NOW, userIds)).toBe(0);
+		expect((await latchOf(latchId))?.status).toBe("expired");
+		expect((await historyOf(latchId))?.outcome).toBe("expired");
+		expect(await notificationsOf(latchId)).toHaveLength(0);
+	});
+
+	it("userIdsが100件を超えても照会をチャンク分割して昇格できる", async () => {
+		const mine = await setupPair("connection");
+		const many = [
+			...Array.from({ length: 150 }, () => ulid()),
+			...mine.userIds,
+		];
+		expect(await releaseHeld(db, NOW, many)).toBe(1);
+		expect((await latchOf(mine.latchId))?.status).toBe("proposed");
+	});
 });
 
 describe("expireHeld", () => {

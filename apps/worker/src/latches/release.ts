@@ -1,6 +1,7 @@
 /**
  * 保留(candidate)の解放と期限切れ(F4a設計 §3.5・docs/06 §2の(i))。
  * 呼び出し元は提案のクローズ時(関係ユーザー対象)と毎分Cron(全体対象)。
+ * Cronは expireHeld(全体の期限切れ)→ releaseHeld(全体の解放)の順に明示的に呼ぶ。
  */
 
 import { LATCH, PIPELINE } from "@latch/shared";
@@ -139,38 +140,68 @@ const promote = async (
 	return after?.status === "proposed" && after.proposedAt?.getTime() === nowMs;
 };
 
-/**
- * 保留(candidate)を順に走査し、提示の上限(F4a設計 §3.3)を満たすものを proposed へ昇格する。
- * 順序: 機会=対象時刻の近い順 → つながり=score降順(同点はid昇順)。1回の走査は最大500件。
- * 参加Intentが matched・expired・cancelled・不在なら cancelled で閉じ(排他の取りこぼしの安全網)、
- * paused なら保留のまま残す(pauseは提案を継続する・docs/06 §2)。
- * userIds 指定時はその参加者の保留のみを対象とする。戻り値は昇格した件数
- */
-export const releaseHeld = async (
-	db: DrizzleD1Database,
-	now: Date,
-	userIds?: string[],
-): Promise<number> => {
-	await expireHeld(db, now);
-	if (userIds !== undefined && userIds.length === 0) return 0;
+/** userIds の照会チャンク幅(D1の1文あたりバインド上限100・他のバインドに余裕を残す) */
+const USER_CHUNK = 50;
 
-	const scope =
-		userIds === undefined
-			? undefined
-			: inArray(
-					latches.id,
-					db
-						.select({ id: latchMembers.latchId })
-						.from(latchMembers)
-						.where(inArray(latchMembers.userId, userIds)),
-				);
+const chunksOf = <T>(items: T[], size: number): T[][] => {
+	const chunks: T[][] = [];
+	for (let i = 0; i < items.length; i += size) {
+		chunks.push(items.slice(i, i + size));
+	}
+	return chunks;
+};
+
+/** 機会の対象時刻(proposal.time_window.start)。無ければ空文字(先頭へ並ぶ) */
+const startOf = (latch: LatchRow): string =>
+	(latch.proposal as { time_window?: { start?: string } | null } | null)
+		?.time_window?.start ?? "";
+
+/** 走査順: 機会=対象時刻の近い順 → つながり=score降順(同点はid昇順) */
+const byReleaseOrder = (x: LatchRow, y: LatchRow): number => {
+	if (x.form !== y.form) return x.form === "occasion" ? -1 : 1;
+	if (x.form === "occasion") {
+		const sx = startOf(x);
+		const sy = startOf(y);
+		if (sx !== sy) return sx < sy ? -1 : 1;
+	} else if (x.score !== y.score) {
+		return y.score - x.score;
+	}
+	return x.id < y.id ? -1 : x.id > y.id ? 1 : 0;
+};
+
+/** 走査対象の保留を読む。userIds 指定時はその参加者の保留をチャンク分割で集める */
+const heldTargets = async (
+	db: DrizzleD1Database,
+	userIds: string[] | undefined,
+): Promise<LatchRow[]> => {
 	const limit = PIPELINE.CRON_BATCH_LIMIT;
+	if (userIds !== undefined) {
+		const byId = new Map<string, LatchRow>();
+		for (const chunk of chunksOf([...new Set(userIds)], USER_CHUNK)) {
+			const rows = await db
+				.select()
+				.from(latches)
+				.where(
+					and(
+						eq(latches.status, "candidate"),
+						inArray(
+							latches.id,
+							db
+								.select({ id: latchMembers.latchId })
+								.from(latchMembers)
+								.where(inArray(latchMembers.userId, chunk)),
+						),
+					),
+				)
+				.limit(limit);
+			for (const row of rows) byId.set(row.id, row);
+		}
+		return [...byId.values()].sort(byReleaseOrder).slice(0, limit);
+	}
 	const occasions = await db
 		.select()
 		.from(latches)
-		.where(
-			and(eq(latches.status, "candidate"), eq(latches.form, "occasion"), scope),
-		)
+		.where(and(eq(latches.status, "candidate"), eq(latches.form, "occasion")))
 		.orderBy(asc(targetStart), asc(latches.id))
 		.limit(limit);
 	const connections =
@@ -182,17 +213,49 @@ export const releaseHeld = async (
 						and(
 							eq(latches.status, "candidate"),
 							eq(latches.form, "connection"),
-							scope,
 						),
 					)
 					.orderBy(desc(latches.score), asc(latches.id))
 					.limit(limit - occasions.length)
 			: [];
+	return [...occasions, ...connections];
+};
+
+/**
+ * 保留(candidate)を順に走査し、提示の上限(F4a設計 §3.3)を満たすものを proposed へ昇格する。
+ * 順序: 機会=対象時刻の近い順 → つながり=score降順(同点はid昇順)。1回の走査は最大500件。
+ * 走査中の期限処理は対象範囲内だけで行う: 期限(latches.expires_at)到達・機会で対象時刻まで
+ * 75分未満のものは昇格させず expired で閉じる(全体の期限切れは Cron が expireHeld で先に閉じる)。
+ * 参加Intentが matched・expired・cancelled・不在なら cancelled で閉じ(排他の取りこぼしの安全網)、
+ * paused なら保留のまま残す(pauseは提案を継続する・docs/06 §2)。
+ * userIds 指定時はその参加者の保留のみを対象とする。戻り値は昇格した件数
+ */
+export const releaseHeld = async (
+	db: DrizzleD1Database,
+	now: Date,
+	userIds?: string[],
+): Promise<number> => {
+	if (userIds !== undefined && userIds.length === 0) return 0;
 
 	let released = 0;
-	for (const latch of [...occasions, ...connections]) {
+	for (const latch of await heldTargets(db, userIds)) {
+		if (latch.expiresAt.getTime() <= now.getTime()) {
+			await closeLatch(db, latch.id, "expired", "expired", ["candidate"], now);
+			continue;
+		}
 		const pair = await intentsOf(db, latch);
 		const [a, b] = pair ?? [];
+		if (
+			latch.form === "occasion" &&
+			a !== undefined &&
+			b !== undefined &&
+			a.startsAt !== null &&
+			b.startsAt !== null &&
+			isTooLate(occasionTargetAt(a, b), now)
+		) {
+			await closeLatch(db, latch.id, "expired", "expired", ["candidate"], now);
+			continue;
+		}
 		if (
 			pair === null ||
 			a === undefined ||

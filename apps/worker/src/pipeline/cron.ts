@@ -40,7 +40,6 @@ import {
 	groupCandidates,
 	intents,
 	latches,
-	latchMembers,
 	latchResponses,
 	matchCandidates,
 	matchEvents,
@@ -49,7 +48,7 @@ import {
 import type { Env } from "../env";
 import { MS_PER_DAY } from "../intents/expiry";
 import { closeLatch } from "../latches/close";
-import { releaseHeld } from "../latches/release";
+import { expireHeld, releaseHeld } from "../latches/release";
 import { createLogger } from "../logging/logger";
 import { createVectorStore } from "../vectorstore";
 import { syncVectorStatus } from "../vectorstore/sync-status";
@@ -566,7 +565,8 @@ const runRetentionSweep = async (env: Env, clock: Clock): Promise<void> => {
  * (i) 回答期限切れ走査(F4a設計 §4.2・docs/06 §4)。proposed・partial_acceptで
  * response_deadline≤now(ちょうどを含む)のLATCHを期限の古い順に最大500件expiredで閉じる
  * (proposal_history=expired・提示済みのため参加者へclosed通知)。閉じられた場合に限り、
- * 有効なyes(retracted_at IS NULL)を無効化し、参加者の保留(candidate)を解放する。
+ * 有効なyes(retracted_at IS NULL)を無効化する。参加者の保留(candidate)の解放は直後の
+ * 保留走査(runHeldSweep)が全体で拾う。
  * 1件の例外は握って続行する(latch_id・error_codeのみをログ・docs/08 §6)
  */
 const runResponseDeadlineSweep = async (
@@ -610,15 +610,7 @@ const runResponseDeadlineSweep = async (
 						isNull(latchResponses.retractedAt),
 					),
 				);
-			const members = await db
-				.select({ userId: latchMembers.userId })
-				.from(latchMembers)
-				.where(eq(latchMembers.latchId, id));
-			await releaseHeld(
-				db,
-				now,
-				members.map((m) => m.userId),
-			);
+			// 参加者の保留の解放は直後の保留走査(runHeldSweep)が全体で拾う
 			expired += 1;
 		} catch (error) {
 			logger.warn("cron.item.failed", {
@@ -633,11 +625,14 @@ const runResponseDeadlineSweep = async (
 };
 
 /**
- * 保留の期限切れと解放(F4a設計 §3.5)。releaseHeldが先にexpireHeldで期限切れを閉じ、
- * 続けて全体の保留を提示の上限に従って昇格する
+ * 保留の期限切れと解放(F4a設計 §3.5)。expireHeldで全体の期限切れを先に閉じ、
+ * 続けてreleaseHeldで全体の保留を提示の上限に従って昇格する
  */
 const runHeldSweep = async (env: Env, clock: Clock): Promise<void> => {
-	const released = await releaseHeld(drizzle(env.DB), clock.now());
+	const db = drizzle(env.DB);
+	const now = clock.now();
+	await expireHeld(db, now);
+	const released = await releaseHeld(db, now);
 	if (released > 0) {
 		logger.info("cron.held.released", { count: released });
 	}
