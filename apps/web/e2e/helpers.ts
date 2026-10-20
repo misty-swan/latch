@@ -7,6 +7,8 @@
  * - 待ち合わせは画面上の明示セレクタで行う(スリープを置かない)
  */
 
+import { execSync } from "node:child_process";
+import path from "node:path";
 import { expect, type Locator, type Page } from "@playwright/test";
 
 /** JST(+9)の壁時計でnow+hours時間のdatetime-local値を作る(starts_atの動生成) */
@@ -47,9 +49,12 @@ export const signIn = async (page: Page): Promise<void> => {
  * 同意後の着地はcompose(最初の1件を預ける導線・ボードConsent.dc.htmlどおり)のため・
  * #c-textが出ることを確認してから閉じるでhomeへ戻る
  */
-export const signInAndRegister = async (page: Page): Promise<void> => {
+export const signInAndRegister = async (
+	page: Page,
+	displayName = "E2Eユーザー",
+): Promise<void> => {
 	await signIn(page);
-	await page.locator("#r-name").fill("E2Eユーザー");
+	await page.locator("#r-name").fill(displayName);
 	await page.locator("#r-birth").fill("2000-01-01");
 	await page.getByRole("button", { name: "次へ" }).click();
 	await page.getByRole("button", { name: "同意して進む" }).click();
@@ -120,4 +125,91 @@ export const fetchIntentsViaApi = async (
 	expect(listRes.status()).toBe(200);
 	const body = (await listRes.json()) as { items: IntentForCheck[] };
 	return body.items;
+};
+
+/**
+ * ページが送る/v1/要求のauthorizationヘッダーからアクセストークンを取る(F4c計画Task 8)。
+ * アクセストークンはメモリだけに持つため、ここではPOST /v1/auth/refreshを呼ばない
+ * (リフレッシュトークンが回転してページ側のセッションが切れるため)。呼び出し側は
+ * 待ち始めた後にpage.reload()等で/v1/要求を発生させる(返り値のPromiseを先に作る)
+ */
+export const captureAccessToken = async (page: Page): Promise<string> => {
+	const request = await page.waitForRequest(
+		(req) =>
+			new URL(req.url()).pathname.startsWith("/v1/") &&
+			(req.headers().authorization ?? "").startsWith("Bearer "),
+	);
+	return (request.headers().authorization as string).slice("Bearer ".length);
+};
+
+/**
+ * つながりIntentをAPIで投入する(ゲートの対象は回答の画面のため・意思の投入画面は
+ * flow.spec.tsで証明済み)。地域はapps/worker/e2e/latches.spec.tsのsiteと同じ分け方
+ * (番号ごとに緯度0.1度≒11kmずらす・半径1km)。worker側と衝突しないようweb側は40以上を使う
+ */
+export const createConnectionIntent = async (
+	page: Page,
+	token: string,
+	topic: string,
+	site: number,
+): Promise<{ id: string }> => {
+	const res = await page.request.post("/v1/intents", {
+		data: {
+			raw_text: topic,
+			form: "connection",
+			topic,
+			geo: { center: { lat: 33 + site * 0.1, lng: 131.5 }, radius_m: 1_000 },
+		},
+		headers: { authorization: `Bearer ${token}` },
+	});
+	expect(res.status(), "POST /v1/intents").toBe(201);
+	return (await res.json()) as { id: string };
+};
+
+/** GET /v1/dev/latchesの1項目のうちE2Eが使う欄 */
+export interface DevLatchForCheck {
+	id: string;
+	status: string;
+}
+
+/**
+ * 指定Intentを含み、matchを満たすLATCHがdev観測API(GET /v1/dev/latches)に現れるまで
+ * 500ms間隔・60秒上限で待って返す(パイプラインのキュー消費・回答の反映待ち)
+ */
+export const waitForDevLatch = async (
+	page: Page,
+	token: string,
+	intentId: string,
+	match: (item: DevLatchForCheck) => boolean,
+): Promise<DevLatchForCheck> => {
+	const deadline = Date.now() + 60_000;
+	for (;;) {
+		const res = await page.request.get(
+			`/v1/dev/latches?intent_id=${intentId}&limit=50`,
+			{ headers: { authorization: `Bearer ${token}` } },
+		);
+		expect(res.status(), "GET /v1/dev/latches").toBe(200);
+		const { items } = (await res.json()) as { items: DevLatchForCheck[] };
+		const found = items.find(match);
+		if (found !== undefined) {
+			return found;
+		}
+		if (Date.now() >= deadline) {
+			throw new Error("waitForDevLatchが60秒の上限に達しました");
+		}
+		await new Promise((resolve) => setTimeout(resolve, 500));
+	}
+};
+
+/**
+ * 他specが残したE2EユーザーのactiveなIntentをexpiredへ倒す
+ * (apps/worker/e2e/latches.spec.tsと同じscripts/clean-e2e-data.mjs。残置Intentが
+ * 提案の枠を埋めて対象ペアの提案が保留へ回るのを防ぐ)。スクリプトはwranglerを
+ * PATHから呼ぶため、apps/workerのpnpm exec経由で実行する(web側にはwranglerが無い)
+ */
+export const expireLeftoverE2eIntents = (): void => {
+	execSync("pnpm exec node scripts/clean-e2e-data.mjs", {
+		cwd: path.join(import.meta.dirname, "../../worker"),
+		stdio: "ignore",
+	});
 };

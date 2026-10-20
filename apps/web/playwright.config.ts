@@ -16,6 +16,10 @@ const e2ePort = process.env.LATCH_E2E_PORT ?? "8788";
 
 export default defineConfig({
 	testDir: "./e2e",
+	// 直列実行にする(latch-flow.spec.tsは提案のパイプラインを通し・各testの前後で
+	// E2EユーザーのactiveなIntentをexpiredへ倒す。並列だとflow.spec.tsの地域なしIntentが
+	// 提案の相手に混ざり・後始末がflow.spec.tsの保存直後のIntentまで倒すため・F4c計画Task 8)
+	workers: 1,
 	reporter: process.env.CI ? "dot" : "list",
 	webServer: {
 		command: `VITE_DEV_AUTH=1 pnpm --filter web build && pnpm --filter worker exec node scripts/prepare-dev-vars.mjs && pnpm --filter worker exec wrangler d1 migrations apply DB --local && pnpm --filter worker exec wrangler dev --local --port ${e2ePort}`,
