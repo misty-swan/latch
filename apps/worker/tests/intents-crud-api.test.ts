@@ -919,7 +919,7 @@ describe("DELETE /v1/intents/{id}(削除・docs/05 §3.1・§3.2)", () => {
 	});
 });
 
-describe("DELETE /v1/intents/{id}: 進行中の提案の取り消し(docs/01 §8・docs/05 §2.5)", () => {
+describe("DELETE・PATCH /v1/intents/{id}: 進行中の提案の取り消し(docs/01 §8・docs/05 §2.5・§3.2)", () => {
 	/** 相手ユーザーとそのactiveなつながりIntentを直接INSERTする */
 	const insertPeer = async (): Promise<{
 		userId: string;
@@ -1057,6 +1057,50 @@ describe("DELETE /v1/intents/{id}: 進行中の提案の取り消し(docs/01 §8
 		const res = await deleteReq(`/v1/intents/${mine.intentId}`, accessToken);
 		expect(res.status).toBe(204);
 		expect((await latchOf(latchId))?.status).toBe("matched");
+		const notes = await db
+			.select()
+			.from(notifications)
+			.where(eq(notifications.latchId, latchId));
+		expect(notes).toHaveLength(0);
+	});
+
+	it("PATCHでtopicを変えると進行中のproposedはcancelledになり、相手にclosed通知(01 §8のHard Constraintの変化)", async () => {
+		const { accessToken, mine, peer } = await setup("patch-topic");
+		const latchId = await insertLatchOf(mine, peer, "proposed");
+		const matchedId = await insertLatchOf(mine, await insertPeer(), "matched");
+		const res = await patchJson(
+			`/v1/intents/${mine.intentId}`,
+			{ topic: "変更後の主題" },
+			accessToken,
+		);
+		expect(res.status).toBe(200);
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		const notes = await db
+			.select()
+			.from(notifications)
+			.where(eq(notifications.latchId, latchId));
+		expect(
+			notes.some((n) => n.userId === peer.userId && n.type === "closed"),
+		).toBe(true);
+		const [hist] = await db
+			.select()
+			.from(proposalHistory)
+			.where(eq(proposalHistory.latchId, latchId));
+		expect(hist?.outcome).toBe("expired");
+		// matchedは変えない
+		expect((await latchOf(matchedId))?.status).toBe("matched");
+	});
+
+	it("PATCHでnotification_levelだけを変えても進行中のproposedは変わらない", async () => {
+		const { accessToken, mine, peer } = await setup("patch-notify");
+		const latchId = await insertLatchOf(mine, peer, "proposed");
+		const res = await patchJson(
+			`/v1/intents/${mine.intentId}`,
+			{ notification_level: "muted" },
+			accessToken,
+		);
+		expect(res.status).toBe(200);
+		expect((await latchOf(latchId))?.status).toBe("proposed");
 		const notes = await db
 			.select()
 			.from(notifications)

@@ -271,6 +271,52 @@ const intentMeaningChanged = (
 	JSON.stringify(updated.negativeConstraints) !==
 		JSON.stringify(row.negativeConstraints);
 
+/**
+ * 指定Intentを含む進行中の提案(candidate・proposed・partial_accept)を cancelled で閉じ
+ * (proposal_history=expired・提示済みなら参加者へclosed通知)、操作者以外の参加者の保留を
+ * 解放する。matchedは成立済みのため変更しない。Intent削除(docs/05 §2.5)と、active更新での
+ * 意味フィールドの変更・期限の短縮(docs/01 §8の不成立経路「Hard Constraintが変化した」・
+ * docs/05 §3.2)が共有する
+ */
+const cancelOpenLatchesOf = async (
+	db: DrizzleD1Database,
+	intentId: string,
+	actorUserId: string,
+	now: Date,
+): Promise<void> => {
+	const openLatches = await db
+		.select({ id: latches.id })
+		.from(latches)
+		.where(
+			and(
+				inArray(latches.status, ["candidate", "proposed", "partial_accept"]),
+				sql`EXISTS (SELECT 1 FROM json_each(${latches.intentIds}) WHERE json_each.value = ${intentId})`,
+			),
+		);
+	const affectedUserIds = new Set<string>();
+	for (const l of openLatches) {
+		const closed = await closeLatch(
+			db,
+			l.id,
+			"cancelled",
+			"expired",
+			["candidate", "proposed", "partial_accept"],
+			now,
+		);
+		if (!closed) continue;
+		const members = await db
+			.select({ userId: latchMembers.userId })
+			.from(latchMembers)
+			.where(eq(latchMembers.latchId, l.id));
+		for (const m of members) affectedUserIds.add(m.userId);
+	}
+	// 操作者以外の参加者は、解放された枠で保留の提案が進められるようにする
+	affectedUserIds.delete(actorUserId);
+	if (affectedUserIds.size > 0) {
+		await releaseHeld(db, now, [...affectedUserIds]);
+	}
+};
+
 // metadata.statusの同期(syncVectorStatus)はvectorstore/sync-status.tsの共通ヘルパーを使う
 // (pause/resumeとCronの期限切れ2窓走査の共用・docs/06 §2)
 
@@ -855,6 +901,19 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 		status: result.row.status,
 		version: result.row.version,
 	});
+	// active更新で意味フィールドが変わった・期限が短くなった場合は、このIntentを含む進行中の
+	// 提案を取り消す(docs/01 §8「Hard Constraintが変化した」・docs/05 §3.2)。再評価は下の
+	// intent_updatedで走り、新しい内容で再提案され得る。表示系だけの変更では閉じない
+	if (
+		row.status === "active" &&
+		result.row.status === "active" &&
+		(intentMeaningChanged(row, result.row) ||
+			(row.expiresAt !== null &&
+				result.row.expiresAt !== null &&
+				result.row.expiresAt.getTime() < row.expiresAt.getTime()))
+	) {
+		await cancelOpenLatchesOf(db, result.row.id, sub, now);
+	}
 	// イベント発行(docs/06 §2): draft→active化はintent_createdを即時投入。activeは
 	// 意味フィールド(topic・time・geo・participants・budget・constraints)が変わったとき
 	// だけintent_updatedを10秒遅延で投入する(notification_levelのみの変更と
@@ -940,38 +999,7 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	}
 	// このIntentを含む進行中の提案を取り消す(docs/01 §8の不成立経路「参加Intentが削除された」)。
 	// matchedは成立済みのため変更しない(docs/05 §2.5)。閉じるのは候補・イベント行の削除より前
-	const now = systemClock.now();
-	const openLatches = await db
-		.select({ id: latches.id })
-		.from(latches)
-		.where(
-			and(
-				inArray(latches.status, ["candidate", "proposed", "partial_accept"]),
-				sql`EXISTS (SELECT 1 FROM json_each(${latches.intentIds}) WHERE json_each.value = ${target.id})`,
-			),
-		);
-	const affectedUserIds = new Set<string>();
-	for (const l of openLatches) {
-		const closed = await closeLatch(
-			db,
-			l.id,
-			"cancelled",
-			"expired",
-			["candidate", "proposed", "partial_accept"],
-			now,
-		);
-		if (!closed) continue;
-		const members = await db
-			.select({ userId: latchMembers.userId })
-			.from(latchMembers)
-			.where(eq(latchMembers.latchId, l.id));
-		for (const m of members) affectedUserIds.add(m.userId);
-	}
-	// 削除者以外の参加者は、解放された枠で保留の提案が進められるようにする
-	affectedUserIds.delete(sub);
-	if (affectedUserIds.size > 0) {
-		await releaseHeld(db, now, [...affectedUserIds]);
-	}
+	await cancelOpenLatchesOf(db, target.id, sub, systemClock.now());
 	// 子(候補・イベント投入記録)を先に削除してから本体を削除する(docs/05 §2.5)。
 	// 1対1候補はintent_a/bのどちらかに含む行・グループ候補はintent_idsに含む行
 	await db
