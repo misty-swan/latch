@@ -336,8 +336,8 @@ export const latchDtoSchema = z.object({
 	participants_count: z.number().int().min(0),
 	my_response: z.enum(LATCH_RESPONSE_VALUES).nullable(),
 	score: z.number(),
-	/** 自分側の参加Intent(全状態で含む・F4c設計 §2) */
-	my_intent_id: z.string(),
+	/** 自分側の参加Intent(全状態で含む・削除済みならnull・F4c設計 §2) */
+	my_intent_id: z.string().nullable(),
 	/** 成立時刻(latch_status_eventsのto=matchedの時刻)。成立を経ていなければnull */
 	matched_at: isoDateTimeSchema.nullable(),
 	proposal: latchProposalSchema.optional(),

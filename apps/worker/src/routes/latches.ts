@@ -143,9 +143,7 @@ const loadLatchDto = async (
 						),
 					)
 					.limit(1);
-	if (myIntent === undefined) {
-		return null;
-	}
+	// Intent削除後もintent_idsは残る(FKなし)ため、見つからなくても404にせずnullで返す
 	// 成立時刻: to=matchedの状態記録のcreated_at。matched・matched経由のcancelled(leave等)にある
 	let matchedAt: Date | null = null;
 	if (latch.status === "matched" || latch.status === "cancelled") {
@@ -165,7 +163,7 @@ const loadLatchDto = async (
 	return toLatchDto(latch, {
 		participantsCount: memberRows.length,
 		myResponse: (mine?.response ?? null) as LatchResponseValue | null,
-		myIntentId: myIntent.id,
+		myIntentId: myIntent?.id ?? null,
 		matchedAt,
 		members: revealed
 			? memberRows.filter((m) => m.user.id !== userId).map((m) => m.user)

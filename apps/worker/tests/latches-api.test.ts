@@ -272,6 +272,23 @@ describe("GET /v1/latches/:id の表示範囲", () => {
 		expect(left.matched_at).toBe(ev?.createdAt.toISOString());
 	});
 
+	it("自分のIntent行が削除済みでもmy_intent_idはnullで、取得・一覧・leaveは200のまま", async () => {
+		const { a, b, id } = await setup("proposed");
+		await yes(id, a.token);
+		await yes(id, b.token);
+		await db.delete(intents).where(eq(intents.userId, a.id));
+		const res = await call("GET", `/v1/latches/${id}`, a.token);
+		expect(res.status).toBe(200);
+		expect(
+			((await res.json()) as { my_intent_id: unknown }).my_intent_id,
+		).toBeNull();
+		const list = await call("GET", "/v1/latches?type=matched", a.token);
+		const items = ((await list.json()) as { items: { id: string }[] }).items;
+		expect(items.map((i) => i.id)).toContain(id);
+		const left = await call("POST", `/v1/latches/${id}/leave`, a.token);
+		expect(left.status).toBe(200);
+	});
+
 	it("グループでも各参加者のmy_intent_idは本人のIntent", async () => {
 		const [a, b, c] = [
 			await registerUser("甲"),

@@ -14,8 +14,8 @@ import { toUserDto } from "../routes/users";
 export interface LatchDtoOptions {
 	participantsCount: number;
 	myResponse: LatchResponseValue | null;
-	/** 自分側の参加Intent(latches.intent_idsのうちintents.user_idが自分のもの・F4c設計 §2) */
-	myIntentId: string;
+	/** 自分側の参加Intent(latches.intent_idsのうちintents.user_idが自分のもの。Intent削除済みで見つからなければnull・F4c設計 §2) */
+	myIntentId: string | null;
 	/** 成立時刻(to=matchedの状態記録のcreated_at)。成立を経ていなければnull */
 	matchedAt: Date | null;
 	/** 自分を除く参加者。成立後(matched経由)のときだけ渡す。渡さなければ成立前の形 */
