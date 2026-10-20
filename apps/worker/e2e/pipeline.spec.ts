@@ -448,7 +448,10 @@ test("#8 新規Intentから既存Intentを検索できる", async ({ request }) 
 			existing.id < fresh.id ? fresh.id : existing.id,
 		);
 		expect(row?.form).toBe("connection");
-		expect(row?.status).toBe("candidate");
+		// F4aでLayer 4〜5と提案化が連結され、stub Jev(全軸0.9・docs/07 §2(b))の
+		// ペアは提案まで進んでproposedになる(設計どおり)。#8の証拠は候補行の
+		// 生成記録そのものであるため、提案化の前後どちらの状態でも合格とする
+		expect(["candidate", "proposed"]).toContain(row?.status);
 		expect(row?.intent_a_version).toBe(1);
 		expect(row?.intent_b_version).toBe(1);
 		expect(typeof row?.retrieval_score).toBe("number");
