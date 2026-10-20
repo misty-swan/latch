@@ -1,9 +1,9 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.12
+- 文書バージョン: v0.13
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.12更新: 2026-10-20)
+- 作成日: 2026-10-17(v0.13更新: 2026-10-20)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
@@ -15,7 +15,8 @@
 - v0.10の変更点: F4a(1対1の提案〜成立)実装に伴い§2.2へlatches.proposed_at・proposal_history.updated_at(見送り時刻の基準)の列と、match_candidatesのupsertが既存行のstatusを上書きしない規定・機会LATCH成立時の参加Intentの更新範囲・geofeaturesのgrid_key書式と逆引き規則を追記し、§2.3へKVバインディングPIPELINE_KVのキーを、§2.4へ提案化・回答期限・通知上限の索引を追記。§3.2へGET /v1/latches/{id}・POST /v1/latches/{id}/defer-reasonを追加し、§3.3へLatchDTO(成立前はproposal・membersのキー自体を出さない表示範囲)・一覧のtype別の状態・回答系の理由コード・dev専用API(backdate・LATCH・提案履歴の観測)の確定形状を追記。前提文書欄の版数を更新
 - v0.11の変更点: F4aの最終レビューの修正に伴い§2.2のnotificationsへ成立後の離脱(leave)はclosedを作らない規定を、§3.2のPATCHへactive Intentの意味フィールドの変更・期限の短縮で進行中の提案を取り消す規定(01 §8の不成立経路「Hard Constraintが変化した」)を、§3.3の回答と取り消しの状態遷移へleaveの通知の扱いを追記。前提文書欄の版数を更新
 - v0.12の変更点: オーナー裁定(2026-10-20・01冒頭の決定記録)に伴い§2.2のproposal_historyへ未提示・システムの都合で閉じた提案は履歴を消費しない規定(新規確保の行は削除・再提案で確保した既存行はexpiredへ戻す)を、intents.last_evaluated_atへ意味フィールドの更新で解除する旨を、§2.5の削除表へIntent削除で取り消した提案の履歴の解放を、§3.2・§3.3のPATCHへ取り消し時の履歴の解放と30分再評価抑制の解除を追記。前提文書欄の版数を更新
-- 前提文書: 01 要件定義書 v0.11 / 02 スコープ・受け入れ条件合意書 v0.5 / 04 アーキテクチャ設計書 v0.13
+- v0.13の変更点: F4b(グループLATCH)実装に伴い§2.2のlatch_membersへleft_at(成立後の離脱時刻・マイグレーション0004と戻す手順)を、group_candidatesへdedup_keyと保存・状態の規則(全ペアのjev_resultが揃った集合だけを保存・衝突時はaggregate_scoreのみ更新・提案でproposed・prev_aggregate_score)を、proposal_historyの「履歴を消費しない閉じ方」へグループ提案のペア別の記録規則(オーナー裁定 2026-10-20・01冒頭の決定記録)を追記。§3.3へ成立後の離脱(本人だけを外して継続・下限割れで全体cancelled・離脱者は非参加扱い・成功応答・二重の離脱の冪等)と、members・participants_countは離脱していない参加者だけを数える旨を追記。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.12 / 02 スコープ・受け入れ条件合意書 v0.6 / 04 アーキテクチャ設計書 v0.14
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -150,7 +151,9 @@ created_at / updated_at
 
 評価ごとの書き込みはUNIQUE組でのupsert(ON CONFLICT)とし、衝突時はretrieval_score・cheap_judge_score・updated_atのみ更新して**statusは上書きしない**(新規行だけがcandidateになり、提案済み(proposed)・closedの既存行は状態を保つ・F4a実装確定)。
 
-**group_candidates**(3人以上・Pool最大15・30日定期削除): `intent_ids json(3..4) / aggregate_score / prev_aggregate_score / status / created_at`。UNIQUE(intent_ids正規化文字列, 各version)。
+**group_candidates**(3人以上・Pool最大15・30日定期削除): `intent_ids json(3..4) / dedup_key / aggregate_score / prev_aggregate_score / status(candidate | proposed | closed) / created_at`。UNIQUE(dedup_key)。dedup_key=intent_ids正規化文字列(ID昇順の`{id}@{version}`をカンマ結合・各versionを含む)。
+
+**group_candidatesの保存と状態(F4b実装確定)。** 1回の評価で予定に入れた集合のうち、**全ペアのJev結果(match_candidates.jev_result)が揃った集合だけ**をaggregate(全ペアのLATCH Scoreの最小値・06 §3)とともに保存する(判定が欠けた集合は保存せず保留する・部分評価しない)。書き込みはdedup_keyでのupsertとし、衝突時は**aggregate_scoreのみ**を更新してstatusは上書きしない(match_candidatesと同じ考え方)。新規行はstatus=candidateで、その集合を提案化したとき(保留のcandidate LATCHを含む)に同じD1バッチでproposedへ進める。prev_aggregate_scoreには、再提案の判定時に集合内のいずれかのペアに前回のLATCHがあれば、そのうち最も新しいLATCHのscoreを記録する(再提案の可否の判定材料・06 §4)。集合を構成する他人どうしのペアもmatch_candidatesへupsertし、jev_resultを次の評価で再利用する(06 §3)。
 
 **proposal_history**(同一ユーザーペアへの再提案恒久排除・01 §8)
 
@@ -170,6 +173,19 @@ UNIQUE(user_low, user_high)
 Layer 1はoutcomeがmatchedまたはrejectedの行の存在で除外する(deferred・expiredの行は機会Intentの条件付き再提案の参照に使う・01 §8)。提案化の直列化(本表の確保を1文目に置く1バッチ)は06 §3に規定する。
 
 **履歴を消費しない閉じ方(オーナー裁定 2026-10-20・F4a実装確定)。** 一度も提示しないまま閉じた保留(保留中の期限切れ・機会で対象時刻まで75分を切ったもの・参加Intentの終了)と、システムの都合で閉じた提案(機会の排他によるcancelled・Intent削除・active Intentの意味フィールドの変更=Hard Constraintの変化・§3.3)は、本表を消費しない。そのLATCHのために新規に確保した行(created_atがLATCHの作成以降)は削除してペアを未提案に戻し、再提案で確保した既存行はoutcome=expiredに戻す(updated_atも更新する)。提示後の回答期限切れ(expired)・defer(deferred)・no(rejected)は従来どおり記録する。同ペアの行が別のLATCHへ移っていれば触らない。
+
+**グループ提案のペア別の記録(オーナー裁定 2026-10-20・01冒頭の決定記録・F4b実装確定)。** 2〜4人の提案は全ペア(C(n,2)行)の本表を提案化の1バッチで確保し(一部だけ確保できた場合は同じバッチ内で巻き戻す・06 §3)、クローズ時はペアごとに次の記録をする。「消費しない」は上段と同じ扱い(新規確保の行は削除・再提案で確保した既存行はexpiredへ戻す)である。
+
+| 閉じ方 | 記録するペア | それ以外のペア |
+|---|---|---|
+| defer(本人X) | Xを含むペア → deferred | 消費しない |
+| no(本人X) | Xを含むペア → rejected(恒久排除) | 消費しない |
+| 回答期限切れ | 有効なyesを持たない参加者を含むペア → expired | 消費しない(yesどうしのペア) |
+| 機会の排他・Intent削除・意味フィールドの変更・未提示の保留の終了 | — | 全ペアとも消費しない |
+| 成立(matched) | 全ペア → matched | — |
+| 成立後の離脱(leave) | 変更しない(matchedのまま) | — |
+
+1対1では唯一のペアが常に本人を含み、期限切れのペアは必ず有効なyesを持たない参加者を含む(双方yesなら成立済み)ため、上段の規則と一致する。
 
 **latches**
 
@@ -193,7 +209,7 @@ created_at / updated_at
 
 **latch_responses**: `id / latch_id / user_id / response(yes|no|defer) / defer_reason(json|null) / responded_at / retracted_at(null|時刻) — UNIQUE(latch_id, user_id)`。
 
-**latch_members**: `latch_id / user_id — PK(latch_id, user_id)`(latchesの参加者副表。「自分の提案・成立」の一覧取得はこの表経由)。
+**latch_members**: `latch_id / user_id / left_at(datetime | null) — PK(latch_id, user_id)`(latchesの参加者副表。「自分の提案・成立」の一覧取得はこの表経由)。left_atは成立後の離脱(leave)の時刻で、グループLATCHが離脱者を残して続くときに記録する(F4b実装確定・マイグレーション0004と戻す手順(migrations_rollback/0004)を対で持つ・12 §4)。成立前の判定(回答のyes数と参加人数の比較・通知・保留の解放・提示の上限判定)は離脱がmatched後にしか起きないため従来どおり全行を数え、成立後の表示・離脱の判定ではleft_atがnullの行だけを参加者として数える(§3.3)。
 
 **latch_status_events**: `id / latch_id / from_status(null可=生成時) / to_status / created_at — INDEX(latch_id)`(MLR集計の観測点。成立後の表示範囲の判定で「matched経由のcancelled」を見分ける根拠にも使う・§3.3)。
 
@@ -386,7 +402,7 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 
 **POST /v1/intents/{id}/pause・resume** — 200 IntentDTO(version+1)。pauseはactiveのみ実行可(他は400 invalid_status)・status=paused・期限は不変。resumeはpausedのみ実行可(他は400 invalid_status)・期限切れ(expires_at<=now)は400(理由コードexpired)・status=active・期限は据え置き(再計算しない)。参加中active数の上限5件は作成・draft→active化・resumeの3経路で検証し、超過は422 ACTIVE_INTENT_LIMIT(§3.1)
 
-**LatchDTO(LATCH系API共通の応答形状・F4a実装確定)** — `{id, form, status, response_deadline, participants_count, my_response: yes|no|defer|null, score}`。scoreは応答に含むがUIでは表示しない(01 §10の裁定)。**成立後(matched、およびmatched経由のcancelled)に限り** `proposal:{form, topic, time_window, region_name, participants, budget}` と `members:[{user_id, display_name, bio, has_icon}]`(自分を除く参加者)を含める。成立前はproposal・membersの**キー自体を出さない**(空値でも出さない・visibility単値化・01 §21)。matched経由のcancelledはlatch_status_eventsにto_status=matchedの記録があることで判定する。保留中(candidate)のLATCHは一覧にも単一取得にも出さない(単一取得は404)。
+**LatchDTO(LATCH系API共通の応答形状・F4a実装確定)** — `{id, form, status, response_deadline, participants_count, my_response: yes|no|defer|null, score}`。scoreは応答に含むがUIでは表示しない(01 §10の裁定)。**成立後(matched、およびmatched経由のcancelled)に限り** `proposal:{form, topic, time_window, region_name, participants, budget}` と `members:[{user_id, display_name, bio, has_icon}]`(自分と離脱者を除く参加者)を含める。participants_countは離脱していない参加者(latch_members.left_atがnull)の数とする(成立前は全員が該当する・F4b実装確定)。成立前はproposal・membersの**キー自体を出さない**(空値でも出さない・visibility単値化・01 §21)。matched経由のcancelledはlatch_status_eventsにto_status=matchedの記録があることで判定する。保留中(candidate)のLATCHは一覧にも単一取得にも出さない(単一取得は404)。
 
 **GET /v1/latches** — 200 `{items: LatchDTO[], next_cursor: string|null}`。自分が参加するもののみ・id降順。type=proposalsはstatusがproposed・partial_accept、type=matchedはmatchedを返す(typeの欠落・不明な値は400)。limit・cursorはIntent一覧と同一の規則(§3.1)。**GET /v1/latches/{id}** — 200 LatchDTO。参加しない・存在しない・保留中は一律404。
 
@@ -394,7 +410,7 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 
 **POST /v1/latches/{id}/defer-reason** — 200 LatchDTO。見送った(defer)本人だけが1回だけ保存できる(latch_responses.defer_reason)。理由の値はno_capacity / schedule_mismatch / just_not_now / otherの4種(他の値・余分なキーは400)。
 
-**回答と取り消しの状態遷移。** defer=[今回は見送る]は提案を即時にrejectedで閉じる(proposal_historyのoutcomeはdeferred)。no=API契約経由の明示の拒否(同rejected・outcome=rejectedで恒久排除)。retract(回答取り消し)は回答期限内・未成立のみ可とし、partial_accept→proposedへ復帰する(双方YES成立後は不可。離脱はleaveを使う)。leave(参加取り消し)はmatchedのLATCHをcancelledとし、チャットを双方読み取り専用にする(02 D-08)。leaveではclosed通知を作らない(closedは不成立の総称・§2.2)。グループで必要人数の下限を割った場合もLATCH全体をcancelledとする。
+**回答と取り消しの状態遷移。** defer=[今回は見送る]は提案を即時にrejectedで閉じる(proposal_historyのoutcomeはdeferred)。no=API契約経由の明示の拒否(同rejected・outcome=rejectedで恒久排除)。retract(回答取り消し)は回答期限内・未成立のみ可とし、partial_accept→proposedへ復帰する(双方YES成立後は不可。離脱はleaveを使う)。leave(参加取り消し)はmatchedのLATCHに対してのみ実行できる。離脱後の残りの参加者数(本人以外でleft_atがnullの数)が提案内容の人数の下限(proposal.participants.min)以上なら本人のleft_atだけを記録してmatchedのまま続け、下限を割るならLATCH全体をcancelledとしてチャットを読み取り専用にする(1対1は常に後者・02 D-08。オーナー裁定 2026-10-20・01冒頭の決定記録・F4b実装確定)。判定と記録は1文の条件付きUPDATEで行い、並行した離脱でも下限未満の人数でmatchedのまま残らない。leaveではclosed通知を作らない(closedは不成立の総称・§2.2)。離脱者の提案履歴と機会Intentはmatchedのまま変えない(§2.2)。離脱した本人からは当該LATCHを非参加と同じに扱う(一覧から除外・単一取得と各操作は一律404)。ただし離脱に成功したPOST /leaveの応答は、本人を参加者として扱った操作後のLatchDTO(status=matched・participants_countは残りの人数・membersは本人と離脱者を除く)を返す。同じ本人の二重の離脱(二重送信・再試行)は冪等な成功とし、LATCHを取り消さない。
 
 **dev専用観測API(F3実装確定・テスト専用)** — GET /v1/dev/match-events・GET /v1/dev/match-candidates。worker E2Eがゲートの合格証拠(match_eventsの計測payload・match_candidatesの生成記録)を観測するためのdev専用API。クエリはintent_id(必須・ULID形式外は400)・limit=1..50既定20・cursor(§3.1と同一の不透明cursor)。応答は`{items, next_cursor}`(id降順)で、itemsはmatch_events行=id / event_type / source_intent_id / version / status / payload / created_at / processed_at・match_candidates行=id / intent_a_id / intent_b_id / intent_a_version / intent_b_version / form / retrieval_score / cheap_judge_score / status / created_at / updated_at(テーブル列の範囲のみ・jev_result等の内部列は含めない)。起点Intentとの一致条件はmatch_events=source_intent_id・match_candidates=intent_a_idかintent_b_idのいずれか。所有者に限定しない(候補は2ユーザーのIntentで構成されるため・観測の実行は認証済みユーザーが行う)。存在隠しはPOST /v1/dev/idp-token(04 §4)と同一条件(prod・テスト鍵2変数のいずれか未設定は認証・クエリ検証より先に一律404・理由は区別しない)。
 
