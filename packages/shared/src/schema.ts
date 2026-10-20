@@ -113,6 +113,19 @@ export const notificationLevelSchema = z.enum(["proposals_only", "muted"]);
  */
 export const isoDateTimeSchema = z.iso.datetime({ offset: true });
 
+/**
+ * POST /v1/dev/latches/:id/backdate のリクエスト(dev専用・F4a計画Task 17)。
+ * いずれもISO 8601。未知キー拒否・少なくとも1つ必須
+ */
+export const devBackdateRequestSchema = z
+	.object({
+		response_deadline: isoDateTimeSchema.optional(),
+		history_updated_at: isoDateTimeSchema.optional(),
+		intents_last_evaluated_at: isoDateTimeSchema.optional(),
+	})
+	.strict()
+	.refine((v) => Object.values(v).some((x) => x !== undefined));
+
 /** parse応答のwarnings要素(判定不能NG条件の注意表示)。docs/05 §3.3 */
 export const warningSchema = z.object({
 	field: z.string(),

@@ -10,7 +10,9 @@
  *   intents一覧と同じcursor方式(limit=1..50既定20・docs/05 §3.1)。所有者に限定しない
  *   (成立候補は2ユーザーのIntentで構成されるため・E2Eユーザーが証拠を読む経路)。
  *   応答はテーブル列の範囲のみ(raw_text等は含まれない)
- * - 存在を隠す(3ルート共通): LATCH_ENV==="production"、またはテスト鍵モードの変数
+ * - GET /v1/dev/latches・GET /v1/dev/proposal-history・POST /v1/dev/latches/:id/backdate:
+ *   F4a(Task 17)。提案・履歴の観測と、期限経過をE2Eが時計操作なしで作る書き換え口
+ * - 存在を隠す(全ルート共通): LATCH_ENV==="production"、またはテスト鍵モードの変数
  *   (LATCH_TEST_IDP_PRIVATE_JWKS・LATCH_TEST_IDP_JWKS)が未設定のときは一律
  *   404 NOT_FOUND(理由は区別できない・docs/05 §3.1)。観測APIでは認証・クエリ検証より
  *   先に404へ倒す。prodでは加えてassertEnvSafetyが秘密鍵の設定自体を拒否する二重防御
@@ -21,8 +23,11 @@
  * 時刻の規律(docs/04 §4): ルートは合成の起点のためsystemClockをimportして使う
  */
 
-import { devIdpTokenRequestSchema } from "@latch/shared";
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import {
+	devBackdateRequestSchema,
+	devIdpTokenRequestSchema,
+} from "@latch/shared";
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono, type MiddlewareHandler } from "hono";
@@ -30,7 +35,13 @@ import { importJWK, SignJWT } from "jose";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../auth/idp";
 import { type AppEnv, requireRegistered } from "../auth/middleware";
 import { systemClock } from "../clock/clock";
-import { matchCandidates, matchEvents } from "../db/schema";
+import {
+	intents,
+	latches,
+	matchCandidates,
+	matchEvents,
+	proposalHistory,
+} from "../db/schema";
 import type { Env } from "../env";
 import { type ErrorResult, errorJson } from "../http/errors";
 import { createLogger } from "../logging/logger";
@@ -131,8 +142,11 @@ type ObserveQuery =
  * - limit=1..50既定20(intents一覧と同一の事前照合・範囲外は400)
  * - cursorは不透明(base64url化した最終id・復号できない値は400)
  */
-const parseObserveQuery = (c: Context<AppEnv>): ObserveQuery => {
-	const intentId = c.req.query("intent_id");
+const parseObserveQuery = (
+	c: Context<AppEnv>,
+	idOverride?: string,
+): ObserveQuery => {
+	const intentId = idOverride ?? c.req.query("intent_id");
 	if (intentId === undefined || !ULID_PATTERN.test(intentId)) {
 		return {
 			ok: false,
@@ -308,12 +322,15 @@ interface MatchCandidateItem {
 	form: string;
 	retrieval_score: number | null;
 	cheap_judge_score: number | null;
+	/** Jev 7軸の数値のみ(reasonなし・docs/01 §13)。F4aのE2Eが提案化の証拠を観測する */
+	jev_result: unknown;
+	latch_score: number | null;
 	status: string;
 	created_at: string;
 	updated_at: string;
 }
 
-/** match_candidates行→観測項目。jev_result等の内部列は観測契約に含めない */
+/** match_candidates行→観測項目。prev_latch_score等の内部列は観測契約に含めない */
 const toMatchCandidateItem = (
 	row: typeof matchCandidates.$inferSelect,
 ): MatchCandidateItem => ({
@@ -325,6 +342,8 @@ const toMatchCandidateItem = (
 	form: row.form,
 	retrieval_score: row.retrievalScore,
 	cheap_judge_score: row.cheapJudgeScore,
+	jev_result: row.jevResult ?? null,
+	latch_score: row.latchScore,
 	status: row.status,
 	created_at: row.createdAt.toISOString(),
 	updated_at: row.updatedAt.toISOString(),
@@ -367,5 +386,165 @@ devRoutes.get(
 			toMatchCandidateItem,
 		);
 		return c.json(pageBody(items, hasMore), 200);
+	},
+);
+
+/** 一覧の続きcursor条件を足したlimit+1件取得の共通後処理(終端判定込み) */
+const pageOf = <T extends { id: string }>(
+	rows: T[],
+	limit: number,
+): { page: T[]; hasMore: boolean } => {
+	const hasMore = rows.length > limit;
+	return { page: hasMore ? rows.slice(0, limit) : rows, hasMore };
+};
+
+/** GET /v1/dev/latchesの1項目(latches行の射影・日時はISO 8601。proposalは含めない) */
+interface LatchObserveItem {
+	id: string;
+	form: string;
+	status: string;
+	intent_ids: string[];
+	response_deadline: string;
+	proposed_at: string | null;
+	score: number;
+}
+
+/**
+ * GET /v1/dev/latches?intent_id=(観測API・F4a計画Task 17)。
+ * intent_idsに指定Intentを含むLATCHをid降順で返す(提案化・回答期限のE2E証拠)。
+ * 参加者に限定しない(既存の観測APIと同じ)。存在隠し404 → requireRegistered → クエリ検証の順
+ */
+devRoutes.get("/latches", hideWhenDisabled, requireRegistered, async (c) => {
+	const query = parseObserveQuery(c);
+	if (!query.ok) {
+		return c.json(query.result.body, query.result.status);
+	}
+	const conditions = [
+		// intent_ids(json配列)の要素一致。json_eachで展開して照合する
+		sql`EXISTS (SELECT 1 FROM json_each(${latches.intentIds}) WHERE json_each.value = ${query.intentId})`,
+	];
+	if (query.cursorId !== undefined) {
+		conditions.push(lt(latches.id, query.cursorId));
+	}
+	const rows = await dbOf(c.env)
+		.select()
+		.from(latches)
+		.where(and(...conditions))
+		.orderBy(desc(latches.id))
+		.limit(query.limit + 1);
+	const { page, hasMore } = pageOf(rows, query.limit);
+	const items: LatchObserveItem[] = page.map((row) => ({
+		id: row.id,
+		form: row.form,
+		status: row.status,
+		intent_ids: row.intentIds,
+		response_deadline: row.responseDeadline.toISOString(),
+		proposed_at: row.proposedAt === null ? null : row.proposedAt.toISOString(),
+		score: row.score,
+	}));
+	return c.json(pageBody(items, hasMore), 200);
+});
+
+/**
+ * GET /v1/dev/proposal-history?user_id=(観測API・F4a計画Task 17)。
+ * user_lowかuser_highが指定ユーザーの履歴行をid降順で返す。user_idは必須ULID。
+ * limit・cursorはparseObserveQueryと同じ規則(intent_idの代わりにuser_idを検証)
+ */
+devRoutes.get(
+	"/proposal-history",
+	hideWhenDisabled,
+	requireRegistered,
+	async (c) => {
+		const userId = c.req.query("user_id");
+		if (userId === undefined || !ULID_PATTERN.test(userId)) {
+			const r = errorJson(
+				"VALIDATION_FAILED",
+				"リクエストが不正です(user_idはULID形式で指定してください)",
+			);
+			return c.json(r.body, r.status);
+		}
+		// limit・cursorの検証は共通関数を再利用する(intent_id欄にuser_idを渡して同じ形式検査を通す)
+		const query = parseObserveQuery(c, userId);
+		if (!query.ok) {
+			return c.json(query.result.body, query.result.status);
+		}
+		const conditions = [
+			or(
+				eq(proposalHistory.userLow, userId),
+				eq(proposalHistory.userHigh, userId),
+			),
+		];
+		if (query.cursorId !== undefined) {
+			conditions.push(lt(proposalHistory.id, query.cursorId));
+		}
+		const rows = await dbOf(c.env)
+			.select()
+			.from(proposalHistory)
+			.where(and(...conditions))
+			.orderBy(desc(proposalHistory.id))
+			.limit(query.limit + 1);
+		const { page, hasMore } = pageOf(rows, query.limit);
+		const items = page.map((row) => ({
+			id: row.id,
+			user_low: row.userLow,
+			user_high: row.userHigh,
+			latch_id: row.latchId,
+			outcome: row.outcome,
+			created_at: row.createdAt.toISOString(),
+			updated_at: row.updatedAt.toISOString(),
+		}));
+		return c.json(pageBody(items, hasMore), 200);
+	},
+);
+
+/**
+ * POST /v1/dev/latches/:id/backdate(F4a計画Task 17)。E2Eが時計を操作せずに
+ * 期限経過・見送り後の抑制解除・30分再評価抑制の解除を作るための書き換え口:
+ * - response_deadline: latches.response_deadline
+ * - history_updated_at: そのLATCHのproposal_history行(latch_id一致)のupdated_at
+ * - intents_last_evaluated_at: 参加Intent全員のlast_evaluated_at
+ * 参加者に限定しない。存在しないLATCHは404。存在隠し404 → requireRegistered → 検証の順
+ */
+devRoutes.post(
+	"/latches/:id/backdate",
+	hideWhenDisabled,
+	requireRegistered,
+	async (c) => {
+		const parsed = devBackdateRequestSchema.safeParse(await readJsonBody(c));
+		if (!parsed.success) {
+			const r = errorJson("VALIDATION_FAILED", "リクエストボディが不正です");
+			return c.json(r.body, r.status);
+		}
+		const database = dbOf(c.env);
+		const [latch] = await database
+			.select()
+			.from(latches)
+			.where(eq(latches.id, c.req.param("id")))
+			.limit(1);
+		if (latch === undefined) {
+			return notFound(c);
+		}
+		const { response_deadline, history_updated_at, intents_last_evaluated_at } =
+			parsed.data;
+		if (response_deadline !== undefined) {
+			await database
+				.update(latches)
+				.set({ responseDeadline: new Date(response_deadline) })
+				.where(eq(latches.id, latch.id));
+		}
+		if (history_updated_at !== undefined) {
+			await database
+				.update(proposalHistory)
+				.set({ updatedAt: new Date(history_updated_at) })
+				.where(eq(proposalHistory.latchId, latch.id));
+		}
+		if (intents_last_evaluated_at !== undefined && latch.intentIds.length > 0) {
+			// 参加Intentは最大4件のためチャンク化は不要(docs/05 §2.2)
+			await database
+				.update(intents)
+				.set({ lastEvaluatedAt: new Date(intents_last_evaluated_at) })
+				.where(inArray(intents.id, latch.intentIds));
+		}
+		return c.json({ ok: true }, 200);
 	},
 );

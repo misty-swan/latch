@@ -15,12 +15,19 @@
  */
 
 import { env, SELF } from "cloudflare:test";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { importJWK, SignJWT } from "jose";
 import { monotonicFactory } from "ulid";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
-import { matchCandidates, matchEvents } from "../src/db/schema";
+import {
+	intents,
+	latches,
+	matchCandidates,
+	matchEvents,
+	proposalHistory,
+} from "../src/db/schema";
 import type { Env } from "../src/env";
 import { devRoutes } from "../src/routes/dev";
 import privateJwkText from "./fixtures/test-idp-private.jwk?raw";
@@ -104,7 +111,9 @@ interface ErrorResponse {
  * auth/token→POST /v1/usersで登録済みユーザーを作りアクセストークンを返す実フロー。
  * subjectは試験ごとにユニーク(intents-create-api.test.tsと同一パターン)
  */
-const registerUser = async (label: string): Promise<string> => {
+const registerAccount = async (
+	label: string,
+): Promise<{ token: string; id: string }> => {
 	const tokenRes = await postJson("/v1/auth/token", {
 		provider: "google",
 		idp_token: await signIdpToken(`${label}-${crypto.randomUUID()}`),
@@ -121,9 +130,16 @@ const registerUser = async (label: string): Promise<string> => {
 		{ Authorization: `Bearer ${tokenBody.access_token}` },
 	);
 	expect(regRes.status).toBe(201);
-	const regBody = (await regRes.json()) as { access_token: string };
-	return regBody.access_token;
+	const regBody = (await regRes.json()) as {
+		access_token: string;
+		user: { id: string };
+	};
+	return { token: regBody.access_token, id: regBody.user.id };
 };
+
+/** 登録済みユーザーのアクセストークンのみを返す */
+const registerUser = async (label: string): Promise<string> =>
+	(await registerAccount(label)).token;
 
 /** draft(FK用のIntent行・イベント発行は起きない)を作りidを返す */
 const createDraftIntent = async (
@@ -429,7 +445,7 @@ describe("GET /v1/dev/match-candidates", () => {
 		};
 		expect(body.items).toHaveLength(2);
 		expect(body.items.map((item) => item.id)).toEqual([secondId, firstId]);
-		// 項目は11フィールドちょうど(過不足なし・jev_result等は含まない)
+		// 項目は13フィールドちょうど(過不足なし・prev_latch_score等の内部列は含まない)
 		expect(Object.keys(body.items[0]).sort()).toEqual(
 			[
 				"cheap_judge_score",
@@ -440,6 +456,8 @@ describe("GET /v1/dev/match-candidates", () => {
 				"intent_a_version",
 				"intent_b_id",
 				"intent_b_version",
+				"jev_result",
+				"latch_score",
 				"retrieval_score",
 				"status",
 				"updated_at",
@@ -561,5 +579,238 @@ describe("存在を隠す(dev-api.test.tsと同一条件・認証と検証より
 		const observeBody = (await observeRes.json()) as ErrorResponse;
 		expect(observeBody.error.message).toBe(idpBody.error.message);
 		expect(observeBody.error.details).toEqual({});
+	});
+});
+
+/** 試験用に直接INSERTする(FK不要な)LATCH行。時刻は固定値で比較しやすくする */
+const insertLatch = async (
+	intentIds: string[],
+	opts: { score?: number; proposedAt?: Date | null } = {},
+): Promise<string> => {
+	const id = nextUlid();
+	const now = new Date();
+	await db.insert(latches).values({
+		id,
+		form: "connection",
+		intentIds,
+		proposal: {},
+		score: opts.score ?? 0.8,
+		status: "proposed",
+		responseDeadline: new Date(now.getTime() + 3600_000),
+		expiresAt: new Date(now.getTime() + 86400_000),
+		lastMessageAt: now,
+		completedAt: null,
+		proposedAt: opts.proposedAt === undefined ? now : opts.proposedAt,
+		createdAt: now,
+		updatedAt: now,
+	});
+	return id;
+};
+
+/** proposal_history行を直接INSERTする(user_low<user_highへ正規化) */
+const insertHistory = async (
+	userA: string,
+	userB: string,
+	latchId: string | null,
+): Promise<string> => {
+	const id = nextUlid();
+	const now = new Date();
+	await db.insert(proposalHistory).values({
+		id,
+		userLow: userA < userB ? userA : userB,
+		userHigh: userA < userB ? userB : userA,
+		latchId,
+		outcome: "proposed",
+		createdAt: now,
+		updatedAt: now,
+	});
+	return id;
+};
+
+/** backdate呼び出しヘルパー */
+const backdateRequest = (
+	latchId: string,
+	body: unknown,
+	token: string,
+): Promise<Response> =>
+	postJson(`/v1/dev/latches/${latchId}/backdate`, body, {
+		Authorization: `Bearer ${token}`,
+	});
+
+describe("POST /v1/dev/latches/:id/backdate", () => {
+	it("response_deadlineとhistory.updated_atを書き換える", async () => {
+		const a = await registerAccount("backdate-a");
+		const b = await registerAccount("backdate-b");
+		const latchId = await insertLatch([nextUlid(), nextUlid()]);
+		const historyId = await insertHistory(a.id, b.id, latchId);
+		const past = "2020-01-01T00:00:00.000Z";
+		const res = await backdateRequest(
+			latchId,
+			{ response_deadline: past, history_updated_at: past },
+			a.token,
+		);
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ ok: true });
+		const [latch] = await db
+			.select()
+			.from(latches)
+			.where(eq(latches.id, latchId));
+		expect(latch.responseDeadline.toISOString()).toBe(past);
+		const [history] = await db
+			.select()
+			.from(proposalHistory)
+			.where(eq(proposalHistory.id, historyId));
+		expect(history.updatedAt.toISOString()).toBe(past);
+	});
+
+	it("intents_last_evaluated_atが参加Intent全員に反映される", async () => {
+		const a = await registerAccount("backdate-eval");
+		const i1 = await createDraftIntent(a.token, "再評価抑制を外す1");
+		const i2 = await createDraftIntent(a.token, "再評価抑制を外す2");
+		const other = await createDraftIntent(a.token, "無関係");
+		const latchId = await insertLatch([i1, i2]);
+		const past = "2020-01-01T00:00:00.000Z";
+		const res = await backdateRequest(
+			latchId,
+			{ intents_last_evaluated_at: past },
+			a.token,
+		);
+		expect(res.status).toBe(200);
+		for (const id of [i1, i2]) {
+			const [row] = await db.select().from(intents).where(eq(intents.id, id));
+			expect(row.lastEvaluatedAt?.toISOString()).toBe(past);
+		}
+		const [untouched] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, other));
+		expect(untouched.lastEvaluatedAt).toBeNull();
+	});
+
+	it("不正入力(空・未知キー・非ISO)は400・存在しないLATCHは404", async () => {
+		const a = await registerAccount("backdate-bad");
+		const latchId = await insertLatch([nextUlid(), nextUlid()]);
+		for (const bad of [
+			{},
+			{ response_deadline: "あした" },
+			{ response_deadline: "2020-01-01T00:00:00.000Z", extra: 1 },
+		]) {
+			const res = await backdateRequest(latchId, bad, a.token);
+			expect(res.status).toBe(400);
+			expect(((await res.json()) as ErrorResponse).error.code).toBe(
+				"VALIDATION_FAILED",
+			);
+		}
+		const missing = await backdateRequest(
+			nextUlid(),
+			{ response_deadline: "2020-01-01T00:00:00.000Z" },
+			a.token,
+		);
+		expect(missing.status).toBe(404);
+	});
+
+	it("prod相当のenvでは認証より先に404", async () => {
+		const res = await devRoutes.request(
+			`/latches/${nextUlid()}/backdate`,
+			{
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ response_deadline: "2020-01-01T00:00:00.000Z" }),
+			},
+			{ ...testEnv, LATCH_ENV: "production" } as unknown as Env,
+		);
+		expect(res.status).toBe(404);
+	});
+});
+
+describe("GET /v1/dev/latches・GET /v1/dev/proposal-history", () => {
+	it("latchesはintent_idがintent_idsに含まれる行のみをid降順で返す", async () => {
+		const a = await registerAccount("obs-latch");
+		const target = nextUlid();
+		const first = await insertLatch([target, nextUlid()], { score: 0.7 });
+		await insertLatch([nextUlid(), nextUlid()]);
+		const third = await insertLatch([nextUlid(), target], {
+			proposedAt: null,
+		});
+		const res = await getReq(`/v1/dev/latches?intent_id=${target}`, a.token);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			items: Record<string, unknown>[];
+			next_cursor: string | null;
+		};
+		expect(body.items.map((i) => i.id)).toEqual([third, first]);
+		expect(Object.keys(body.items[0]).sort()).toEqual(
+			[
+				"form",
+				"id",
+				"intent_ids",
+				"proposed_at",
+				"response_deadline",
+				"score",
+				"status",
+			].sort(),
+		);
+		expect(body.items[0].proposed_at).toBeNull();
+		expectIso(body.items[1].proposed_at as string);
+		expectIso(body.items[1].response_deadline as string);
+		expect(body.items[1].score).toBe(0.7);
+		expect(body.next_cursor).toBeNull();
+	});
+
+	it("proposal-historyはuser_low/highのどちらかが一致する行を返し、形式外user_idは400", async () => {
+		const a = await registerAccount("obs-hist-a");
+		const b = await registerAccount("obs-hist-b");
+		const c = await registerAccount("obs-hist-c");
+		const ab = await insertHistory(a.id, b.id, null);
+		const ca = await insertHistory(c.id, a.id, null);
+		await insertHistory(b.id, c.id, null);
+		const res = await getReq(
+			`/v1/dev/proposal-history?user_id=${a.id}`,
+			a.token,
+		);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			items: Record<string, unknown>[];
+			next_cursor: string | null;
+		};
+		expect(body.items.map((i) => i.id)).toEqual([ca, ab]);
+		expect(Object.keys(body.items[0]).sort()).toEqual(
+			[
+				"created_at",
+				"id",
+				"latch_id",
+				"outcome",
+				"updated_at",
+				"user_high",
+				"user_low",
+			].sort(),
+		);
+		const bad = await getReq("/v1/dev/proposal-history?user_id=xyz", a.token);
+		expect(bad.status).toBe(400);
+	});
+
+	it("match-candidatesにjev_resultとlatch_scoreが出る", async () => {
+		const token = await registerUser("obs-jev");
+		const x = await createDraftIntent(token, "Jev観測1");
+		const y = await createDraftIntent(token, "Jev観測2");
+		const id = await insertCandidate(x, y);
+		await db
+			.update(matchCandidates)
+			.set({ jevResult: { topic: 0.9 }, latchScore: 0.75 })
+			.where(eq(matchCandidates.id, id));
+		const res = await getReq(`/v1/dev/match-candidates?intent_id=${x}`, token);
+		const body = (await res.json()) as { items: Record<string, unknown>[] };
+		expect(body.items[0].jev_result).toEqual({ topic: 0.9 });
+		expect(body.items[0].latch_score).toBe(0.75);
+	});
+
+	it("新規観測APIもprod相当envでは404", async () => {
+		for (const path of [
+			`/latches?intent_id=${nextUlid()}`,
+			`/proposal-history?user_id=${nextUlid()}`,
+		]) {
+			const res = await getFromDevRoutes(path, { LATCH_ENV: "production" });
+			expect(res.status, path).toBe(404);
+		}
 	});
 });
