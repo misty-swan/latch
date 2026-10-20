@@ -14,17 +14,24 @@ import {
 	createScheduledController,
 	env,
 } from "cloudflare:test";
-import { PIPELINE } from "@latch/shared";
-import { eq } from "drizzle-orm";
+import { LATCH, LIMITS, PIPELINE } from "@latch/shared";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fixedClock } from "../src/clock/clock";
+import { fixedClock, jstDayKey, jstMonthKey } from "../src/clock/clock";
 import {
 	groupCandidates,
 	intents,
+	latches,
+	latchMembers,
+	latchResponses,
+	latchStatusEvents,
 	matchCandidates,
 	matchEvents,
+	notifications,
+	proposalHistory,
+	usageCounters,
 	users,
 } from "../src/db/schema";
 import type { Env as WorkerEnv } from "../src/env";
@@ -213,6 +220,13 @@ beforeEach(async () => {
 	// テスト間の行の残存を排除する(このテスト環境ではテストごとのD1ロールバックが
 	// 行われないため、自前で掃除して各試験を順序非依存にする)。
 	// FK参照の順序に従い子→親の順で削除する
+	await db.delete(notifications);
+	await db.delete(latchStatusEvents);
+	await db.delete(latchResponses);
+	await db.delete(latchMembers);
+	await db.delete(proposalHistory);
+	await db.delete(latches);
+	await db.delete(usageCounters);
 	await db.delete(matchEvents);
 	await db.delete(matchCandidates);
 	await db.delete(groupCandidates);
@@ -700,6 +714,327 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 		expect(candidateRows[0]?.status).toBe("proposed");
 		const groupRows = await db.select().from(groupCandidates);
 		expect(groupRows).toHaveLength(1);
+	});
+});
+
+/** console.logへ出た構造化ログ(JSON1行)のうち、指定eventのものを返す */
+const logsOf = (
+	spy: ReturnType<typeof vi.spyOn>,
+	event: string,
+): Record<string, unknown>[] =>
+	spy.mock.calls
+		.map(
+			(call: unknown[]) =>
+				JSON.parse(String(call[0])) as Record<string, unknown>,
+		)
+		.filter((line: Record<string, unknown>) => line.event === event);
+
+/**
+ * 提示済みの1対1 LATCH(partial_accept・members・proposal_history・片方のyes回答つき)を
+ * 配置する。2人のユーザーと2件のつながりIntentを作り、response_deadlineを指定する
+ */
+const insertProposedLatch = async (
+	responseDeadline: Date,
+): Promise<{ latchId: string; userIds: string[] }> => {
+	const ua = ulid();
+	const ub = ulid();
+	await insertUserRow(ua);
+	await insertUserRow(ub);
+	const a = intentFixture({ id: ulid(), userId: ua, topic: "期限試験その1" });
+	const b = intentFixture({ id: ulid(), userId: ub, topic: "期限試験その2" });
+	await insertIntentRow(a);
+	await insertIntentRow(b);
+	const latchId = ulid();
+	await db.insert(latches).values({
+		id: latchId,
+		form: "connection",
+		intentIds: [a.id, b.id],
+		proposal: {
+			form: "connection",
+			topic: a.topic,
+			time_window: null,
+			region_name: null,
+			participants: { min: 2, max: 3 },
+			budget: null,
+		},
+		score: 0.9,
+		status: "partial_accept",
+		responseDeadline,
+		expiresAt: new Date(BASE + 30 * MS_PER_DAY),
+		lastMessageAt: new Date(BASE - HOUR),
+		completedAt: null,
+		proposedAt: new Date(BASE - 2 * HOUR),
+		createdAt: new Date(BASE - 2 * HOUR),
+		updatedAt: new Date(BASE - HOUR),
+	});
+	await db.insert(latchMembers).values([
+		{ latchId, userId: ua },
+		{ latchId, userId: ub },
+	]);
+	const [low, high] = ua < ub ? [ua, ub] : [ub, ua];
+	await db.insert(proposalHistory).values({
+		id: ulid(),
+		userLow: low,
+		userHigh: high,
+		latchId,
+		outcome: "proposed",
+		createdAt: new Date(BASE - 2 * HOUR),
+		updatedAt: new Date(BASE - 2 * HOUR),
+	});
+	await db.insert(latchResponses).values({
+		id: ulid(),
+		latchId,
+		userId: ua,
+		response: "yes",
+		deferReason: null,
+		respondedAt: new Date(BASE - HOUR),
+		retractedAt: null,
+	});
+	return { latchId, userIds: [ua, ub] };
+};
+
+/** バックフィル対象(埋め込み未完了・猶予5分経過)のつながりIntentを n 件配置する */
+const insertBackfillTargets = async (n: number): Promise<void> => {
+	const userId = ulid();
+	await insertUserRow(userId);
+	for (let i = 0; i < n; i += 1) {
+		await insertIntentRow(
+			intentFixture({
+				id: ulid(),
+				userId,
+				topic: `バックフィル対象の学習仲間${i}`,
+				updatedAt: new Date(BASE - 6 * MIN),
+			}),
+		);
+	}
+};
+
+describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
+	it("回答期限切れ: 期限を過ぎた提案はexpired・履歴expired・closed通知・yesの無効化(期限前は残る)", async () => {
+		const overdue = await insertProposedLatch(new Date(BASE - 1 * MIN));
+		const atBoundary = await insertProposedLatch(FIXED_NOW);
+		const notYet = await insertProposedLatch(new Date(BASE + 1 * MIN));
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		for (const { latchId, userIds } of [overdue, atBoundary]) {
+			const [latch] = await db
+				.select()
+				.from(latches)
+				.where(eq(latches.id, latchId));
+			expect(latch?.status).toBe("expired");
+			const [history] = await db
+				.select()
+				.from(proposalHistory)
+				.where(eq(proposalHistory.latchId, latchId));
+			expect(history?.outcome).toBe("expired");
+			const closed = await db
+				.select()
+				.from(notifications)
+				.where(
+					and(
+						eq(notifications.latchId, latchId),
+						eq(notifications.type, "closed"),
+					),
+				);
+			expect(closed.map((n) => n.userId).sort()).toEqual([...userIds].sort());
+			const [yes] = await db
+				.select()
+				.from(latchResponses)
+				.where(eq(latchResponses.latchId, latchId));
+			expect(yes?.retractedAt).toEqual(FIXED_NOW);
+		}
+		const [kept] = await db
+			.select()
+			.from(latches)
+			.where(eq(latches.id, notYet.latchId));
+		expect(kept?.status).toBe("partial_accept");
+		const [keptYes] = await db
+			.select()
+			.from(latchResponses)
+			.where(eq(latchResponses.latchId, notYet.latchId));
+		expect(keptYes?.retractedAt).toBeNull();
+	});
+
+	it("予算アラート: 全体1日の80%到達で警告を1回だけ出し、2回目のCronでは出さない", async () => {
+		const day = jstDayKey(FIXED_NOW);
+		const month = jstMonthKey(FIXED_NOW);
+		await testEnv.PIPELINE_KV.delete(`jev:alert:jev_global_daily:${day}`);
+		await testEnv.PIPELINE_KV.delete(`jev:alert:jev_global_monthly:${month}`);
+		const threshold = LIMITS.JEV_GLOBAL_DAILY * LATCH.BUDGET_ALERT_RATIO;
+		await db.insert(usageCounters).values([
+			{ scope: "jev_global_daily", key: "-", period: day, count: threshold },
+			// 月次は80%未満(警告しない)
+			{
+				scope: "jev_global_monthly",
+				key: "-",
+				period: month,
+				count: LIMITS.JEV_GLOBAL_MONTHLY * LATCH.BUDGET_ALERT_RATIO - 1,
+			},
+		]);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runScheduledPipeline(testEnv, directClock);
+		await runScheduledPipeline(testEnv, fixedClock(new Date(BASE + 1 * MIN)));
+
+		expect(logsOf(logSpy, "jev.budget.alert")).toEqual([
+			{
+				level: "warn",
+				event: "jev.budget.alert",
+				layer: "jev_global_daily",
+				count: threshold,
+			},
+		]);
+		expect(
+			await testEnv.PIPELINE_KV.get(`jev:alert:jev_global_daily:${day}`),
+		).not.toBeNull();
+		expect(
+			await testEnv.PIPELINE_KV.get(`jev:alert:jev_global_monthly:${month}`),
+		).toBeNull();
+	});
+
+	it("usage_counters削除: 90日より古い日次・時間・月次の行を消し、新しい行は残す", async () => {
+		const daysAgo = (n: number) => new Date(BASE - n * MS_PER_DAY);
+		// FIXED_NOWはJST 2026-06-01 → 90日前のJST日付は2026-03-03(これより前を削除)
+		await db.insert(usageCounters).values([
+			{
+				scope: "jev_intent",
+				key: "x",
+				period: jstDayKey(daysAgo(91)),
+				count: 1,
+			},
+			{
+				scope: "jev_intent",
+				key: "x",
+				period: jstDayKey(daysAgo(89)),
+				count: 1,
+			},
+			{ scope: "intent_hourly", key: "x", period: "2026-03-02-23", count: 1 },
+			{ scope: "intent_hourly", key: "x", period: "2026-03-03-00", count: 1 },
+			// 月次は末日扱い: 2026-02(末日2026-02-28)は削除・2026-03(末日2026-03-31)は残る
+			{ scope: "jev_global_monthly", key: "-", period: "2026-02", count: 1 },
+			{ scope: "jev_global_monthly", key: "-", period: "2026-03", count: 1 },
+		]);
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		const periods = (await db.select().from(usageCounters))
+			.map((row) => row.period)
+			.sort();
+		expect(periods).toEqual(
+			["2026-03", "2026-03-03-00", jstDayKey(daysAgo(89))].sort(),
+		);
+	});
+
+	it("pending残留: 10分以上前のpendingイベントをfailedへ倒し、10分未満は残す", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const target = intentFixture({ id: ulid(), userId, topic: "残留試験" });
+		await insertIntentRow(target);
+		const insertEvent = async (version: number, createdAt: Date) => {
+			const id = ulid();
+			await db.insert(matchEvents).values({
+				id,
+				eventType: "intent_updated",
+				sourceIntentId: target.id,
+				version,
+				payload: {},
+				status: "pending",
+				createdAt,
+				processedAt: null,
+			});
+			return id;
+		};
+		const stale = await insertEvent(1, new Date(BASE - 11 * MIN));
+		const atBoundary = await insertEvent(
+			2,
+			new Date(BASE - LATCH.PENDING_STALE_MS),
+		);
+		const fresh = await insertEvent(3, new Date(BASE - 9 * MIN));
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		const eventOf = async (id: string) =>
+			(await db.select().from(matchEvents).where(eq(matchEvents.id, id)))[0];
+		expect((await eventOf(stale))?.status).toBe("failed");
+		expect((await eventOf(stale))?.processedAt).toBeNull();
+		expect((await eventOf(atBoundary))?.status).toBe("failed");
+		expect((await eventOf(fresh))?.status).toBe("pending");
+		expect(logsOf(logSpy, "cron.pending.failed")).toEqual([
+			{ level: "info", event: "cron.pending.failed", count: 2 },
+		]);
+	});
+
+	it("バックフィル: 埋め込み後にembedding_completedイベント行を作らない(評価はCronが直接行う)", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const target = intentFixture({
+			id: ulid(),
+			userId,
+			topic: "二重評価しない学習仲間",
+			updatedAt: new Date(BASE - 6 * MIN),
+		});
+		await insertIntentRow(target);
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		const row = await rowOf(target.id);
+		expect(row?.embeddedAt).toEqual(FIXED_NOW);
+		expect(row?.lastEvaluatedAt).toEqual(FIXED_NOW);
+		const events = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.sourceIntentId, target.id));
+		expect(events).toEqual([]);
+	});
+
+	it("バックフィル: Embeddingが連続5件失敗したら当回の走査を打ち切る", async () => {
+		await insertBackfillTargets(10);
+		// stub Embeddingは失敗しないため、第1段のVectorStore.upsert(memory storeの
+		// シングルトン)を失敗させる。runEmbeddingStageは例外を握って"failed"を返す
+		const upsertSpy = vi
+			.spyOn(memoryVectorStore(), "upsert")
+			.mockRejectedValue(new Error("UPSERT_FAILED: 試験用の失敗"));
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		expect(upsertSpy).toHaveBeenCalledTimes(LATCH.BACKFILL_FAILURE_ABORT);
+		expect(logsOf(logSpy, "cron.backfill.aborted")).toEqual([
+			{
+				level: "warn",
+				event: "cron.backfill.aborted",
+				count: LATCH.BACKFILL_FAILURE_ABORT,
+			},
+		]);
+	});
+
+	it("バックフィル: 成功が挟まれば連続失敗数は0に戻る", async () => {
+		await insertBackfillTargets(10);
+		const store = memoryVectorStore();
+		const original = store.upsert.bind(store);
+		let calls = 0;
+		// 4件失敗 → 1件成功 → 以降は失敗。成功で連続数が0に戻るため、
+		// 打ち切りは成功の後の5件目(通算10件目)になる
+		const upsertSpy = vi
+			.spyOn(store, "upsert")
+			.mockImplementation(async (vectors) => {
+				calls += 1;
+				if (calls === 5) {
+					return original(vectors);
+				}
+				throw new Error("UPSERT_FAILED: 試験用の失敗");
+			});
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		expect(upsertSpy).toHaveBeenCalledTimes(10);
+		// count=打ち切り時点までの当回の失敗件数(4+5)
+		expect(logsOf(logSpy, "cron.backfill.aborted")).toEqual([
+			{ level: "warn", event: "cron.backfill.aborted", count: 9 },
+		]);
 	});
 });
 

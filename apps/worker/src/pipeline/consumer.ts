@@ -75,13 +75,18 @@ const waitUntilReflected = async (
  * (同version・即時)までを行い、成功("embedded")/失敗("failed")を返す。
  * 失敗(throw/timeout)は再試行せず、呼び出し側が起点イベントをfailedへ倒す
  * (06 §5: 再試行なし・Cronのバックフィルが回収)。Cronのバックフィル
- * (docs/12 Task 12(e))からも再利用するためexportする
+ * (docs/12 Task 12(e))からも再利用するためexportする。
+ * options.emitCompleted=false はembedding_completedを投入しない(既定true)。
+ * Cronのバックフィルは直後にevaluateIntentを直接呼ぶため、投入すると二重評価になる
+ * (docs/06 §2「Cronからは新たな起点イベントを発行しない」)
  */
 export const runEmbeddingStage = async (
 	env: Env,
 	intent: IntentRow,
 	clock: Clock,
+	options: { emitCompleted?: boolean } = {},
 ): Promise<EmbeddingStageResult> => {
+	const emitCompleted = options.emitCompleted ?? true;
 	const startedAt = clock.now().getTime();
 	try {
 		const embedder = createEmbedder(env);
@@ -114,16 +119,18 @@ export const runEmbeddingStage = async (
 			.set({ embeddingModel: embedder.modelId, embeddedAt: clock.now() })
 			.where(eq(intents.id, intent.id));
 		// 第2段への再投入(同version・即時・docs/06 §2)
-		await emitMatchEvent(
-			env,
-			{
-				eventType: "embedding_completed",
-				intentId: intent.id,
-				version: intent.version,
-			},
-			undefined,
-			clock,
-		);
+		if (emitCompleted) {
+			await emitMatchEvent(
+				env,
+				{
+					eventType: "embedding_completed",
+					intentId: intent.id,
+					version: intent.version,
+				},
+				undefined,
+				clock,
+			);
+		}
 		// count=upsertしたベクトル数(1Intent=1ベクトル・06 §7の層別観測)
 		logger.info("pipeline.stage1.completed", {
 			intent_id: intent.id,

@@ -10,15 +10,20 @@
  * - (e) 埋め込みバックフィルとベクトルmetadata整合の修復
  * - (g) 未評価回収(キュー消失の安全網)
  * - (h) つながりIntentの1回きり遅延再評価
- * - 保持期間: match_candidates・group_candidatesの30日削除(docs/05 §2.6)
+ * - 保持期間: match_candidates・group_candidatesの30日削除と
+ *   usage_countersの90日削除(docs/05 §2.6)
+ * - (i) 回答期限切れ(expired化・yesの無効化・参加者の保留解放)と保留の期限切れ・解放
+ *   (F4a設計 §3.5・§4.2)
+ * - (f) Jev予算アラート(全体1日・1か月の80%・docs/06 §6)
+ * - pending残留の掃査(10分経過のpendingイベントをfailedへ・docs/06 §4)
  * 評価本体はevaluateIntent・第1段はrunEmbeddingStageを再利用し、Cronからは
  * 新たな起点イベントを発行しない(直接呼び出し・docs/06 §2)。
- * (d)つながりLATCHのcompleted判定・(f)予算アラート・(i)提案クローズ後続は
- * F4/F5で計上する(docs/12)。
+ * (d)つながりLATCHのcompleted判定はF5で計上する(docs/12)。
  */
-import { PIPELINE } from "@latch/shared";
+import { LATCH, LIMITS, PIPELINE } from "@latch/shared";
 import {
 	and,
+	asc,
 	eq,
 	gt,
 	inArray,
@@ -30,10 +35,21 @@ import {
 	sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { Clock } from "../clock/clock";
-import { groupCandidates, intents, matchCandidates } from "../db/schema";
+import { type Clock, jstDayKey, jstMonthKey } from "../clock/clock";
+import {
+	groupCandidates,
+	intents,
+	latches,
+	latchMembers,
+	latchResponses,
+	matchCandidates,
+	matchEvents,
+	usageCounters,
+} from "../db/schema";
 import type { Env } from "../env";
 import { MS_PER_DAY } from "../intents/expiry";
+import { closeLatch } from "../latches/close";
+import { releaseHeld } from "../latches/release";
 import { createLogger } from "../logging/logger";
 import { createVectorStore } from "../vectorstore";
 import { syncVectorStatus } from "../vectorstore/sync-status";
@@ -351,8 +367,11 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
 /**
  * (e) 埋め込みバックフィル(docs/06 §2(e))。active・埋め込み未完了で生成(更新)から
  * 5分(BACKFILL_GRACE_MS・ちょうどを含む)経過したIntentへ第1段(runEmbeddingStage:
- * 埋め込み→upsert確認→intents更新→embedding_completed投入)を直接実行し、
- * 成功時のみ続けて評価する。失敗は再試行せず次のCronで回収する(docs/06 §5)。
+ * 埋め込み→upsert確認→intents更新)を直接実行し、成功時のみ続けて評価する。
+ * 直後に評価するためembedding_completedは投入しない(emitCompleted:false。投入すると
+ * キュー経由の評価と二重になる)。失敗は再試行せず次のCronで回収する(docs/06 §5)。
+ * Embeddingの失敗が連続BACKFILL_FAILURE_ABORT(5)件に達したら当回の走査を打ち切る
+ * (障害中に500件を空振りしない・docs/06 §4)。成功を挟めば連続数は0に戻る。
  * 続けてベクトルmetadata整合の修復を行う
  */
 const runBackfillSweep = async (env: Env, clock: Clock): Promise<void> => {
@@ -370,11 +389,24 @@ const runBackfillSweep = async (env: Env, clock: Clock): Promise<void> => {
 		)
 		.limit(PIPELINE.CRON_BATCH_LIMIT);
 	let backfilled = 0;
+	let failed = 0;
+	let consecutiveFailures = 0;
 	for (const row of stale) {
 		try {
-			if ((await runEmbeddingStage(env, row, clock)) !== "embedded") {
+			const stage = await runEmbeddingStage(env, row, clock, {
+				emitCompleted: false,
+			});
+			if (stage !== "embedded") {
+				failed += 1;
+				consecutiveFailures += 1;
+				if (consecutiveFailures >= LATCH.BACKFILL_FAILURE_ABORT) {
+					// count=打ち切り時点までの当回の失敗件数
+					logger.warn("cron.backfill.aborted", { count: failed });
+					break;
+				}
 				continue;
 			}
+			consecutiveFailures = 0;
 			await evaluateIntent(env, row.id, clock);
 			backfilled += 1;
 		} catch (error) {
@@ -465,7 +497,8 @@ const runDelayedReevalSweep = async (env: Env, clock: Clock): Promise<void> => {
 /**
  * 保持期間削除(docs/05 §2.6)。1対1候補は評価確定から30日
  * (updated_at≤now−30日)・グループ候補は生成から30日(created_at≤now−30日)で
- * 削除する(01 §21)。D1はDELETE...LIMITに対応しないため、先にCRON_BATCH_LIMITで
+ * 削除する(01 §21)。usage_countersはperiodの日付がnowのJST日付より90日
+ * (COUNTER_RETENTION_DAYS)超古い行を削除する。D1はDELETE...LIMITに対応しないため、先にCRON_BATCH_LIMITで
  * 削除対象のidを取得してからinArrayで削除する(1実行あたりの処理量を
  * CRON_BATCH_LIMITで頭打ちにし、超過分は次回のCronで回収する・docs/04 §4)
  */
@@ -500,9 +533,210 @@ const runRetentionSweep = async (env: Env, clock: Clock): Promise<void> => {
 			),
 		);
 	}
-	const deleted = staleCandidates.length + staleGroups.length;
+	// usage_counters: 日次(YYYY-MM-DD)・時間(YYYY-MM-DD-HH)は先頭10文字の日付で、
+	// 月次(YYYY-MM)はその月の末日で判定する(末日<cutoff ⇔ 月<cutoffの年月)。
+	// 1日あたりの行数はIntent・ユーザー数で上限づけられるため一括で削除する
+	const counterCutoff = jstDayKey(
+		new Date(clock.now().getTime() - LATCH.COUNTER_RETENTION_DAYS * MS_PER_DAY),
+	);
+	const counterResult = await db
+		.delete(usageCounters)
+		.where(
+			or(
+				and(
+					sql`length(${usageCounters.period}) >= 10`,
+					sql`substr(${usageCounters.period}, 1, 10) < ${counterCutoff}`,
+				),
+				and(
+					sql`length(${usageCounters.period}) = 7`,
+					sql`${usageCounters.period} < ${counterCutoff.slice(0, 7)}`,
+				),
+			),
+		);
+	const deleted =
+		staleCandidates.length +
+		staleGroups.length +
+		(counterResult.meta.changes ?? 0);
 	if (deleted > 0) {
 		logger.info("cron.retention.deleted", { count: deleted });
+	}
+};
+
+/**
+ * (i) 回答期限切れ走査(F4a設計 §4.2・docs/06 §4)。proposed・partial_acceptで
+ * response_deadline≤now(ちょうどを含む)のLATCHを期限の古い順に最大500件expiredで閉じる
+ * (proposal_history=expired・提示済みのため参加者へclosed通知)。閉じられた場合に限り、
+ * 有効なyes(retracted_at IS NULL)を無効化し、参加者の保留(candidate)を解放する。
+ * 1件の例外は握って続行する(latch_id・error_codeのみをログ・docs/08 §6)
+ */
+const runResponseDeadlineSweep = async (
+	env: Env,
+	clock: Clock,
+): Promise<void> => {
+	const db = drizzle(env.DB);
+	const now = clock.now();
+	const rows = await db
+		.select({ id: latches.id })
+		.from(latches)
+		.where(
+			and(
+				inArray(latches.status, ["proposed", "partial_accept"]),
+				lte(latches.responseDeadline, now),
+			),
+		)
+		.orderBy(asc(latches.responseDeadline), asc(latches.id))
+		.limit(PIPELINE.CRON_BATCH_LIMIT);
+	let expired = 0;
+	for (const { id } of rows) {
+		try {
+			const closed = await closeLatch(
+				db,
+				id,
+				"expired",
+				"expired",
+				["proposed", "partial_accept"],
+				now,
+			);
+			if (!closed) {
+				continue;
+			}
+			await db
+				.update(latchResponses)
+				.set({ retractedAt: now })
+				.where(
+					and(
+						eq(latchResponses.latchId, id),
+						eq(latchResponses.response, "yes"),
+						isNull(latchResponses.retractedAt),
+					),
+				);
+			const members = await db
+				.select({ userId: latchMembers.userId })
+				.from(latchMembers)
+				.where(eq(latchMembers.latchId, id));
+			await releaseHeld(
+				db,
+				now,
+				members.map((m) => m.userId),
+			);
+			expired += 1;
+		} catch (error) {
+			logger.warn("cron.item.failed", {
+				latch_id: id,
+				error_code: errorCodeOf(error),
+			});
+		}
+	}
+	if (expired > 0) {
+		logger.info("cron.latches.expired", { count: expired });
+	}
+};
+
+/**
+ * 保留の期限切れと解放(F4a設計 §3.5)。releaseHeldが先にexpireHeldで期限切れを閉じ、
+ * 続けて全体の保留を提示の上限に従って昇格する
+ */
+const runHeldSweep = async (env: Env, clock: Clock): Promise<void> => {
+	const released = await releaseHeld(drizzle(env.DB), clock.now());
+	if (released > 0) {
+		logger.info("cron.held.released", { count: released });
+	}
+};
+
+/** 予算アラートの送信済み印の有効期限(秒)。日次は2日・月次は40日で自然消滅させる */
+const ALERT_TTL_SECONDS = {
+	jev_global_daily: 2 * 24 * 60 * 60,
+	jev_global_monthly: 40 * 24 * 60 * 60,
+} as const;
+
+/**
+ * (f) Jev予算アラート(docs/06 §6)。当日の全体1日・当月の全体1か月のカウンタが
+ * 上限×BUDGET_ALERT_RATIO(80%)以上なら、期間ごとに1回だけwarnログと
+ * Analytics Engineの1点を出す。送信済みの印はKV `jev:alert:<scope>:<period>` に置く。
+ * Analytics Engineには識別子を入れない(scopeと件数のみ・docs/08 §6)
+ */
+const runBudgetAlert = async (env: Env, clock: Clock): Promise<void> => {
+	const db = drizzle(env.DB);
+	const now = clock.now();
+	const targets = [
+		{
+			scope: "jev_global_daily",
+			period: jstDayKey(now),
+			limit: LIMITS.JEV_GLOBAL_DAILY,
+		},
+		{
+			scope: "jev_global_monthly",
+			period: jstMonthKey(now),
+			limit: LIMITS.JEV_GLOBAL_MONTHLY,
+		},
+	] as const;
+	for (const target of targets) {
+		const [row] = await db
+			.select({ count: usageCounters.count })
+			.from(usageCounters)
+			.where(
+				and(
+					eq(usageCounters.scope, target.scope),
+					eq(usageCounters.key, "-"),
+					eq(usageCounters.period, target.period),
+				),
+			);
+		const count = row?.count ?? 0;
+		if (count < target.limit * LATCH.BUDGET_ALERT_RATIO) {
+			continue;
+		}
+		const key = `jev:alert:${target.scope}:${target.period}`;
+		if ((await env.PIPELINE_KV.get(key)) !== null) {
+			continue;
+		}
+		logger.warn("jev.budget.alert", { layer: target.scope, count });
+		// PIPELINE_AXが未バインドの環境では送信を省略する(metrics.tsと同じ防御)
+		env.PIPELINE_AX?.writeDataPoint({
+			blobs: ["jev_budget_alert", target.scope],
+			doubles: [count, target.limit],
+			indexes: ["jev_budget_alert"],
+		});
+		await env.PIPELINE_KV.put(key, "1", {
+			expirationTtl: ALERT_TTL_SECONDS[target.scope],
+		});
+	}
+};
+
+/**
+ * pending残留の掃査(docs/06 §4)。status=pendingのままcreated_atから10分
+ * (PENDING_STALE_MS・ちょうどを含む)経過したイベント行を最大500件failedへ倒す
+ * (キュー消失の可視化。評価の回収はバックフィル・未評価回収が担う)。
+ * processed_atは記録しない(markFailedと同じ扱い)
+ */
+const runPendingSweep = async (env: Env, clock: Clock): Promise<void> => {
+	const db = drizzle(env.DB);
+	const cutoff = new Date(clock.now().getTime() - LATCH.PENDING_STALE_MS);
+	const stale = await db
+		.select({ id: matchEvents.id })
+		.from(matchEvents)
+		.where(
+			and(
+				eq(matchEvents.status, "pending"),
+				lte(matchEvents.createdAt, cutoff),
+			),
+		)
+		.limit(PIPELINE.CRON_BATCH_LIMIT);
+	for (let i = 0; i < stale.length; i += UPDATE_CHUNK) {
+		await db
+			.update(matchEvents)
+			.set({ status: "failed" })
+			.where(
+				and(
+					eq(matchEvents.status, "pending"),
+					inArray(
+						matchEvents.id,
+						stale.slice(i, i + UPDATE_CHUNK).map((row) => row.id),
+					),
+				),
+			);
+	}
+	if (stale.length > 0) {
+		logger.info("cron.pending.failed", { count: stale.length });
 	}
 };
 
@@ -523,4 +757,8 @@ export const runScheduledPipeline = async (
 	await runUnevaluatedSweep(env, clock);
 	await runDelayedReevalSweep(env, clock);
 	await runRetentionSweep(env, clock);
+	await runResponseDeadlineSweep(env, clock);
+	await runHeldSweep(env, clock);
+	await runBudgetAlert(env, clock);
+	await runPendingSweep(env, clock);
 };
