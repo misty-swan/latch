@@ -9,7 +9,7 @@
  */
 
 import type { LatchStatus } from "@latch/shared";
-import { and, eq, inArray, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import {
 	latches,
@@ -116,7 +116,10 @@ export const closeLatch = async (
 			? await db
 					.select({ userId: latchMembers.userId })
 					.from(latchMembers)
-					.where(eq(latchMembers.latchId, latchId))
+					// 離脱済みの参加者には通知しない(F4b設計 §3.4)
+					.where(
+						and(eq(latchMembers.latchId, latchId), isNull(latchMembers.leftAt)),
+					)
 			: [];
 
 	const nowMs = now.getTime();

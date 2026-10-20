@@ -373,6 +373,16 @@ export const leave = async (
 		)
 		.returning({ userId: latchMembers.userId });
 	if (recorded.length > 0) return { ok: true, latchId };
+	// 同じ本人の並行した離脱(二重送信・再試行)が先に記録した場合は、下限割れではないため
+	// 取り消さずに成功として返す(冪等)。本人が未離脱のまま記録できなかったときだけ下限割れとみなす。
+	// 残り人数は減る方向にしか変わらないため、ここで未離脱なら下限割れは以後も解消しない
+	const [me] = await db
+		.select({ leftAt: latchMembers.leftAt })
+		.from(latchMembers)
+		.where(
+			and(eq(latchMembers.latchId, latchId), eq(latchMembers.userId, userId)),
+		);
+	if (me?.leftAt != null) return { ok: true, latchId };
 	// 下限割れ。成立後の離脱はclosed通知を出さない(closedは不成立の総称・docs/05 §2.2)
 	const closed = await closeLatch(
 		db,

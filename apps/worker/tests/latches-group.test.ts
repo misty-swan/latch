@@ -757,6 +757,23 @@ describe("成立後の離脱(F4b設計 §3.4・オーナー裁定3)", () => {
 		expect(await closedNotificationCount(latchId)).toBe(0);
 	});
 
+	it("4人(min=3)で同じ本人のleaveが並行2回(二重送信) → matchedのまま・left_atは1件・両方ok", async () => {
+		const { latchId, members } = await setupMatchedGroup(4);
+		const [a] = members as [string];
+		const results = await Promise.all([
+			leave(db, latchId, a, NOW),
+			leave(db, latchId, a, NOW),
+		]);
+		expect(results).toEqual([
+			{ ok: true, latchId },
+			{ ok: true, latchId },
+		]);
+		expect((await latchOf(latchId))?.status).toBe("matched");
+		const left = await leftAtOf(latchId);
+		expect([...left.values()].filter((v) => v !== null)).toHaveLength(1);
+		expect(left.get(a)?.getTime()).toBe(NOW.getTime());
+	});
+
 	it("4人(min=3)で2人が並行してleave → 1人だけ記録され、もう1人で下限割れとなりcancelled(Review Focus 4)", async () => {
 		const { latchId, members } = await setupMatchedGroup(4);
 		const [, b, c] = members as [string, string, string];
