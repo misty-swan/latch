@@ -264,7 +264,7 @@ export const proposePair = async (
 	const insertMember = (userId: string) =>
 		db
 			.insert(latchMembers)
-			.select(sql`SELECT ${latchId}, ${userId} WHERE ${secured}`);
+			.select(sql`SELECT ${latchId}, ${userId}, NULL WHERE ${secured}`);
 	const insertEvent = db
 		.insert(latchStatusEvents)
 		.select(

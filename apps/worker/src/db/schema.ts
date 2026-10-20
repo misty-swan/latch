@@ -359,6 +359,8 @@ export const latchMembers = sqliteTable(
 	{
 		latchId: text("latch_id", { length: 26 }).notNull(),
 		userId: text("user_id", { length: 26 }).notNull(),
+		// 離脱時刻。nullは参加中(F4b設計・docs/05 §2.2)
+		leftAt: integer("left_at", { mode: "timestamp_ms" }),
 	},
 	(t) => [
 		primaryKey({ columns: [t.latchId, t.userId] }),

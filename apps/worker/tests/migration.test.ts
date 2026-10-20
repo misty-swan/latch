@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import { expect, it } from "vitest";
 import rollback0002Sql from "../migrations_rollback/0002_rollback.sql?raw";
 import rollback0003Sql from "../migrations_rollback/0003_rollback.sql?raw";
+import rollback0004Sql from "../migrations_rollback/0004_rollback.sql?raw";
 
 /**
  * マイグレーション適用結果の検証。
@@ -220,4 +221,20 @@ it("戻しマイグレーション0003の適用で追加列・索引が消える
 	);
 	const events = await columnsOf("latch_status_events");
 	expect(events.find((c) => c.name === "from_status")?.notnull).toBe(1);
+});
+
+it("0004適用後、latch_membersにleft_at列(null可・nullは参加中)がある(F4b設計・docs/05 §2.2)", async () => {
+	const members = await columnsOf("latch_members");
+	const leftAt = members.find((c) => c.name === "left_at");
+	expect(leftAt, "left_at 列が存在すること").toBeDefined();
+	expect(leftAt?.notnull).toBe(0);
+});
+
+it("戻しマイグレーション0004の適用でleft_at列が消える(docs/11 §3の対マイグレーション)", async () => {
+	for (const statement of toStatements(rollback0004Sql)) {
+		await env.DB.prepare(statement).run();
+	}
+	expect((await columnsOf("latch_members")).map((c) => c.name)).not.toContain(
+		"left_at",
+	);
 });

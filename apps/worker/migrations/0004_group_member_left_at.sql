@@ -1,0 +1,1 @@
+ALTER TABLE `latch_members` ADD `left_at` integer;

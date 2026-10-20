@@ -155,6 +155,10 @@ describe("LATCH(提案化の定数・docs/06 §5〜§7)", () => {
 			COUNTER_RETENTION_DAYS: 90,
 			PENDING_STALE_MS: 10 * 60_000,
 			BACKFILL_FAILURE_ABORT: 5,
+			GROUP_POOL_MAX: 15,
+			GROUP_SIZE_MIN: 3,
+			GROUP_SIZE_MAX: 4,
+			JEV_ONE_ON_ONE_MIN: 4,
 		});
 	});
 });
