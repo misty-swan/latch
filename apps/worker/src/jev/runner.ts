@@ -109,7 +109,7 @@ export const runJev = async (
 		calls += reserved.length;
 		slots -= n;
 
-		// breakerへの記録は1波につき1回にまとめる(KVの同一キー書き込みは1秒1回まで・docs/04 §5)
+		// breakerへの記録は1波につき1回にまとめる(KVの同一キー書き込みは1秒1回まで・docs/04 §4・docs/06 §5)
 		await recordJevOutcomes(
 			kv,
 			outcomes.map((o) => o.ok),

@@ -24,7 +24,7 @@ export type CloseTo = "rejected" | "expired" | "cancelled";
 
 /**
  * LATCHを to へ閉じる。現在の状態が fromStatuses に無い・行が無い・並行更新に負けた場合はfalse。
- * - latch_status_events に(読んだ状態 → to)を記録する
+ * - latch_status_events に(更新直前の状態 → to)を記録する
  * - historyOutcome が非nullなら、このLATCHを指す proposal_history 行の outcome を更新する
  *   (同ペアの履歴が別のLATCHへ移っていれば触らない)
  * - 提示済み(proposed_atあり)なら参加者全員へ type=closed の通知を作る(docs/05 §3.3)。
