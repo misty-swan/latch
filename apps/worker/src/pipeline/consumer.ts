@@ -221,6 +221,13 @@ const consumeEvent = async (
 						l1_pass: result.l1Pass,
 						l1_exclusions: result.exclusions,
 						l3_pass: result.l3Pass,
+						jev_calls: result.jevCalls,
+						jev_reused: result.jevReused,
+						jev_held: result.jevHeld,
+						jev_latency: result.jevLatencyMs,
+						l5_over_threshold: result.l5OverThreshold,
+						proposed: result.proposed,
+						held_proposals: result.held,
 					},
 		);
 		return;

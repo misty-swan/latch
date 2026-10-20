@@ -3,22 +3,28 @@
  * evaluateIntentはembedding_completedの消費(consumer.ts)とCron(Task 12)の
  * 両方から呼ばれる共通の入口。Layer 2 Candidate Retrieval(Vectorize)→
  * Layer 1 Hard Filter(コード+D1)→ Layer 3 Cheap Judge(合成スコア)→
- * match_candidatesの保存 → last_evaluated_atの更新までを行う。
+ * match_candidatesの保存 → Layer 4 Jev → Layer 5 Scoring → 提案化 →
+ * last_evaluated_atの更新までを行う(F4a設計 §1・§3.1)。
  * イベントの存在を知らない設計とし(docs/06 §7の計測はイベント単位で行う)、
  * 層通過の計測結果を戻り値で返す。Analytics Engineへの送信とログはここで
  * 共通に行い、起点イベントpayloadへの反映は呼び出し側(consumer.ts)が行う
  */
-import { PIPELINE } from "@latch/shared";
-import { eq, sql } from "drizzle-orm";
+import { LATCH, PIPELINE } from "@latch/shared";
+import { and, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Clock } from "../clock/clock";
 import { intents, matchCandidates } from "../db/schema";
 import type { Env } from "../env";
 import { newUlid } from "../ids";
+import type { JevHeldReason } from "../jev/runner";
+import { proposePair } from "../latches/propose";
+import type { JevFn } from "../llm/types";
 import { createLogger } from "../logging/logger";
 import { createVectorStore } from "../vectorstore";
 import { cheapJudgeScore } from "./cheap";
 import { fetchL1Data, layer1Judge, pairKey } from "./layer1";
+import { type L4Candidate, runLayer4 } from "./layer4";
+import { type L5Item, latchScore, pickProposals, recheckHard } from "./layer5";
 import { writeStage2Metrics } from "./metrics";
 
 const logger = createLogger();
@@ -36,6 +42,25 @@ export interface Stage2Result {
 	exclusions: Record<string, number>;
 	/** Layer 3通過(上位K_c)でmatch_candidatesへ保存した件数 */
 	l3Pass: number;
+	/** Jevの実呼び出し数(フォールバック含む・K_j以下・#14) */
+	jevCalls: number;
+	/** jev_resultを再利用してJevを呼ばなかった件数 */
+	jevReused: number;
+	/** Jevの保留の理由別内訳(予算・breaker・失敗・呼び出し枠) */
+	jevHeld: Record<JevHeldReason, number>;
+	/** Jev実行の処理時間(ミリ秒) */
+	jevLatencyMs: number;
+	/** Layer 5でLATCH Scoreが閾値を超えた件数(ペア単位の絞り込み前) */
+	l5OverThreshold: number;
+	/** 提案化して提示した件数(proposePairが"proposed") */
+	proposed: number;
+	/** 提案化したが通知上限で保留した件数(proposePairが"held") */
+	held: number;
+}
+
+/** evaluateIntentの差し替え口(試験用)。jevはLayer 4へそのまま渡す */
+export interface EvaluateOptions {
+	jev?: { primary: JevFn; fallback: JevFn };
 }
 
 /** 地球半径(メートル)。ハバーシン距離の計算に使う(layer1.tsと同一の式) */
@@ -98,16 +123,26 @@ const byScoreDescThenIdAsc = (
 /** 候補upsertの分割幅(13列×7行=91バインド・D1の上限100対策) */
 const UPSERT_CHUNK_SIZE = 7;
 
+/** match_candidatesのUNIQUEキー(intent_a_id, intent_b_id, intent_a_version, intent_b_version)の文字列化 */
+const candidateKey = (r: {
+	intentAId: string;
+	intentBId: string;
+	intentAVersion: number;
+	intentBVersion: number;
+}): string =>
+	`${r.intentAId}:${r.intentBId}:${r.intentAVersion}:${r.intentBVersion}`;
+
 /**
  * 評価実行(第2段・docs/06 §2〜§3)。対象外(active以外・行不在)・30分抑制中
  * (docs/06 §4)・ベクトル不在(埋め込み未完了=バックフィル対象外パス)のときは
  * 何も書かずnullを返す。それ以外は検索→Layer 1→Layer 3→候補保存→
- * last_evaluated_at更新→計測までを行い計測結果を返す
+ * Layer 4→Layer 5→提案化→last_evaluated_at更新→計測までを行い計測結果を返す
  */
 export const evaluateIntent = async (
 	env: Env,
 	intentId: string,
 	clock: Clock,
+	options?: EvaluateOptions,
 ): Promise<Stage2Result | null> => {
 	const db = drizzle(env.DB);
 	const now = clock.now();
@@ -259,6 +294,117 @@ export const evaluateIntent = async (
 			});
 	}
 
+	// upsertは衝突時に既存行のidを保持するため、UNIQUEキーで読み直して実際の行idを得る
+	const rowIdByKey = new Map<string, string>();
+	const otherIds = l3Scored.map((item) => item.candidate.id);
+	if (otherIds.length > 0) {
+		const saved = await db
+			.select({
+				id: matchCandidates.id,
+				intentAId: matchCandidates.intentAId,
+				intentBId: matchCandidates.intentBId,
+				intentAVersion: matchCandidates.intentAVersion,
+				intentBVersion: matchCandidates.intentBVersion,
+			})
+			.from(matchCandidates)
+			.where(
+				or(
+					and(
+						eq(matchCandidates.intentAId, intent.id),
+						eq(matchCandidates.intentAVersion, intent.version),
+						inArray(matchCandidates.intentBId, otherIds),
+					),
+					and(
+						eq(matchCandidates.intentBId, intent.id),
+						eq(matchCandidates.intentBVersion, intent.version),
+						inArray(matchCandidates.intentAId, otherIds),
+					),
+				) as SQL,
+			);
+		for (const r of saved) {
+			rowIdByKey.set(candidateKey(r), r.id);
+		}
+	}
+	// Layer 4 Jev(F4a設計 §2.3): Layer 3降順のまま、起点=evaluateIntentの対象・
+	// 相手=候補Intentで渡す(予算計上が起点基準のため行の向きに依らない)
+	const l4Candidates: L4Candidate[] = [];
+	for (const [index, item] of l3Scored.entries()) {
+		const row = rows[index];
+		const rowId =
+			row === undefined ? undefined : rowIdByKey.get(candidateKey(row));
+		if (rowId === undefined) {
+			// 到達しない(直前のupsertで必ず存在する)・防御
+			continue;
+		}
+		l4Candidates.push({
+			rowId,
+			origin: intent,
+			other: item.candidate,
+			cheapScore: item.score,
+		});
+	}
+	const l4 = await runLayer4(env, clock, l4Candidates, options?.jev);
+
+	// Layer 5 Scoring(docs/06 §6・F4a設計 §3.1): Jev結果のある全行のLを保存する
+	// (閾値未満も保存・Hは候補化時点でLayer 1通過のため1)
+	const l5Items: L5Item[] = [];
+	const otherByRow = new Map<string, IntentRow>();
+	for (const c of l4Candidates) {
+		const axes = l4.axesByRow.get(c.rowId);
+		if (axes === undefined) {
+			continue;
+		}
+		const score = latchScore(axes, 1);
+		await db
+			.update(matchCandidates)
+			.set({ latchScore: score, updatedAt: now })
+			.where(eq(matchCandidates.id, c.rowId));
+		l5Items.push({
+			rowId: c.rowId,
+			pair: pairKey(intent.userId, c.other.userId),
+			score,
+		});
+		otherByRow.set(c.rowId, c.other);
+	}
+	const l5OverThreshold = l5Items.filter(
+		(item) => item.score > LATCH.THRESHOLD,
+	).length;
+	const picks = pickProposals(l5Items);
+
+	// 提案の直前にHをD1の現行値で再検証し、合格した相手だけを
+	// L降順に提案化する(docs/06 §6・F4a設計 §3.1〜§3.2)
+	let proposed = 0;
+	let held = 0;
+	if (picks.length > 0) {
+		const passedIds = await recheckHard(
+			db,
+			intent.id,
+			picks.flatMap((pick) => {
+				const other = otherByRow.get(pick.rowId);
+				return other === undefined ? [] : [other.id];
+			}),
+			now,
+		);
+		for (const pick of picks) {
+			const other = otherByRow.get(pick.rowId);
+			if (other === undefined || !passedIds.has(other.id)) {
+				continue;
+			}
+			// a/bはmatch_candidatesの正規化順(a.id < b.id)
+			const [a, b] = intent.id < other.id ? [intent, other] : [other, intent];
+			const outcome = await proposePair(
+				db,
+				{ rowId: pick.rowId, a, b, score: pick.score },
+				now,
+			);
+			if (outcome === "proposed") {
+				proposed += 1;
+			} else if (outcome === "held") {
+				held += 1;
+			}
+		}
+	}
+
 	// 30分再評価抑制の起点を更新する(docs/05 §2.6)
 	await db
 		.update(intents)
@@ -271,6 +417,13 @@ export const evaluateIntent = async (
 		l1Pass: l1Top.length,
 		exclusions,
 		l3Pass: rows.length,
+		jevCalls: l4.run.calls,
+		jevReused: l4.reused,
+		jevHeld: l4.run.held,
+		jevLatencyMs: l4.run.latencyMs,
+		l5OverThreshold,
+		proposed,
+		held,
 	};
 	// 計測(Analytics Engine+ログ・docs/06 §7)。Cron呼び出しはこの計測のみを受け、
 	// イベントpayloadへの反映は呼び出し側(consumer.ts)が行う

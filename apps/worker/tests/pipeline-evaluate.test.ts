@@ -26,7 +26,7 @@ import {
 	type MatchQueueMessage,
 	PIPELINE,
 } from "@latch/shared";
-import { eq, or, type SQL } from "drizzle-orm";
+import { eq, inArray, or, type SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { importJWK, SignJWT } from "jose";
 import { ulid } from "ulid";
@@ -36,6 +36,8 @@ import { fixedClock, systemClock } from "../src/clock/clock";
 import {
 	blocks,
 	intents,
+	latches,
+	latchMembers,
 	matchCandidates,
 	matchEvents,
 	proposalHistory,
@@ -44,6 +46,13 @@ import {
 // ルート・handleQueueBatch・evaluateIntentが受け取るEnv(src/env.ts・生成型Envの宣言部分型)
 import type { Env as WorkerEnv } from "../src/env";
 import { stubEmbedding } from "../src/llm/stub/embedding";
+import {
+	JEV_LOW_MARKER,
+	STUB_JEV_HIGH,
+	STUB_JEV_LOW,
+	stubJev,
+} from "../src/llm/stub/jev";
+import type { JevFn } from "../src/llm/types";
 import { handleQueueBatch } from "../src/pipeline/consumer";
 import { evaluateIntent } from "../src/pipeline/evaluate";
 import { pairKey } from "../src/pipeline/layer1";
@@ -183,6 +192,23 @@ const sendResponse = (): QueueSendResponse => ({
 /** MATCH_QUEUE.sendを捕捉するモック。実キューへの投入は行わない */
 const spySend = () =>
 	vi.spyOn(testEnv.MATCH_QUEUE, "send").mockResolvedValue(sendResponse());
+
+/** Jevの保留が無いときの理由別内訳(F4a設計 §2.6) */
+const NO_JEV_HELD = { budget: 0, breaker: 0, failed: 0, cap: 0 } as const;
+
+/**
+ * 1ペアがstub Jev(0.9)で閾値を超え提示まで進んだときのJev・Layer 5・提案化の計測値
+ * (fixedClockのためJevの処理時間は0)
+ */
+const ONE_PROPOSED = {
+	jevCalls: 1,
+	jevReused: 0,
+	jevHeld: NO_JEV_HELD,
+	jevLatencyMs: 0,
+	l5OverThreshold: 1,
+	proposed: 1,
+	held: 0,
+} as const;
 
 /** vi.waitUntilのタイムアウト(waitUntil内のINSERT完了待ち・CIの遅延を吸収) */
 const WAIT = { timeout: 5_000, interval: 20 } as const;
@@ -414,7 +440,8 @@ describe("統合パターン(SELF.fetch→イベント→第1段→第2段)", ()
 		expect(row.form).toBe("connection");
 		expect(row.retrievalScore).toEqual(expect.any(Number));
 		expect(row.cheapJudgeScore).toEqual(expect.any(Number));
-		expect(row.status).toBe("candidate");
+		// stub Jev(0.9)で閾値を超え提案化まで進む(F4a設計 §3.1)
+		expect(row.status).toBe("proposed");
 
 		// 両者のlast_evaluated_atが設定される(docs/05 §2.6の抑制起点)
 		expect((await intentRowOf(a.id))?.lastEvaluatedAt).not.toBeNull();
@@ -432,6 +459,14 @@ describe("統合パターン(SELF.fetch→イベント→第1段→第2段)", ()
 			l1_pass: 1,
 			l1_exclusions: {},
 			l3_pass: 1,
+			jev_calls: 1,
+			jev_reused: 0,
+			jev_held: NO_JEV_HELD,
+			// 統合パターンはsystemClock(実時間)のため処理時間は値を固定しない
+			jev_latency: expect.any(Number),
+			l5_over_threshold: 1,
+			proposed: 1,
+			held_proposals: 0,
 		});
 	});
 
@@ -525,6 +560,7 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			l1Pass: 1,
 			exclusions: {},
 			l3Pass: 1,
+			...ONE_PROPOSED,
 		});
 		expect(await candidatesInvolving(a.id)).toHaveLength(1);
 	});
@@ -564,11 +600,19 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 		const result = await evaluateIntent(testEnv, origin.id, directClock);
 
 		// retrievalCount=3は自idを含む取得件数(自id除外後の2件が両方通過)
+		// 別ユーザーの2ペアがそれぞれ閾値を超え、通知上限内のため両方提示される
 		expect(result).toEqual({
 			retrievalCount: 3,
 			l1Pass: 2,
 			exclusions: {},
 			l3Pass: 2,
+			jevCalls: 2,
+			jevReused: 0,
+			jevHeld: NO_JEV_HELD,
+			jevLatencyMs: 0,
+			l5OverThreshold: 2,
+			proposed: 2,
+			held: 0,
 		});
 		expect(await candidatesInvolving(origin.id)).toHaveLength(2);
 	});
@@ -616,6 +660,13 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			l1_pass: 0,
 			l1_exclusions: { form_mismatch: 1 },
 			l3_pass: 0,
+			jev_calls: 0,
+			jev_reused: 0,
+			jev_held: NO_JEV_HELD,
+			jev_latency: 0,
+			l5_over_threshold: 0,
+			proposed: 0,
+			held_proposals: 0,
 		});
 	});
 
@@ -761,6 +812,15 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 				geo_no_overlap: 1,
 			},
 			l3_pass: 1,
+			// 閾値は超えるが、機会の開始時刻=現在で対象時刻まで75分未満のため
+			// 提案しない(docs/01 §8)
+			jev_calls: 1,
+			jev_reused: 0,
+			jev_held: NO_JEV_HELD,
+			jev_latency: 0,
+			l5_over_threshold: 1,
+			proposed: 0,
+			held_proposals: 0,
 		});
 	});
 
@@ -833,7 +893,8 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 		expect(rows).toHaveLength(20);
 		for (const row of rows) {
 			expect(row.intentAId < row.intentBId).toBe(true);
-			expect(row.status).toBe("candidate");
+			// Jevの対象(K_j=8)のうち通知上限内の分は提案化まで進む(F4a設計 §3.3)
+			expect(["candidate", "proposed"]).toContain(row.status);
 			expect(row.intentAVersion).toBe(1);
 			expect(row.intentBVersion).toBe(1);
 		}
@@ -962,16 +1023,18 @@ describe("計測(Analytics Engine・docs/06 §7)", () => {
 			l1Pass: 1,
 			exclusions: {},
 			l3Pass: 1,
+			...ONE_PROPOSED,
 		});
 		expect(fakeAx.writeDataPoint).toHaveBeenCalledTimes(1);
 		const point = fakeAx.writeDataPoint.mock.calls[0][0] as {
 			blobs: string[];
 			doubles: number[];
 		};
-		// blob=処理段の識別・doubles=層通過件数(Vectorize取得→L1→L3)と処理時間
-		// (fixedClockのためlatencyMs=0・retrievalCount=2は自id含む取得件数)
+		// blob=処理段の識別・doubles=層通過件数(Vectorize取得→L1→L3)・処理時間・
+		// Jev(呼び出し・再利用・保留4理由・処理時間)・L5閾値超過・提示・保留
+		// (fixedClockのため処理時間は0・retrievalCount=2は自id含む取得件数)
 		expect(point.blobs[0]).toBe("stage2");
-		expect(point.doubles).toEqual([2, 1, 1, 0]);
+		expect(point.doubles).toEqual([2, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0]);
 
 		// PIPELINE_AXが未バインドの環境(単体試験等)でも評価自体は完走する
 		const envWithoutAx = {
@@ -981,5 +1044,154 @@ describe("計測(Analytics Engine・docs/06 §7)", () => {
 		const second = await evaluateIntent(envWithoutAx, b.id, directClock);
 		expect(second).not.toBeNull();
 		expect(fakeAx.writeDataPoint).toHaveBeenCalledTimes(1);
+	});
+});
+
+/** 指定ユーザーが参加するLATCH行の一覧(latch_members経由) */
+const latchesOfUser = async (
+	userId: string,
+): Promise<(typeof latches.$inferSelect)[]> => {
+	const members = await db
+		.select()
+		.from(latchMembers)
+		.where(eq(latchMembers.userId, userId));
+	if (members.length === 0) {
+		return [];
+	}
+	return db
+		.select()
+		.from(latches)
+		.where(
+			inArray(
+				latches.id,
+				members.map((m) => m.latchId),
+			),
+		);
+};
+
+/** 起点と相手のつながりIntent(別ユーザー)を行INSERT+ベクトルupsertで配置する */
+const seedConnectionPair = async (otherTopic = "評価試験の学習仲間") => {
+	const userA = ulid();
+	const userB = ulid();
+	await insertUserRow(userA);
+	await insertUserRow(userB);
+	const origin = intentFixture({ id: ulid(), userId: userA });
+	const other = intentFixture({ id: ulid(), userId: userB, topic: otherTopic });
+	for (const row of [origin, other]) {
+		await insertIntentRow(row);
+		await upsertVector(row);
+	}
+	return { userA, userB, origin, other };
+};
+
+describe("Layer 4・Layer 5・提案化の連結(F4a設計 §2.6・§3.1)", () => {
+	it("一致するつながりIntent 2件でLATCHが1件proposedになりpayloadにJevと提案の計測が載る", async () => {
+		const { userA, userB, origin } = await seedConnectionPair();
+
+		const eventId = await seedCompletedEvent(origin.id);
+		expectAcked(await runBatch("match-events", [eventId], directClock));
+
+		const [event] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		expect(event?.status).toBe("processed");
+		const payload = event?.payload as Record<string, unknown>;
+		expect(payload.jev_calls).toBeGreaterThanOrEqual(1);
+		expect(payload).toMatchObject({
+			jev_reused: 0,
+			jev_held: { budget: 0, breaker: 0, failed: 0, cap: 0 },
+			jev_latency: 0,
+			l5_over_threshold: 1,
+			proposed: 1,
+			held_proposals: 0,
+		});
+
+		// 双方が参加するLATCHが1件・status=proposed
+		const latchesA = await latchesOfUser(userA);
+		expect(latchesA).toHaveLength(1);
+		expect(latchesA[0]?.status).toBe("proposed");
+		expect((await latchesOfUser(userB)).map((l) => l.id)).toEqual(
+			latchesA.map((l) => l.id),
+		);
+		// 候補行にstub Jev(0.9)由来のlatch_scoreが保存され、提案済みになる
+		const [row] = await candidatesInvolving(origin.id);
+		expect(row?.latchScore).toBeCloseTo(STUB_JEV_HIGH);
+		expect(row?.status).toBe("proposed");
+	});
+
+	it("#14: 候補25件でもJev呼び出しは1イベント8回以下", async () => {
+		const originUserId = ulid();
+		await insertUserRow(originUserId);
+		const origin = intentFixture({ id: ulid(), userId: originUserId });
+		await insertIntentRow(origin);
+		await upsertVector(origin);
+		for (let i = 0; i < 25; i += 1) {
+			const uid = ulid();
+			await insertUserRow(uid);
+			const row = intentFixture({
+				id: ulid(),
+				userId: uid,
+				topic: `学習仲間${String(i).padStart(2, "0")}`,
+			});
+			await insertIntentRow(row);
+			await upsertVector(row);
+		}
+
+		const eventId = await seedCompletedEvent(origin.id);
+		expectAcked(await runBatch("match-events", [eventId], directClock));
+
+		const [event] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		const payload = event?.payload as Record<string, number>;
+		// Layer 3通過は上位K_c=20・Jevはそのうち1イベントK_j=8回まで(docs/06 §5)
+		expect(payload.l3_pass).toBe(PIPELINE.LAYER3_OUTPUT_MAX);
+		expect(payload.jev_calls).toBeGreaterThanOrEqual(1);
+		expect(payload.jev_calls).toBeLessThanOrEqual(8);
+	});
+
+	it("相手のtopicが低値マーカーならlatch_score=0.3を保存し提案しない", async () => {
+		const { userA, origin } = await seedConnectionPair(
+			`${JEV_LOW_MARKER} 学習仲間`,
+		);
+
+		const result = await evaluateIntent(testEnv, origin.id, directClock);
+
+		expect(result?.jevCalls).toBe(1);
+		expect(result?.l5OverThreshold).toBe(0);
+		expect(result?.proposed).toBe(0);
+		expect(result?.held).toBe(0);
+		const [row] = await candidatesInvolving(origin.id);
+		expect(row?.latchScore).toBeCloseTo(STUB_JEV_LOW);
+		expect(row?.status).toBe("candidate");
+		expect(await latchesOfUser(userA)).toHaveLength(0);
+	});
+
+	it("Layer 4完了後〜Layer 5前に相手がpausedになると提案しない(Hの再検証)", async () => {
+		const { userA, origin, other } = await seedConnectionPair();
+		// 呼ばれた時に相手Intentをpausedにしてからstub Jev(0.9)の結果を返すfake
+		const pausingJev: JevFn = async (input) => {
+			await db
+				.update(intents)
+				.set({ status: "paused" })
+				.where(eq(intents.id, other.id));
+			return stubJev(input);
+		};
+
+		const result = await evaluateIntent(testEnv, origin.id, directClock, {
+			jev: { primary: pausingJev, fallback: pausingJev },
+		});
+
+		// 閾値は超えるが、提案直前のHの再検証で除外され提案されない
+		expect(result?.jevCalls).toBe(1);
+		expect(result?.l5OverThreshold).toBe(1);
+		expect(result?.proposed).toBe(0);
+		expect(result?.held).toBe(0);
+		expect(await latchesOfUser(userA)).toHaveLength(0);
+		const [row] = await candidatesInvolving(origin.id);
+		expect(row?.latchScore).toBeCloseTo(STUB_JEV_HIGH);
+		expect(row?.status).toBe("candidate");
 	});
 });
