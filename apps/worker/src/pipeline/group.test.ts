@@ -58,11 +58,12 @@ describe("selectPool", () => {
 	});
 });
 
-describe("cosineSimilarity", () => {
-	it("同方向1・直交0・零ベクトル0", () => {
+describe("cosineSimilarity(再エクスポート)", () => {
+	it("同方向1・直交0・零ベクトル0・長さ不一致0", () => {
 		expect(cosineSimilarity([1, 2], [2, 4])).toBeCloseTo(1);
 		expect(cosineSimilarity([1, 0], [0, 1])).toBe(0);
 		expect(cosineSimilarity([0, 0], [1, 1])).toBe(0);
+		expect(cosineSimilarity([1], [1, 1])).toBe(0);
 	});
 });
 
@@ -101,6 +102,43 @@ describe("enumerateSets", () => {
 			(a, b) => (intentPairKey(a.id, b.id) === "B:C" ? 0.4 : 0.9),
 		);
 		expect(sets[0].cheapAggregate).toBe(0.4);
+	});
+	it("cheapAggregate降順で並ぶ", () => {
+		const cheap: Record<string, number> = {
+			"B:C": 0.9,
+			"B:O": 0.8,
+			"C:O": 0.7,
+			"B:D": 0.5,
+			"C:D": 0.55,
+			"D:O": 0.6,
+		};
+		const sets = enumerateSets(
+			o,
+			[row("B"), row("C"), row("D")],
+			() => true,
+			(a, b) => cheap[intentPairKey(a.id, b.id)],
+		);
+		expect(sets.map((s) => s.key)).toEqual([
+			"B,C,O",
+			"C,D,O",
+			"B,D,O",
+			"B,C,D,O",
+		]);
+		expect(sets.map((s) => s.cheapAggregate)).toEqual([0.7, 0.55, 0.5, 0.5]);
+	});
+	it("同点なら3人集合が4人集合より先", () => {
+		const sets = enumerateSets(
+			o,
+			[row("B"), row("C"), row("D")],
+			() => true,
+			() => 0.7,
+		);
+		expect(sets.map((s) => s.key)).toEqual([
+			"B,C,O",
+			"B,D,O",
+			"C,D,O",
+			"B,C,D,O",
+		]);
 	});
 	it("人数条件を満たさない集合は作らない", () => {
 		const sets = enumerateSets(

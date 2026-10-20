@@ -5,34 +5,11 @@
  * E2E(wrangler dev)でfetch・Queues消費・Cronが同一isolate内の状態を共有する。
  * staging/prodでは使わない(env.VECTORSのVectorize実装を使う・index.ts)。
  */
+import { cosineSimilarity } from "./similarity";
 import type { StoredVector, VectorStore } from "./types";
 
 /** シングルトンの実体(モジュール内Map) */
 const store = new Map<string, StoredVector>();
-
-/** 内積 */
-const dot = (a: number[], b: number[]): number => {
-	let sum = 0;
-	for (let i = 0; i < a.length; i += 1) {
-		sum += a[i] * b[i];
-	}
-	return sum;
-};
-
-/** ユークリッドノルム */
-const norm = (a: number[]): number => Math.sqrt(dot(a, a));
-
-/**
- * コサイン類似度(内積/ノルム積・docs/05 §2.3の距離=cosine)。
- * どちらかのノルムが0のときは0に倒す(ゼロ除算ガード・NaNを返さない)。
- */
-const cosineSimilarity = (a: number[], b: number[]): number => {
-	const denom = norm(a) * norm(b);
-	if (denom === 0) {
-		return 0;
-	}
-	return dot(a, b) / denom;
-};
 
 /** score降順・同点はid昇順(メモリ実装の結果順を決定的に保つ) */
 const byScoreDescThenIdAsc = (

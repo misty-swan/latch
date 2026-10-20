@@ -8,10 +8,10 @@
  */
 import { LATCH } from "@latch/shared";
 import type { IntentRow } from "./consumer";
+import { pairKey } from "./layer1";
 
-/** 2つのIntent idの順序なしペアキー(小さいid:大きいid) */
-export const intentPairKey = (a: string, b: string): string =>
-	a < b ? `${a}:${b}` : `${b}:${a}`;
+/** 2つのIntent idの順序なしペアキー(小さいid:大きいid・layer1のpairKeyと同一規則) */
+export const intentPairKey = (a: string, b: string): string => pairKey(a, b);
 
 /**
  * 人数nの集合が全メンバーの人数条件(participantsMin ≤ n ≤ participantsMax)を
@@ -48,24 +48,7 @@ export const selectPool = (
 		.slice(0, LATCH.GROUP_POOL_MAX);
 };
 
-/** コサイン類似度。長さ不一致・零ベクトルは0 */
-export const cosineSimilarity = (a: number[], b: number[]): number => {
-	if (a.length !== b.length) {
-		return 0;
-	}
-	let dot = 0;
-	let na = 0;
-	let nb = 0;
-	for (let i = 0; i < a.length; i++) {
-		dot += a[i] * b[i];
-		na += a[i] * a[i];
-		nb += b[i] * b[i];
-	}
-	if (na === 0 || nb === 0) {
-		return 0;
-	}
-	return dot / (Math.sqrt(na) * Math.sqrt(nb));
-};
+export { cosineSimilarity } from "../vectorstore/similarity";
 
 /** 列挙された集合の候補 */
 export interface GroupSet {
