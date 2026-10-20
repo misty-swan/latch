@@ -343,7 +343,7 @@
   - expireHeld: status=candidate で expires_at <= now、または機会で`isTooLate`の行を`closeLatch(…, "expired", "expired", ["candidate"])`
   - releaseHeld: status=candidate(userIds指定時はその参加者のもの)を 機会=対象時刻(proposal.time_window.start)昇順 → つながり=score降順・id昇順 で最大500件走査し、`canPresent`ならproposedへ昇格(1バッチ: status・proposed_at・response_deadline=提示時刻で再計算・status_event・proposal通知)。先にexpireHeldを呼ぶ
 
-- [ ] **Step 1: 失敗する試験** — (a) 上限で保留した提案が、当日分の通知を前日付にずらす(UPDATE created_at)とreleaseHeldでproposed・期限は提示時刻基準 (b) つながり保留3件(score 0.7/0.9/0.8)・空き1件 → 0.9が昇格 (c) 保留中にIntent期限経過 → expired・通知0・history=expired (d) closeLatchで提示済み提案を閉じるとclosed通知2件、未提示は0件 (e) 保留(candidate)をcloseLatchでcancelledにした後のreleaseHeldで昇格しない(status=cancelledのまま・通知0)。加えて、参加Intentがmatched(またはactive以外)の保留はreleaseHeldの昇格対象から外しcancelledで閉じる(排他の取りこぼしの安全網・Review Focus 5)
+- [ ] **Step 1: 失敗する試験** — (a) 上限で保留した提案が、当日分の通知を前日付にずらす(UPDATE created_at)とreleaseHeldでproposed・期限は提示時刻基準 (b) つながり保留3件(score 0.7/0.9/0.8)・空き1件 → 0.9が昇格 (c) 保留中にIntent期限経過 → expired・通知0・history=expired (d) closeLatchで提示済み提案を閉じるとclosed通知2件、未提示は0件 (e) 保留(candidate)をcloseLatchでcancelledにした後のreleaseHeldで昇格しない(status=cancelledのまま・通知0)。加えて、参加Intentがmatched・expired・cancelled・不在の保留はreleaseHeldでcancelledに閉じ、pausedの保留は昇格も取り消しもせず保留のまま残す(排他の取りこぼしの安全網・Review Focus 5・pauseは提案を継続する06 §2)
 - [ ] **Step 2: 失敗を確認** → FAIL
 - [ ] **Step 3: 実装**
 - [ ] **Step 4: 通過を確認** → PASS
@@ -449,7 +449,7 @@
 
 **Interfaces:**
 - Produces:
-  - `POST /v1/dev/latches/:id/backdate` `{response_deadline?: string(ISO), history_updated_at?: string(ISO)}`(`.strict()`・少なくとも1つ必須)→ 200 `{ok: true}`。latches.response_deadlineと、そのLATCHのproposal_history行のupdated_atを書き換える。存在しない→404
+  - `POST /v1/dev/latches/:id/backdate` `{response_deadline?: string(ISO), history_updated_at?: string(ISO), intents_last_evaluated_at?: string(ISO)}`(`.strict()`・少なくとも1つ必須)→ 200 `{ok: true}`。latches.response_deadlineと、そのLATCHのproposal_history行のupdated_atと、参加Intent全員のlast_evaluated_at(30分再評価抑制をE2Eで外すため)を書き換える。存在しない→404
   - `GET /v1/dev/match-candidates` の items に `jev_result`・`latch_score` を追加
   - `GET /v1/dev/latches?intent_id=` → `{items: [{id, form, status, intent_ids, response_deadline, proposed_at, score}], next_cursor}`(json_eachでintent_ids照合)
   - `GET /v1/dev/proposal-history?user_id=` → `{items: [{id, user_low, user_high, latch_id, outcome, created_at, updated_at}], next_cursor}`
@@ -478,7 +478,7 @@
   - `#19 回答期限切れ`: backdate(response_deadline=過去)→`runCron`→status=expired
   - `#23 機会の排他`: 機会Intent X(ユーザーA)と、一致する機会Intent Y(B)・Z(C)→ A-B・A-Cの2提案 → A-Bで双方yes → A-Cがcancelled
   - `#12(a) 成立・no後は再提案されない`: 成立ペア/no ペアの片方が新規Intentを作成→評価完了(payload出現)後もLATCHが増えない
-  - `#12(b) 見送り後の機会Intentは条件変化で再提案される`: 機会でdefer → backdate(history_updated_at=十分過去)→ 片方の機会IntentをPATCH(topic等の意味フィールド)→ 新しいLATCHがproposed
+  - `#12(b) 見送り後の機会Intentは条件変化で再提案される`: 機会でdefer → backdate(history_updated_at=十分過去・intents_last_evaluated_at=31分以上前)→ 片方の機会IntentをPATCH(topic等の意味フィールド)→ 新しいLATCHがproposed
 - [ ] **Step 2: webをビルドしてE2E実行** — Run: `pnpm --filter web build && pnpm --filter worker test:e2e` → 全spec PASS(F3の既存specを含む)
 - [ ] **Step 3: コミット** — `F4a: ゲート#12・#14・#15・#17〜#20・#23のworker E2Eを追加`
 
