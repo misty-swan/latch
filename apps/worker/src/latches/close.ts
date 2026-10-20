@@ -9,7 +9,7 @@
  */
 
 import type { LatchStatus } from "@latch/shared";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import {
 	latches,
@@ -23,13 +23,75 @@ import { newUlid } from "../ids";
 export type CloseTo = "rejected" | "expired" | "cancelled";
 
 /**
+ * クローズ時の履歴の記録規則(F4b設計 §3.2・オーナー裁定1・2)。
+ * - release: 全ペアとも履歴を消費しない。未提示の保留・排他・Intent削除・条件変更といった
+ *   システムの都合で閉じる場合に使う(オーナー裁定 2026-10-20・docs/01 §8)
+ * - actor: 閉じた本人(defer/no)を含むペアだけを outcome で記録し、他のペアは release
+ * - non_yes: 回答期限切れ。有効なyesを持たない参加者を含むペアだけを expired で記録し、
+ *   yesどうしのペアは release
+ * 1対1では唯一のペアが常に対象となるため、F4aの挙動と一致する
+ */
+export type HistoryRule =
+	| { kind: "release" }
+	| { kind: "actor"; userId: string; outcome: "deferred" | "rejected" }
+	| { kind: "non_yes"; outcome: "expired" };
+
+/**
+ * 履歴の更新文(すべて closed 条件付き)。(1) 対象ペアのUPDATE (2) outcome='proposed' のまま
+ * 残った行のうちこのLATCHのために新規に確保した行(created_at が LATCH作成以降)を削除
+ * (3) 残った outcome='proposed' の行(再提案で確保した既存行)を expired に戻す。release は(2)(3)のみ
+ */
+const historyStatementsOf = (
+	db: DrizzleD1Database,
+	latchId: string,
+	history: HistoryRule,
+	closed: SQL,
+	now: Date,
+) => {
+	const ofLatch = eq(proposalHistory.latchId, latchId);
+	const stillProposed = eq(proposalHistory.outcome, "proposed");
+	const release = [
+		db
+			.delete(proposalHistory)
+			.where(
+				and(
+					ofLatch,
+					stillProposed,
+					sql`${proposalHistory.createdAt} >= (SELECT created_at FROM latches WHERE id = ${latchId})`,
+					closed,
+				),
+			),
+		db
+			.update(proposalHistory)
+			.set({ outcome: "expired", updatedAt: now })
+			.where(and(ofLatch, stillProposed, closed)),
+	];
+	if (history.kind === "release") return release;
+	const target =
+		history.kind === "actor"
+			? or(
+					eq(proposalHistory.userLow, history.userId),
+					eq(proposalHistory.userHigh, history.userId),
+				)
+			: sql`(${proposalHistory.userLow} NOT IN (${activeYesUsers(latchId)}) OR ${proposalHistory.userHigh} NOT IN (${activeYesUsers(latchId)}))`;
+	return [
+		db
+			.update(proposalHistory)
+			.set({ outcome: history.outcome, updatedAt: now })
+			.where(and(ofLatch, target, closed)),
+		...release,
+	];
+};
+
+/** このLATCHで有効なyes(取り消していない)を持つ user_id の副問い合わせ */
+const activeYesUsers = (latchId: string): SQL =>
+	sql`SELECT user_id FROM latch_responses WHERE latch_id = ${latchId} AND response = 'yes' AND retracted_at IS NULL`;
+
+/**
  * LATCHを to へ閉じる。現在の状態が fromStatuses に無い・行が無い・並行更新に負けた場合はfalse。
  * - latch_status_events に(更新直前の状態 → to)を記録する
- * - historyOutcome が非nullなら、このLATCHを指す proposal_history 行の outcome を更新する
- *   (同ペアの履歴が別のLATCHへ移っていれば触らない)。"release" は履歴を消費しない閉じ方で、
- *   未提示の保留・排他・Intent削除・条件変更といったシステムの都合で閉じる場合に使う
- *   (オーナー裁定 2026-10-20・docs/01 §8): このLATCHのために新規に確保した行(created_at が
- *   LATCH作成以降)は削除し、再提案で確保した既存行は expired に戻す
+ * - history が非nullなら、このLATCHを指す proposal_history 行をペアごとの規則で更新する
+ *   (同ペアの履歴が別のLATCHへ移っていれば触らない・HistoryRule参照)。nullなら履歴を変えない(leave)
  * - 提示済み(proposed_atあり)なら参加者全員へ type=closed の通知を作る(docs/05 §3.3)。
  *   options.notify=false なら作らない(成立後の離脱 leave。closedは不成立の総称・docs/05 §2.2)
  */
@@ -37,7 +99,7 @@ export const closeLatch = async (
 	db: DrizzleD1Database,
 	latchId: string,
 	to: CloseTo,
-	historyOutcome: "rejected" | "deferred" | "expired" | "release" | null,
+	history: HistoryRule | null,
 	fromStatuses: LatchStatus[],
 	now: Date,
 	options: { notify?: boolean } = {},
@@ -74,31 +136,9 @@ export const closeLatch = async (
 		.set({ status: to, updatedAt: now })
 		.where(and(eq(latches.id, latchId), inArray(latches.status, fromStatuses)));
 	const historyStatements =
-		historyOutcome === null
+		history === null
 			? []
-			: historyOutcome === "release"
-				? [
-						// 新規確保の行は削除(ペアは未提案に戻る)。残った行=再提案で確保した既存行
-						db
-							.delete(proposalHistory)
-							.where(
-								and(
-									eq(proposalHistory.latchId, latchId),
-									sql`${proposalHistory.createdAt} >= (SELECT created_at FROM latches WHERE id = ${latchId})`,
-									closed,
-								),
-							),
-						db
-							.update(proposalHistory)
-							.set({ outcome: "expired", updatedAt: now })
-							.where(and(eq(proposalHistory.latchId, latchId), closed)),
-					]
-				: [
-						db
-							.update(proposalHistory)
-							.set({ outcome: historyOutcome, updatedAt: now })
-							.where(and(eq(proposalHistory.latchId, latchId), closed)),
-					];
+			: historyStatementsOf(db, latchId, history, closed, now);
 	// UNIQUE(latch_id,user_id,type)の重複は何もしない。INSERT … SELECT のupsertはWHEREが必要(SQLiteの構文)
 	const notifyStatements = members.map((m) =>
 		db

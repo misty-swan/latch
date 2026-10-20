@@ -593,7 +593,9 @@ const runResponseDeadlineSweep = async (
 				db,
 				id,
 				"expired",
-				"expired",
+				// 有効なyesを持たない参加者を含むペアだけを記録する(F4b設計 §3.2・オーナー裁定2)。
+				// yesの判定はクローズのバッチ内で読むため、yesの無効化はこの後に行う
+				{ kind: "non_yes", outcome: "expired" },
 				["proposed", "partial_accept"],
 				now,
 			);

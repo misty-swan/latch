@@ -222,7 +222,12 @@ const respondClose = async (
 		db,
 		latchId,
 		"rejected",
-		response === "defer" ? "deferred" : "rejected",
+		// 閉じた本人を含むペアだけを記録する(F4b設計 §3.2・オーナー裁定1)
+		{
+			kind: "actor",
+			userId,
+			outcome: response === "defer" ? "deferred" : "rejected",
+		},
 		[...OPEN_STATUSES],
 		now,
 	);
@@ -452,7 +457,7 @@ const onMatched = async (
 				db,
 				id,
 				"cancelled",
-				"release",
+				{ kind: "release" },
 				["candidate", "proposed", "partial_accept"],
 				now,
 			);

@@ -64,7 +64,16 @@ export const expireHeld = async (
 		.orderBy(asc(latches.expiresAt), asc(latches.id))
 		.limit(PIPELINE.CRON_BATCH_LIMIT);
 	for (const { id } of overdue) {
-		if (await closeLatch(db, id, "expired", "release", ["candidate"], now)) {
+		if (
+			await closeLatch(
+				db,
+				id,
+				"expired",
+				{ kind: "release" },
+				["candidate"],
+				now,
+			)
+		) {
 			closed++;
 		}
 	}
@@ -93,7 +102,14 @@ export const expireHeld = async (
 		if (members.some((m) => m.startsAt === null)) continue;
 		if (!isTooLate(occasionTargetAt(members), now)) continue;
 		if (
-			await closeLatch(db, latch.id, "expired", "release", ["candidate"], now)
+			await closeLatch(
+				db,
+				latch.id,
+				"expired",
+				{ kind: "release" },
+				["candidate"],
+				now,
+			)
 		) {
 			closed++;
 		}
@@ -232,7 +248,14 @@ const releaseOne = async (
 	now: Date,
 ): Promise<boolean> => {
 	if (latch.expiresAt.getTime() <= now.getTime()) {
-		await closeLatch(db, latch.id, "expired", "release", ["candidate"], now);
+		await closeLatch(
+			db,
+			latch.id,
+			"expired",
+			{ kind: "release" },
+			["candidate"],
+			now,
+		);
 		return false;
 	}
 	const intentRows = await intentsOf(db, latch);
@@ -242,7 +265,14 @@ const releaseOne = async (
 		intentRows.every((i) => i.startsAt !== null) &&
 		isTooLate(occasionTargetAt(intentRows), now)
 	) {
-		await closeLatch(db, latch.id, "expired", "release", ["candidate"], now);
+		await closeLatch(
+			db,
+			latch.id,
+			"expired",
+			{ kind: "release" },
+			["candidate"],
+			now,
+		);
 		return false;
 	}
 	if (
@@ -254,7 +284,14 @@ const releaseOne = async (
 				i.status === "cancelled",
 		)
 	) {
-		await closeLatch(db, latch.id, "cancelled", "release", ["candidate"], now);
+		await closeLatch(
+			db,
+			latch.id,
+			"cancelled",
+			{ kind: "release" },
+			["candidate"],
+			now,
+		);
 		return false;
 	}
 	// paused(と想定外の状態)は保留のまま残す

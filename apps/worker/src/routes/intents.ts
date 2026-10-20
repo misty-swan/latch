@@ -300,7 +300,7 @@ const cancelOpenLatchesOf = async (
 			db,
 			l.id,
 			"cancelled",
-			"release",
+			{ kind: "release" },
 			["candidate", "proposed", "partial_accept"],
 			now,
 		);

@@ -378,7 +378,14 @@ describe("releaseHeld", () => {
 	it("(e) closeLatchでcancelledにした保留はreleaseHeldで昇格しない", async () => {
 		const { latchId } = await setupPair("connection");
 		expect(
-			await closeLatch(db, latchId, "cancelled", "expired", ["candidate"], NOW),
+			await closeLatch(
+				db,
+				latchId,
+				"cancelled",
+				{ kind: "non_yes", outcome: "expired" },
+				["candidate"],
+				NOW,
+			),
 		).toBe(true);
 		// userIds指定なし(全体対象)でも対象外
 		await releaseHeld(db, later(MIN));
@@ -593,7 +600,7 @@ describe("expireHeld", () => {
 
 describe("closeLatch", () => {
 	it("読み取りの後に状態がproposed→partial_acceptへ進んでも、fromStatusesに含まれれば閉じ、遷移元は更新直前の値で記録する", async () => {
-		const { latchId } = await setupPair(
+		const { latchId, userIds } = await setupPair(
 			"connection",
 			{},
 			{ status: "proposed" },
@@ -618,7 +625,7 @@ describe("closeLatch", () => {
 				racing,
 				latchId,
 				"rejected",
-				"deferred",
+				{ kind: "actor", userId: userIds[0] ?? "", outcome: "deferred" },
 				["proposed", "partial_accept"],
 				NOW,
 			),
@@ -655,7 +662,7 @@ describe("closeLatch", () => {
 				db,
 				latchId,
 				"rejected",
-				"deferred",
+				{ kind: "actor", userId: userIds[0] ?? "", outcome: "deferred" },
 				["proposed", "partial_accept"],
 				NOW,
 			),
@@ -678,7 +685,14 @@ describe("closeLatch", () => {
 	it("(d) 未提示(candidate)の提案を閉じても通知は0件", async () => {
 		const { latchId } = await setupPair("connection");
 		expect(
-			await closeLatch(db, latchId, "cancelled", "expired", ["candidate"], NOW),
+			await closeLatch(
+				db,
+				latchId,
+				"cancelled",
+				{ kind: "non_yes", outcome: "expired" },
+				["candidate"],
+				NOW,
+			),
 		).toBe(true);
 		expect(await notificationsOf(latchId)).toHaveLength(0);
 		expect((await historyOf(latchId))?.outcome).toBe("expired");
@@ -695,7 +709,7 @@ describe("closeLatch", () => {
 				db,
 				latchId,
 				"expired",
-				"expired",
+				{ kind: "non_yes", outcome: "expired" },
 				["proposed", "partial_accept"],
 				NOW,
 			),
@@ -705,7 +719,14 @@ describe("closeLatch", () => {
 		expect(await eventsOf(latchId)).toHaveLength(0);
 		expect((await historyOf(latchId))?.outcome).toBe("proposed");
 		expect(
-			await closeLatch(db, ulid(), "expired", "expired", ["proposed"], NOW),
+			await closeLatch(
+				db,
+				ulid(),
+				"expired",
+				{ kind: "non_yes", outcome: "expired" },
+				["proposed"],
+				NOW,
+			),
 		).toBe(false);
 	});
 
@@ -724,7 +745,14 @@ describe("closeLatch", () => {
 		const old = await insertLatch(a, b, { status: "proposed" });
 		const current = await insertLatch(a, b, { status: "proposed" });
 		expect(
-			await closeLatch(db, old, "expired", "expired", ["proposed"], NOW),
+			await closeLatch(
+				db,
+				old,
+				"expired",
+				{ kind: "non_yes", outcome: "expired" },
+				["proposed"],
+				NOW,
+			),
 		).toBe(true);
 		const [history] = await db
 			.select()
@@ -769,7 +797,14 @@ describe("履歴の解放(未提示・システムの都合で閉じた提案は
 			{ status: "proposed" },
 		);
 		expect(
-			await closeLatch(db, latchId, "expired", "expired", ["proposed"], NOW),
+			await closeLatch(
+				db,
+				latchId,
+				"expired",
+				{ kind: "non_yes", outcome: "expired" },
+				["proposed"],
+				NOW,
+			),
 		).toBe(true);
 		expect((await historyOf(latchId))?.outcome).toBe("expired");
 	});
