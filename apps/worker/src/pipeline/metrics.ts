@@ -34,13 +34,31 @@ export interface Stage2MetricsData {
 	proposed: number;
 	/** 通知上限で保留した提案の件数 */
 	held: number;
+	/** 人数条件(n=2が区間外)で1対1から除外した件数(F4b設計 §2.1) */
+	l4SkippedParticipants: number;
+	/** グループのPoolの件数 */
+	groupPool: number;
+	/** 有効な集合の数 */
+	groupSets: number;
+	/** グループ用にJevへ渡した件数 */
+	groupJevCalls: number;
+	/** 判定しきれず保留した集合の数(配分の保留+判定欠け) */
+	groupHeldSets: number;
+	/** aggregateが閾値を超えた集合の数 */
+	groupOverThreshold: number;
+	/** 提示した集合の数(0または1) */
+	groupProposed: number;
+	/** 通知上限で保留した集合の数(0または1) */
+	groupHeldProposals: number;
 }
 
 /**
  * 第2段の計測を1件のdata pointとして書く(docs/06 §7の層別通過記録)。
  * blob[0]=処理段の識別("stage2")・blob[1]=Layer 1の除外理由別内訳(JSON)。
  * doubles=層通過件数(Vectorize取得→L1→L3)・処理時間・Jev(呼び出し・再利用・
- * 保留の理由別 budget/breaker/failed/cap・処理時間)・L5閾値超過・提示・保留の順
+ * 保留の理由別 budget/breaker/failed/cap・処理時間)・L5閾値超過・提示・保留の順。
+ * その後にF4bの項目(人数条件の除外・Pool・集合・グループ用Jev・集合の保留・
+ * 集合の閾値超過・集合の提示・集合の保留)を同順で続ける(F4b設計 §5)
  */
 export const writeStage2Metrics = (env: Env, data: Stage2MetricsData): void => {
 	if (env.PIPELINE_AX === undefined) {
@@ -63,6 +81,14 @@ export const writeStage2Metrics = (env: Env, data: Stage2MetricsData): void => {
 			data.l5OverThreshold,
 			data.proposed,
 			data.held,
+			data.l4SkippedParticipants,
+			data.groupPool,
+			data.groupSets,
+			data.groupJevCalls,
+			data.groupHeldSets,
+			data.groupOverThreshold,
+			data.groupProposed,
+			data.groupHeldProposals,
 		],
 		indexes: ["stage2"],
 	});

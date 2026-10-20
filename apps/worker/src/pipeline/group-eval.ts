@@ -3,28 +3,41 @@
  *
  * - prepareGroups: Pool構築 → Pool内の全ペアのHard判定 → 集合の列挙 →
  *   集合に現れるペアのmatch_candidates行のupsert(既存のjev_resultを返す)
+ * - finishGroups: Jev後の集合の点数(aggregate)→ group_candidatesのupsert →
+ *   提案直前の再検証 → 1回の評価で1集合だけ提案化
  *
  * 純関数(Pool選定・列挙・配分・点数)はgroup.tsが担う。
  */
+import { inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import type { matchCandidates } from "../db/schema";
+import { groupCandidates, type matchCandidates } from "../db/schema";
 import type { Env } from "../env";
 import { newUlid } from "../ids";
-import { historyBlockedPairs } from "../latches/propose";
+import { historyBlockedPairs, proposeSet } from "../latches/propose";
 import type { JevAxes } from "../llm/types";
 import { createVectorStore } from "../vectorstore";
 import { upsertCandidateRows } from "./candidates";
 import { cheapJudgeScore, geoDistanceM } from "./cheap";
 import type { IntentRow } from "./consumer";
 import {
+	aggregateOf,
 	cosineSimilarity,
+	dedupKeyOf,
 	enumerateSets,
 	type GroupSet,
 	intentPairKey,
 	type PoolEntry,
+	rankByAggregate,
 	selectPool,
 } from "./group";
 import { fetchMembersL1Data, layer1Judge, pairKey } from "./layer1";
+import { latchScore, recheckSet } from "./layer5";
+
+/** group_candidatesのupsertの分割幅(7列×12行=84バインド・D1の上限100対策) */
+const GROUP_UPSERT_CHUNK_SIZE = 12;
+
+/** group_candidatesの読み直しの分割幅(dedup_keyのin句・docs/06 §3の48件) */
+const GROUP_READ_CHUNK_SIZE = 48;
 
 /** prepareGroupsの結果 */
 export interface GroupPrep {
@@ -179,4 +192,129 @@ export const prepareGroups = async (
 		rows.set(key, { ...row, a, b });
 	}
 	return { sets, rows, poolSize: pool.length };
+};
+
+/** finishGroupsの結果(F4b設計 §5の計測) */
+export interface GroupOutcome {
+	/** aggregateを出してgroup_candidatesへ保存した集合の数 */
+	sets: number;
+	/** aggregate > 閾値の集合の数 */
+	overThreshold: number;
+	/** 予定に入れたがJevの判定が欠けてaggregateを出せなかった集合の数(部分評価しない・06 §3) */
+	heldSets: number;
+	/** 提示した集合の数(0または1) */
+	proposed: number;
+	/** 通知上限で保留した集合の数(0または1) */
+	held: number;
+}
+
+/**
+ * Jev後の集合の仕上げ(F4b設計 §2.5)。予定に入れた集合のうち全ペアのjev_resultが
+ * 揃ったものだけaggregate(全ペアのLATCH Scoreの最小値)を出してgroup_candidatesへ
+ * upsertする(dedup_key衝突はaggregate_scoreのみ更新・statusは保持)。閾値超過を
+ * aggregate降順に見て、全メンバーの再検証(recheckSet)→proposeSet(group)を行い、
+ * proposedまたはheldになった時点で止める(1回の評価で提案する集合は1つだけ)
+ */
+export const finishGroups = async (
+	db: DrizzleD1Database,
+	prep: GroupPrep,
+	plannedSets: GroupSet[],
+	axesByRow: Map<string, JevAxes>,
+	now: Date,
+): Promise<GroupOutcome> => {
+	// ペアごとのLATCH Score(今回の実行分+既存のjev_result・Hは候補化時点で1)
+	const scoreByPair = new Map<string, number>();
+	for (const [key, row] of prep.rows) {
+		const axes = axesByRow.get(row.id) ?? row.jevResult;
+		if (axes !== null) {
+			scoreByPair.set(key, latchScore(axes, 1));
+		}
+	}
+
+	let heldSets = 0;
+	const scored: (GroupSet & { aggregate: number; dedupKey: string })[] = [];
+	for (const set of plannedSets) {
+		const aggregate = aggregateOf(set.members, scoreByPair);
+		if (aggregate === null) {
+			heldSets += 1;
+			continue;
+		}
+		scored.push({ ...set, aggregate, dedupKey: dedupKeyOf(set.members) });
+	}
+
+	// group_candidatesへupsertし、dedup_keyで実際の行id(衝突時は既存行)を読み直す
+	for (let i = 0; i < scored.length; i += GROUP_UPSERT_CHUNK_SIZE) {
+		await db
+			.insert(groupCandidates)
+			.values(
+				scored.slice(i, i + GROUP_UPSERT_CHUNK_SIZE).map((set) => ({
+					id: newUlid(),
+					intentIds: set.members.map((m) => m.id),
+					dedupKey: set.dedupKey,
+					aggregateScore: set.aggregate,
+					prevAggregateScore: null,
+					status: "candidate" as const,
+					createdAt: now,
+				})),
+			)
+			.onConflictDoUpdate({
+				target: groupCandidates.dedupKey,
+				set: { aggregateScore: sql`excluded.aggregate_score` },
+			});
+	}
+	const idByDedupKey = new Map<string, string>();
+	for (let i = 0; i < scored.length; i += GROUP_READ_CHUNK_SIZE) {
+		const saved = await db
+			.select({ id: groupCandidates.id, dedupKey: groupCandidates.dedupKey })
+			.from(groupCandidates)
+			.where(
+				inArray(
+					groupCandidates.dedupKey,
+					scored.slice(i, i + GROUP_READ_CHUNK_SIZE).map((s) => s.dedupKey),
+				),
+			);
+		for (const row of saved) {
+			idByDedupKey.set(row.dedupKey, row.id);
+		}
+	}
+
+	const ranked = rankByAggregate(scored);
+	let proposed = 0;
+	let held = 0;
+	for (const set of ranked) {
+		const groupCandidateId = idByDedupKey.get(set.dedupKey);
+		if (groupCandidateId === undefined) {
+			// 到達しない(直前のupsertで必ず存在する)・防御
+			continue;
+		}
+		// 提案の直前に全メンバーのHを読み直して再検証する(Review Focus 5)
+		const members = await recheckSet(db, set.members, now);
+		if (members === null) {
+			continue;
+		}
+		const outcome = await proposeSet(
+			db,
+			{
+				members,
+				score: set.aggregate,
+				source: { kind: "group", groupCandidateId },
+			},
+			now,
+		);
+		if (outcome === "proposed") {
+			proposed = 1;
+			break;
+		}
+		if (outcome === "held") {
+			held = 1;
+			break;
+		}
+	}
+	return {
+		sets: scored.length,
+		overThreshold: ranked.length,
+		heldSets,
+		proposed,
+		held,
+	};
 };

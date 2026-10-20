@@ -5,14 +5,24 @@
  * - pickProposals: 閾値超過のみを残し、ユーザーペアごとに最大1件へ絞る
  * - recheckHard: 提案化の直前に起点Intentを読み直し、Hard Constraint(Layer 1)を
  *   D1の現行値で再検証する(docs/06 §3の二重化)
+ * - recheckSet: 集合(グループ)の全メンバーを読み直して同じ再検証を全ペアへかける
+ *   (F4b設計 §2.5・Review Focus 5)
  * match_candidates.latch_scoreへの保存は呼び出し側が行う
  */
 import { LATCH } from "@latch/shared";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { intents } from "../db/schema";
 import type { JevAxes } from "../llm/types";
-import { fetchL1Data, layer1Judge, pairKey } from "./layer1";
+import { sizeFits } from "./group";
+import {
+	fetchL1Data,
+	fetchMembersL1Data,
+	layer1Judge,
+	pairKey,
+} from "./layer1";
+
+type IntentRow = typeof intents.$inferSelect;
 
 /** Layer 5の入力1件。pairはpairKey(userA, userB) */
 export interface L5Item {
@@ -82,4 +92,44 @@ export const recheckHard = async (
 		}
 	}
 	return passed;
+};
+
+/**
+ * 集合のHard Constraintの再検証(F4b設計 §2.5)。全メンバーをD1から読み直し、
+ * 全員active・全ペアがLayer 1に合格・人数nが全員の区間内なら最新の行(id昇順)を
+ * 返す。1人でも不在・active以外・不合格ならnull(Jev実行〜提案化の間のpause・
+ * 削除を拾う・Review Focus 5)
+ */
+export const recheckSet = async (
+	db: DrizzleD1Database,
+	members: IntentRow[],
+	now: Date,
+): Promise<IntentRow[] | null> => {
+	const ids = members.map((m) => m.id);
+	const fresh = await db.select().from(intents).where(inArray(intents.id, ids));
+	if (fresh.length !== ids.length || fresh.some((m) => m.status !== "active")) {
+		return null;
+	}
+	const sorted = fresh.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+	if (!sizeFits(sorted, sorted.length)) {
+		return null;
+	}
+	const l1 = await fetchMembersL1Data(db, sorted);
+	for (let i = 0; i < sorted.length; i++) {
+		for (let j = i + 1; j < sorted.length; j++) {
+			const users = pairKey(sorted[i].userId, sorted[j].userId);
+			const judgement = layer1Judge(
+				sorted[i],
+				sorted[j],
+				l1.birthDates,
+				l1.blockedPairs.has(users),
+				l1.historyPairs.has(users),
+				now,
+			);
+			if (!judgement.pass) {
+				return null;
+			}
+		}
+	}
+	return sorted;
 };

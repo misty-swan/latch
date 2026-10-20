@@ -3,6 +3,8 @@
  * Layer 3降順の候補のうち、match_candidates.jev_resultが既にある行は再利用し(Jevを呼ばない)、
  * 無い行だけをJev実行器へ渡して結果を同じ行へ保存する。
  * JevInputは行の正規化順(intent_a=小さいid側)で作り、起点の向きに依存させない。
+ * 1対1とグループ(他人どうしのペアを含む)の対象を1つの列で受け取り、予算は
+ * 明示した起点(evaluateIntentの対象)へ計上する(F4b設計 §2.4)。
  */
 
 import { eq, inArray } from "drizzle-orm";
@@ -20,9 +22,9 @@ type IntentRow = typeof intents.$inferSelect;
 export interface L4Candidate {
 	/** match_candidates.id */
 	rowId: string;
+	/** ペアの一方(1対1は起点・他人どうしは行のa側)。JevInputの向きは行で決める */
 	origin: IntentRow;
 	other: IntentRow;
-	cheapScore: number;
 }
 
 export interface L4Result {
@@ -35,6 +37,8 @@ export interface L4Result {
 export const runLayer4 = async (
 	env: Env,
 	clock: Clock,
+	// 予算の起点(評価対象のIntent)。他人どうしのペアが混ざるため候補からは取らない
+	budgetOrigin: { intentId: string; userId: string },
 	candidates: L4Candidate[],
 	// 試験で入力の向きを記録できるよう差し替え可能にする(既定は設定どおりのJev)
 	jev: { primary: JevFn; fallback: JevFn } = createLlm(
@@ -44,8 +48,7 @@ export const runLayer4 = async (
 ): Promise<L4Result> => {
 	const db = drizzle(env.DB);
 	const axesByRow = new Map<string, JevAxes>();
-	const first = candidates[0];
-	if (!first) {
+	if (candidates.length === 0) {
 		return {
 			axesByRow,
 			reused: 0,
@@ -58,7 +61,8 @@ export const runLayer4 = async (
 		};
 	}
 
-	// 既存のjev_resultと行の正規化順(intent_a側のid)を読む。候補はK_c=20以下のため1回で足りる
+	// 既存のjev_resultと行の正規化順(intent_a側のid)を読む。候補は1対1(K_c=20以下)+
+	// グループ用の新規分(K_j=8以下)のため1回で足りる(D1のバインド上限100未満)
 	const rows = await db
 		.select({
 			id: matchCandidates.id,
@@ -105,7 +109,7 @@ export const runLayer4 = async (
 			kv: env.PIPELINE_KV,
 			clock,
 		},
-		{ intentId: first.origin.id, userId: first.origin.userId },
+		budgetOrigin,
 		targets,
 	);
 

@@ -210,6 +210,30 @@ const ONE_PROPOSED = {
 	held: 0,
 } as const;
 
+/** グループが組めない(Pool 2件未満)ときのF4bの計測値(F4b設計 §5) */
+const NO_GROUP = {
+	l4SkippedParticipants: 0,
+	groupPool: 0,
+	groupSets: 0,
+	groupJevCalls: 0,
+	groupHeldSets: 0,
+	groupOverThreshold: 0,
+	groupProposed: 0,
+	groupHeldProposals: 0,
+} as const;
+
+/** NO_GROUPのpayload表記(consumer.tsのキー名・F4b設計 §5) */
+const NO_GROUP_PAYLOAD = {
+	l4_skipped_participants: 0,
+	group_pool: 0,
+	group_sets: 0,
+	group_jev_calls: 0,
+	group_held_sets: 0,
+	group_over_threshold: 0,
+	group_proposed: 0,
+	group_held_proposals: 0,
+} as const;
+
 /** vi.waitUntilのタイムアウト(waitUntil内のINSERT完了待ち・CIの遅延を吸収) */
 const WAIT = { timeout: 5_000, interval: 20 } as const;
 
@@ -468,6 +492,7 @@ describe("統合パターン(SELF.fetch→イベント→第1段→第2段)", ()
 			l5_over_threshold: 1,
 			proposed: 1,
 			held_proposals: 0,
+			...NO_GROUP_PAYLOAD,
 		});
 	});
 
@@ -556,6 +581,7 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			l3Pass: 1,
 			l4SkippedHistory: 0,
 			...ONE_PROPOSED,
+			...NO_GROUP,
 		});
 		expect(await candidatesInvolving(a.id)).toHaveLength(1);
 	});
@@ -602,13 +628,23 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			exclusions: {},
 			l3Pass: 2,
 			l4SkippedHistory: 0,
-			jevCalls: 2,
+			// 双方{2,3}のため3人集合{起点,2人}も組まれ、他人どうしの1ペア分だけJevを呼ぶ。
+			// 起点ペアは1対1で提案済みのため集合は提案しない(F4b設計 §2.4・§3.6)
+			jevCalls: 3,
 			jevReused: 0,
 			jevHeld: NO_JEV_HELD,
 			jevLatencyMs: 0,
 			l5OverThreshold: 2,
 			proposed: 2,
 			held: 0,
+			l4SkippedParticipants: 0,
+			groupPool: 2,
+			groupSets: 1,
+			groupJevCalls: 1,
+			groupHeldSets: 0,
+			groupOverThreshold: 1,
+			groupProposed: 0,
+			groupHeldProposals: 0,
 		});
 		expect(await candidatesInvolving(origin.id)).toHaveLength(2);
 	});
@@ -664,6 +700,7 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			l5_over_threshold: 0,
 			proposed: 0,
 			held_proposals: 0,
+			...NO_GROUP_PAYLOAD,
 		});
 	});
 
@@ -819,6 +856,7 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			l5_over_threshold: 1,
 			proposed: 0,
 			held_proposals: 0,
+			...NO_GROUP_PAYLOAD,
 		});
 	});
 
@@ -1023,6 +1061,7 @@ describe("計測(Analytics Engine・docs/06 §7)", () => {
 			l3Pass: 1,
 			l4SkippedHistory: 0,
 			...ONE_PROPOSED,
+			...NO_GROUP,
 		});
 		expect(fakeAx.writeDataPoint).toHaveBeenCalledTimes(1);
 		const point = fakeAx.writeDataPoint.mock.calls[0][0] as {
@@ -1033,7 +1072,11 @@ describe("計測(Analytics Engine・docs/06 §7)", () => {
 		// Jev(呼び出し・再利用・保留4理由・処理時間)・L5閾値超過・提示・保留
 		// (fixedClockのため処理時間は0・retrievalCount=2は自id含む取得件数)
 		expect(point.blobs[0]).toBe("stage2");
-		expect(point.doubles).toEqual([2, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0]);
+		// 末尾にF4bの項目(l4_skipped_participants・group_pool・group_sets・group_jev_calls・
+		// group_held_sets・group_over_threshold・group_proposed・group_held_proposals)が続く
+		expect(point.doubles).toEqual([
+			2, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		]);
 
 		// PIPELINE_AXが未バインドの環境(単体試験等)でも評価自体は完走する
 		const envWithoutAx = {
@@ -1104,6 +1147,7 @@ describe("Layer 4・Layer 5・提案化の連結(F4a設計 §2.6・§3.1)", () =
 			l5_over_threshold: 1,
 			proposed: 1,
 			held_proposals: 0,
+			...NO_GROUP_PAYLOAD,
 		});
 
 		// 双方が参加するLATCHが1件・status=proposed
@@ -1246,5 +1290,39 @@ describe("Layer 4・Layer 5・提案化の連結(F4a設計 §2.6・§3.1)", () =
 		const [row] = await candidatesInvolving(origin.id);
 		expect(row?.latchScore).toBeCloseTo(STUB_JEV_HIGH);
 		expect(row?.status).toBe("candidate");
+	});
+
+	it("双方{3,3}の2人だけなら1対1のLATCHを作らずl4_skipped_participantsに数える(F4b設計 §2.1)", async () => {
+		const userA = ulid();
+		const userB = ulid();
+		await insertUserRow(userA);
+		await insertUserRow(userB);
+		const only3 = { participantsMin: 3, participantsMax: 3 };
+		const origin = intentFixture({ id: ulid(), userId: userA, ...only3 });
+		const other = intentFixture({ id: ulid(), userId: userB, ...only3 });
+		for (const row of [origin, other]) {
+			await insertIntentRow(row);
+			await upsertVector(row);
+		}
+
+		const eventId = await seedCompletedEvent(origin.id);
+		expectAcked(await runBatch("match-events", [eventId], directClock));
+
+		const [event] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		expect(event?.payload).toMatchObject({
+			l3_pass: 1,
+			l4_skipped_history: 0,
+			l4_skipped_participants: 1,
+			jev_calls: 0,
+			proposed: 0,
+			group_pool: 0,
+			group_proposed: 0,
+		});
+		expect(await latchesOfUser(userA)).toHaveLength(0);
+		const [row] = await candidatesInvolving(origin.id);
+		expect(row?.jevResult).toBeNull();
 	});
 });

@@ -5,12 +5,17 @@
  */
 
 import { env } from "cloudflare:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
 import { describe, expect, it } from "vitest";
 import { fixedClock } from "../src/clock/clock";
-import { intents, matchCandidates, users } from "../src/db/schema";
+import {
+	intents,
+	matchCandidates,
+	usageCounters,
+	users,
+} from "../src/db/schema";
 import type { Env as WorkerEnv } from "../src/env";
 import { JEV_LOW_MARKER } from "../src/llm/stub/jev";
 import { JEV_AXES, type JevFn, type JevInput } from "../src/llm/types";
@@ -109,9 +114,14 @@ const seedPair = async (
 		rowId,
 		origin: originIsSmaller ? small : large,
 		other: originIsSmaller ? large : small,
-		cheapScore: 0.7,
 	};
 };
+
+/** 起点Intent(origin)を予算の起点として渡す */
+const budgetOf = (c: L4Candidate) => ({
+	intentId: c.origin.id,
+	userId: c.origin.userId,
+});
 
 const jevResultOf = async (rowId: string) =>
 	(
@@ -129,7 +139,7 @@ describe("runLayer4", () => {
 			{ small: "再利用A", large: "再利用B" },
 			existing,
 		);
-		const r = await runLayer4(testEnv, clock, [c]);
+		const r = await runLayer4(testEnv, clock, budgetOf(c), [c]);
 		expect(r.reused).toBe(1);
 		expect(r.run.calls).toBe(0);
 		expect(r.axesByRow.get(c.rowId)).toEqual(existing);
@@ -137,7 +147,7 @@ describe("runLayer4", () => {
 
 	it("新規行はjev_resultに7軸すべての数値が保存される", async () => {
 		const c = await seedPair(true, { small: "新規A", large: "新規B" });
-		const r = await runLayer4(testEnv, clock, [c]);
+		const r = await runLayer4(testEnv, clock, budgetOf(c), [c]);
 		expect(r.reused).toBe(0);
 		expect(r.run.calls).toBe(1);
 		const saved = await jevResultOf(c.rowId);
@@ -157,7 +167,7 @@ describe("runLayer4", () => {
 			large: "起点側",
 		});
 		expect(c.origin.id > c.other.id).toBe(true);
-		const r = await runLayer4(testEnv, clock, [c]);
+		const r = await runLayer4(testEnv, clock, budgetOf(c), [c]);
 		const axes = r.axesByRow.get(c.rowId);
 		expect(axes).toBeDefined();
 		// normalizedAがintent_a側(マーカー付き)ならstubは全軸0.3
@@ -184,10 +194,34 @@ describe("runLayer4", () => {
 				>,
 			};
 		};
-		await runLayer4(testEnv, clock, [c], { primary: fake, fallback: fake });
+		await runLayer4(testEnv, clock, budgetOf(c), [c], {
+			primary: fake,
+			fallback: fake,
+		});
 		expect(seen).toHaveLength(1);
 		// originは大きいid側(intent_b)。A=other(小さいid側)・B=origin
 		expect(seen[0]?.normalizedA).toBe(buildNormalizedText(c.other));
 		expect(seen[0]?.normalizedB).toBe(buildNormalizedText(c.origin));
+	});
+
+	it("予算は明示した起点に計上し、候補の向き(origin)には計上しない(F4b設計 §2.4)", async () => {
+		// 他人どうしのペアが混ざるため、candidates[0].originでなく引数の起点で数える
+		const c = await seedPair(true, { small: "予算A", large: "予算B" });
+		const budgetOrigin = { intentId: ulid(), userId: ulid() };
+		const r = await runLayer4(testEnv, clock, budgetOrigin, [c]);
+		expect(r.run.calls).toBe(1);
+		const countOf = async (scope: "jev_intent" | "jev_user", key: string) =>
+			(
+				await db
+					.select({ count: usageCounters.count })
+					.from(usageCounters)
+					.where(
+						and(eq(usageCounters.scope, scope), eq(usageCounters.key, key)),
+					)
+			)[0]?.count ?? 0;
+		expect(await countOf("jev_intent", budgetOrigin.intentId)).toBe(1);
+		expect(await countOf("jev_user", budgetOrigin.userId)).toBe(1);
+		expect(await countOf("jev_intent", c.origin.id)).toBe(0);
+		expect(await countOf("jev_user", c.origin.userId)).toBe(0);
 	});
 });

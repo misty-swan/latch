@@ -4,7 +4,9 @@
  * 両方から呼ばれる共通の入口。Layer 2 Candidate Retrieval(Vectorize)→
  * Layer 1 Hard Filter(コード+D1)→ Layer 3 Cheap Judge(合成スコア)→
  * match_candidatesの保存 → Layer 4 Jev → Layer 5 Scoring → 提案化 →
- * last_evaluated_atの更新までを行う(F4a設計 §1・§3.1)。
+ * last_evaluated_atの更新までを行う(F4a設計 §1・§3.1)。グループLATCHの集合も
+ * 同じ評価の中で組み立て、1対1とJevの枠(K_j=8)を分け合う(F4b設計 §1・§2.4)。
+ * グループ部分の失敗は1対1の評価と提案を止めない(F4b設計 §5)。
  * イベントの存在を知らない設計とし(docs/06 §7の計測はイベント単位で行う)、
  * 層通過の計測結果を戻り値で返す。Analytics Engineへの送信とログはここで
  * 共通に行い、起点イベントpayloadへの反映は呼び出し側(consumer.ts)が行う
@@ -23,7 +25,19 @@ import { createLogger } from "../logging/logger";
 import { createVectorStore } from "../vectorstore";
 import { upsertCandidateRows } from "./candidates";
 import { cheapJudgeScore, geoDistanceM } from "./cheap";
-import { intentPairKey } from "./group";
+import { errorCodeOf } from "./errors";
+import {
+	type AllocationPlan,
+	intentPairKey,
+	planJevAllocation,
+	sizeFits,
+} from "./group";
+import {
+	finishGroups,
+	type GroupOutcome,
+	type GroupPrep,
+	prepareGroups,
+} from "./group-eval";
 import { fetchL1Data, layer1Judge, pairKey } from "./layer1";
 import { type L4Candidate, runLayer4 } from "./layer4";
 import { type L5Item, latchScore, pickProposals, recheckHard } from "./layer5";
@@ -60,6 +74,22 @@ export interface Stage2Result {
 	proposed: number;
 	/** 提案化したが通知上限で保留した件数(proposeSetが"held") */
 	held: number;
+	/** 人数条件(n=2が双方の区間内でない)により1対1のLayer 4へ渡さなかった件数(F4b設計 §2.1) */
+	l4SkippedParticipants: number;
+	/** グループのPoolの件数(Poolを作らない・グループ部分の失敗は0) */
+	groupPool: number;
+	/** 有効な集合の数(F4b設計 §2.3) */
+	groupSets: number;
+	/** グループ用にJevへ渡した件数(1対1の対象と重なるペアは1対1側で数える) */
+	groupJevCalls: number;
+	/** 判定しきれず保留した集合の数(Jev配分の保留+判定欠け・F4b設計 §2.4・§5) */
+	groupHeldSets: number;
+	/** aggregateが閾値を超えた集合の数 */
+	groupOverThreshold: number;
+	/** 提示した集合の数(0または1・F4b設計 §2.5) */
+	groupProposed: number;
+	/** 通知上限で保留した集合の数(0または1) */
+	groupHeldProposals: number;
 }
 
 /** evaluateIntentの差し替え口(試験用)。jevはLayer 4へそのまま渡す */
@@ -181,8 +211,9 @@ export const evaluateIntent = async (
 	// Layer 3 Cheap Judge(docs/06 §3・課金ゼロ): 合成スコアで上位K_c=20を選ぶ。
 	// topicは確定後の値を渡す。activeではtopic非nullが原則だが、防御としてnullは
 	// 空文字へ倒す(null同士は満点になる既知の挙動・Layer 2のfilter=activeの
-	// 実経路では到達しにくい)
-	const l3Scored = l1Top
+	// 実経路では到達しにくい)。点数はl1Top全件で出し、グループのPool選定にも使う
+	// (F4b設計 §2.2)
+	const l1Scored = l1Top
 		.map((item) => ({
 			id: item.id,
 			score: cheapJudgeScore({
@@ -202,8 +233,8 @@ export const evaluateIntent = async (
 			retrievalScore: item.score,
 			candidate: item.candidate,
 		}))
-		.sort(byScoreDescThenIdAsc)
-		.slice(0, PIPELINE.LAYER3_OUTPUT_MAX);
+		.sort(byScoreDescThenIdAsc);
+	const l3Scored = l1Scored.slice(0, PIPELINE.LAYER3_OUTPUT_MAX);
 
 	// match_candidatesへupsert(docs/05 §2.2): a<b正規化。UNIQUE(a,b,va,vb)の
 	// 衝突はON CONFLICT DO UPDATEで再評価のスコアを上書きする(行は増やさない・statusは保持)
@@ -234,51 +265,128 @@ export const evaluateIntent = async (
 		l3Scored.map((item) => item.candidate),
 		now,
 	);
-	// Layer 4 Jev(F4a設計 §2.3): Layer 3降順のまま、起点=evaluateIntentの対象・
-	// 相手=候補Intentで渡す(予算計上が起点基準のため行の向きに依らない)
-	const l4Candidates: L4Candidate[] = [];
+	// 1対1の対象(F4b設計 §2.1・§2.4の1): 履歴で除外されず、人数2が双方の区間に
+	// 入る候補をLayer 3降順のまま。人数条件の不合格はJevの枠を使わない
+	const oneOnOne = new Map<string, { rowId: string; other: IntentRow }>();
 	let l4SkippedHistory = 0;
+	let l4SkippedParticipants = 0;
 	for (const item of l3Scored) {
 		if (historyBlocked.has(item.candidate.id)) {
 			l4SkippedHistory += 1;
 			continue;
 		}
-		const rowId = savedRows.get(
-			intentPairKey(intent.id, item.candidate.id),
-		)?.id;
+		if (!sizeFits([intent, item.candidate], 2)) {
+			l4SkippedParticipants += 1;
+			continue;
+		}
+		const key = intentPairKey(intent.id, item.candidate.id);
+		const rowId = savedRows.get(key)?.id;
 		if (rowId === undefined) {
 			// 到達しない(直前のupsertで必ず存在する)・防御
 			continue;
 		}
-		l4Candidates.push({
-			rowId,
-			origin: intent,
-			other: item.candidate,
-			cheapScore: item.score,
+		oneOnOne.set(key, { rowId, other: item.candidate });
+	}
+	// jev_resultが既にあるペア(1対1の行+グループの行)
+	const known = new Set<string>();
+	for (const [key, row] of savedRows) {
+		if (row.jevResult !== null) {
+			known.add(key);
+		}
+	}
+
+	// グループの準備とJev配分(F4b設計 §2.2〜§2.4)。失敗しても1対1だけで続ける(§5)
+	let prep: GroupPrep | null = null;
+	try {
+		prep = await prepareGroups(
+			env,
+			db,
+			intent,
+			l1Scored.map((item) => ({
+				intent: item.candidate,
+				cheapScore: item.score,
+				similarity: item.retrievalScore,
+			})),
+			now,
+		);
+		for (const [key, row] of prep?.rows ?? []) {
+			if (row.jevResult !== null) {
+				known.add(key);
+			}
+		}
+	} catch (error) {
+		// 準備の途中で失敗した集合は扱わない(prepはnullのまま・1対1だけで配分する)
+		logger.warn("pipeline.group.failed", {
+			intent_id: intentId,
+			error_code: errorCodeOf(error),
 		});
 	}
-	const l4 = await runLayer4(env, clock, l4Candidates, options?.jev);
+	const plan: AllocationPlan = planJevAllocation({
+		oneOnOne: [...oneOnOne.keys()],
+		sets: prep?.sets ?? [],
+		known,
+	});
+
+	// Layer 4 Jev(F4a設計 §2.3・F4b設計 §2.4の4): 1対1(Layer 3降順)を先・グループの
+	// 新規ペアを後にした1つの列で1回だけ呼ぶ。予算は起点側のみ計上する
+	const l4Candidates: L4Candidate[] = [];
+	for (const key of plan.oneOnOneKeys) {
+		const target = oneOnOne.get(key);
+		if (target !== undefined) {
+			l4Candidates.push({
+				rowId: target.rowId,
+				origin: intent,
+				other: target.other,
+			});
+		}
+	}
+	for (const key of plan.groupKeys) {
+		const row = prep?.rows.get(key);
+		if (row !== undefined) {
+			l4Candidates.push({ rowId: row.id, origin: row.a, other: row.b });
+		}
+	}
+	const l4 = await runLayer4(
+		env,
+		clock,
+		{ intentId: intent.id, userId: intent.userId },
+		l4Candidates,
+		options?.jev,
+	);
+	// 枠に収まらずJevへ渡さなかった1対1は「1イベントの呼び出し枠」の保留として数える
+	const jevHeld = {
+		...l4.run.held,
+		cap: l4.run.held.cap + plan.oneOnOneCapped,
+	};
 
 	// Layer 5 Scoring(docs/06 §6・F4a設計 §3.1): Jev結果のある全行のLを保存する
-	// (閾値未満も保存・Hは候補化時点でLayer 1通過のため1)
-	const l5Items: L5Item[] = [];
-	const otherByRow = new Map<string, IntentRow>();
+	// (閾値未満も保存・他人どうしの行を含む・Hは候補化時点でLayer 1通過のため1)
 	for (const c of l4Candidates) {
 		const axes = l4.axesByRow.get(c.rowId);
 		if (axes === undefined) {
 			continue;
 		}
-		const score = latchScore(axes, 1);
 		await db
 			.update(matchCandidates)
-			.set({ latchScore: score, updatedAt: now })
+			.set({ latchScore: latchScore(axes, 1), updatedAt: now })
 			.where(eq(matchCandidates.id, c.rowId));
+	}
+	// 1対1の提案対象は起点を含む1対1の対象の行だけ
+	const l5Items: L5Item[] = [];
+	const otherByRow = new Map<string, IntentRow>();
+	for (const key of plan.oneOnOneKeys) {
+		const target = oneOnOne.get(key);
+		const axes =
+			target === undefined ? undefined : l4.axesByRow.get(target.rowId);
+		if (target === undefined || axes === undefined) {
+			continue;
+		}
 		l5Items.push({
-			rowId: c.rowId,
-			pair: pairKey(intent.userId, c.other.userId),
-			score,
+			rowId: target.rowId,
+			pair: pairKey(intent.userId, target.other.userId),
+			score: latchScore(axes, 1),
 		});
-		otherByRow.set(c.rowId, c.other);
+		otherByRow.set(target.rowId, target.other);
 	}
 	const l5OverThreshold = l5Items.filter(
 		(item) => item.score > LATCH.THRESHOLD,
@@ -323,6 +431,19 @@ export const evaluateIntent = async (
 		}
 	}
 
+	// 集合の点数・保存・提案(F4b設計 §2.5)。1対1の提案の後に1集合だけ。失敗は隔離する(§5)
+	let group: GroupOutcome | null = null;
+	if (prep !== null) {
+		try {
+			group = await finishGroups(db, prep, plan.plannedSets, l4.axesByRow, now);
+		} catch (error) {
+			logger.warn("pipeline.group.failed", {
+				intent_id: intentId,
+				error_code: errorCodeOf(error),
+			});
+		}
+	}
+
 	// 30分再評価抑制の起点を更新する(docs/05 §2.6)
 	await db
 		.update(intents)
@@ -338,11 +459,19 @@ export const evaluateIntent = async (
 		l4SkippedHistory,
 		jevCalls: l4.run.calls,
 		jevReused: l4.reused,
-		jevHeld: l4.run.held,
+		jevHeld,
 		jevLatencyMs: l4.run.latencyMs,
 		l5OverThreshold,
 		proposed,
 		held,
+		l4SkippedParticipants,
+		groupPool: prep?.poolSize ?? 0,
+		groupSets: prep?.sets.length ?? 0,
+		groupJevCalls: plan.groupKeys.length,
+		groupHeldSets: plan.heldSets + (group?.heldSets ?? 0),
+		groupOverThreshold: group?.overThreshold ?? 0,
+		groupProposed: group?.proposed ?? 0,
+		groupHeldProposals: group?.held ?? 0,
 	};
 	// 計測(Analytics Engine+ログ・docs/06 §7)。Cron呼び出しはこの計測のみを受け、
 	// イベントpayloadへの反映は呼び出し側(consumer.ts)が行う

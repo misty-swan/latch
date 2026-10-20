@@ -421,4 +421,56 @@ describe("ログの分離と計測(docs/06 §7・docs/08 §6)", () => {
 		expect(completed).toHaveLength(1);
 		expect(completed[0]?.count).toBe(1);
 	});
+
+	it("第2段のpayloadは既存の項目の後にF4bの項目を同順で載せる(F4b設計 §5)", async () => {
+		const { intentId, eventId } = await seedEvent();
+		spySend();
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		// 第1段でベクトルを作り、発行されたembedding_completedを第2段で消費する
+		await runBatch("match-events", [eventId]);
+		const [completed] = (await eventsOf(intentId)).filter(
+			(e) => e.eventType === "embedding_completed",
+		);
+		expectAcked(await runBatch("match-events", [completed.id]));
+
+		const [row] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, completed.id));
+		expect(row?.status).toBe("processed");
+		const payload = row?.payload as Record<string, unknown>;
+		expect(Object.keys(payload)).toEqual([
+			"retrieval_count",
+			"l1_pass",
+			"l1_exclusions",
+			"l3_pass",
+			"l4_skipped_history",
+			"jev_calls",
+			"jev_reused",
+			"jev_held",
+			"jev_latency",
+			"l5_over_threshold",
+			"proposed",
+			"held_proposals",
+			"l4_skipped_participants",
+			"group_pool",
+			"group_sets",
+			"group_jev_calls",
+			"group_held_sets",
+			"group_over_threshold",
+			"group_proposed",
+			"group_held_proposals",
+		]);
+		// 相手が居ないためグループの項目はすべて0
+		expect(payload).toMatchObject({
+			l4_skipped_participants: 0,
+			group_pool: 0,
+			group_sets: 0,
+			group_jev_calls: 0,
+			group_held_sets: 0,
+			group_over_threshold: 0,
+			group_proposed: 0,
+			group_held_proposals: 0,
+		});
+	});
 });

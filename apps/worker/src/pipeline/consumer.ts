@@ -236,6 +236,14 @@ const consumeEvent = async (
 						l5_over_threshold: result.l5OverThreshold,
 						proposed: result.proposed,
 						held_proposals: result.held,
+						l4_skipped_participants: result.l4SkippedParticipants,
+						group_pool: result.groupPool,
+						group_sets: result.groupSets,
+						group_jev_calls: result.groupJevCalls,
+						group_held_sets: result.groupHeldSets,
+						group_over_threshold: result.groupOverThreshold,
+						group_proposed: result.groupProposed,
+						group_held_proposals: result.groupHeldProposals,
 					},
 		);
 		return;
