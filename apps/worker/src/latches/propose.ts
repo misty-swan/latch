@@ -217,7 +217,9 @@ const pairsOf = (members: IntentRow[]): [IntentRow, IntentRow][] => {
 /**
  * 履歴によりこの時点で提案できないペア(intentPairKey)。判定はblockedForProposalと同じ規則
  * (ペアごとの対象時刻で、既存行あり かつ 再提案不可、または抑制期間中)。
- * スコア変化・Intent更新の条件はここでは見ない(proposeSetが判定する・F4b設計 §3.1)
+ * スコア変化・Intent更新の条件はここでは見ない(proposeSetが判定する・F4b設計 §3.1)。
+ * 抑制期間はペアごとの対象時刻で判定する緩い事前除外であり、正はproposeSetが集合の対象時刻
+ * (全メンバーのstarts_atの最大値)で行う再判定
  */
 export const historyBlockedPairs = async (
 	db: DrizzleD1Database,

@@ -402,6 +402,36 @@ const insertPrevHistory = async (
 	return { latchId, row };
 };
 
+/**
+ * 最初のbatch呼び出しだけを止めるdbを返す(読み出し後・バッチ前に競合側を割り込ませる)。
+ * reachedはbatchに到達したとき解決し、release()で元のbatchを実行する
+ */
+const gatedDb = () => {
+	let release = () => {};
+	const released = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	let reach = () => {};
+	const reached = new Promise<void>((resolve) => {
+		reach = resolve;
+	});
+	let paused = false;
+	const gated = new Proxy(db, {
+		get(target, prop, receiver) {
+			if (prop === "batch" && !paused) {
+				return async (...args: Parameters<typeof db.batch>) => {
+					paused = true;
+					reach();
+					await released;
+					return target.batch(...args);
+				};
+			}
+			return Reflect.get(target, prop, receiver);
+		},
+	});
+	return { db: gated, reached, release: () => release() };
+};
+
 describe("proposeSet(集合・F4b設計 §3.1)", () => {
 	it("3人: proposed・履歴3行・members 3・通知3・group_candidatesはproposed", async () => {
 		const members = await insertMembers(3, "connection");
@@ -452,35 +482,35 @@ describe("proposeSet(集合・F4b設計 §3.1)", () => {
 		expect(hs.every((h) => h.latchId === ls[0].id)).toBe(true);
 	});
 
-	it("{A,B,C}と{A,B,D}の並行 → LATCH 1件・負けた側の確保は巻き戻す(Review Focus 1)", async () => {
+	it("{A,B,C}と{A,B,D}の競合: 読み出し後に先を越された側は確保を巻き戻す(Review Focus 1)", async () => {
 		const [a, b, c, d] = await insertMembers(4, "connection");
 		const abc = [a, b, c];
 		const abd = [a, b, d];
 		const g1 = await insertGroupCandidate(abc);
 		const g2 = await insertGroupCandidate(abd);
-		const outcomes = await Promise.all([
-			proposeSet(db, groupInput(abc, g1), NOW),
-			proposeSet(db, groupInput(abd, g2), NOW),
-		]);
-		expect([...outcomes].sort()).toEqual(["proposed", "skipped"]);
+		// {A,B,C}は履歴を読んだ後・バッチの前で止め、その間に{A,B,D}を完了させる
+		const gate = gatedDb();
+		const loser = proposeSet(gate.db, groupInput(abc, g1), NOW);
+		await gate.reached;
+		expect(await proposeSet(db, groupInput(abd, g2), NOW)).toBe("proposed");
+		gate.release();
+		// A-Bの確保に失敗し、新規確保したA-C・B-Cは同じバッチで削除される
+		expect(await loser).toBe("skipped");
 		const ls = await latchesWithAny([a, b, c, d]);
 		expect(ls).toHaveLength(1);
-		const winner = outcomes[0] === "proposed" ? abc : abd;
-		const loserOnly = outcomes[0] === "proposed" ? d : c;
+		expect(ls[0].intentIds).toEqual(abd.map((m) => m.id));
 		const all = await historiesAmong([a, b, c, d]);
 		// 勝った側のC(3,2)=3行だけが残り、すべて勝った側のLATCHを指す
 		expect(all).toHaveLength(3);
 		expect(all.every((h) => h.latchId === ls[0].id)).toBe(true);
-		expect((await historiesAmong(winner)).length).toBe(3);
-		for (const m of [a, b]) {
-			expect(await historyOf(m.userId, loserOnly.userId)).toBeUndefined();
-		}
-		const loserGid = outcomes[0] === "proposed" ? g2 : g1;
-		expect((await groupCandidateOf(loserGid)).status).toBe("candidate");
+		expect(await historyOf(a.userId, c.userId)).toBeUndefined();
+		expect(await historyOf(b.userId, c.userId)).toBeUndefined();
+		expect((await groupCandidateOf(g1)).status).toBe("candidate");
+		expect((await groupCandidateOf(g2)).status).toBe("proposed");
 	});
 
-	it("再提案で確保したUPDATEも、負けたときは読み出し値へ戻す", async () => {
-		// A-Bにdeferred(抑制期間経過・メンバー更新あり)。{A,B,C}と{A,C,D}が並行する
+	it("再提案で確保したUPDATEも、先を越されたときは読み出し値へ戻す", async () => {
+		// A-Bにdeferred(抑制期間経過・メンバー更新あり)。{A,B,C}の読み出し後に{A,C,D}が先に確保する
 		const [a, b, c, d] = await insertMembers(4, "occasion", {
 			updatedAt: ago(HOUR),
 		});
@@ -489,27 +519,33 @@ describe("proposeSet(集合・F4b設計 §3.1)", () => {
 		const acd = [a, c, d];
 		const g1 = await insertGroupCandidate(abc);
 		const g2 = await insertGroupCandidate(acd);
-		const outcomes = await Promise.all([
-			proposeSet(db, groupInput(abc, g1), NOW),
-			proposeSet(db, groupInput(acd, g2), NOW),
-		]);
-		expect([...outcomes].sort()).toEqual(["proposed", "skipped"]);
+		const gate = gatedDb();
+		const loser = proposeSet(gate.db, groupInput(abc, g1), NOW);
+		await gate.reached;
+		expect(await proposeSet(db, groupInput(acd, g2), NOW)).toBe("proposed");
+		gate.release();
+		// A-BのUPDATEは成功・A-Cは衝突・B-Cは新規 → 確保2/3で巻き戻す
+		expect(await loser).toBe("skipped");
 		const ls = (await latchesWithAny([a, b, c, d])).filter(
 			(l) => l.id !== prev.latchId,
 		);
 		expect(ls).toHaveLength(1);
-		const ab = await historyOf(a.userId, b.userId);
-		if (outcomes[0] === "proposed") {
-			expect(ab?.outcome).toBe("proposed");
-			expect(ab?.latchId).toBe(ls[0].id);
-			expect(await historyOf(a.userId, d.userId)).toBeUndefined();
-			expect(await historyOf(c.userId, d.userId)).toBeUndefined();
-		} else {
-			expect(ab).toEqual(prev.row);
-			expect(await historyOf(b.userId, c.userId)).toBeUndefined();
-		}
+		const winnerId = ls[0].id;
+		expect(ls[0].intentIds).toEqual(acd.map((m) => m.id));
+		// A-Bは読み出し値(outcome・latch_id・updated_at)へ戻る
+		expect(await historyOf(a.userId, b.userId)).toEqual(prev.row);
+		expect(await historyOf(b.userId, c.userId)).toBeUndefined();
+		// 負けた側のlatch_idを指す行は無く、勝った側の3行はそのまま
 		const all = await historiesAmong([a, b, c, d]);
-		expect(all.filter((h) => h.latchId === ls[0].id)).toHaveLength(3);
+		expect(
+			all.every((h) => h.latchId === winnerId || h.latchId === prev.latchId),
+		).toBe(true);
+		const won = await historiesAmong(acd);
+		expect(won).toHaveLength(3);
+		expect(
+			won.every((h) => h.latchId === winnerId && h.outcome === "proposed"),
+		).toBe(true);
+		expect((await groupCandidateOf(g1)).status).toBe("candidate");
 	});
 
 	it("A-Bに進行中の1対1がある{A,B,C} → skipped・A-Bは不変・A-C/B-Cは作らない(Review Focus 2)", async () => {
