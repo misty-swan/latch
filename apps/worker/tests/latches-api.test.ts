@@ -439,3 +439,91 @@ describe("GET /v1/latches 一覧", () => {
 		expect(p2.next_cursor).toBeNull();
 	});
 });
+
+/** 4人のmatchedのつながりLATCH(participants.min=3)を配置する */
+const seedMatchedGroup = async (accounts: Account[]): Promise<string> => {
+	const intentIds: string[] = [];
+	for (const acc of accounts) intentIds.push(await insertIntent(acc.id));
+	const id = ulid();
+	const now = new Date();
+	await db.insert(latches).values({
+		id,
+		form: "connection",
+		intentIds,
+		proposal: {
+			form: "connection",
+			topic: "グループの主題",
+			time_window: null,
+			region_name: null,
+			participants: { min: 3, max: 4 },
+			budget: null,
+		},
+		score: 0.9,
+		status: "matched",
+		responseDeadline: new Date(now.getTime() + HOUR),
+		expiresAt: new Date(now.getTime() + 24 * HOUR),
+		lastMessageAt: now,
+		completedAt: null,
+		proposedAt: now,
+		createdAt: now,
+		updatedAt: now,
+	});
+	await db
+		.insert(latchMembers)
+		.values(accounts.map((acc) => ({ latchId: id, userId: acc.id })));
+	return id;
+};
+
+describe("グループの成立後の離脱(F4b設計 §3.4・オーナー裁定3)", () => {
+	it("4人(min=3)で1人leave → 残りのmembersは2人・participants_countは3、離脱者はGET 404・一覧に出ない", async () => {
+		const accounts = [
+			await registerUser("甲"),
+			await registerUser("乙"),
+			await registerUser("丙"),
+			await registerUser("丁"),
+		];
+		const [a, b, c, d] = accounts as [Account, Account, Account, Account];
+		const id = await seedMatchedGroup(accounts);
+
+		const res = await call("POST", `/v1/latches/${id}/leave`, a.token);
+		expect(res.status).toBe(200);
+		const left = (await res.json()) as {
+			status: string;
+			participants_count: number;
+		};
+		expect(left.status).toBe("matched");
+		expect(left.participants_count).toBe(3);
+
+		const got = (await (
+			await call("GET", `/v1/latches/${id}`, b.token)
+		).json()) as {
+			status: string;
+			participants_count: number;
+			members: { user_id: string }[];
+		};
+		expect(got.status).toBe("matched");
+		expect(got.participants_count).toBe(3);
+		expect(got.members.map((m) => m.user_id).sort()).toEqual(
+			[c.id, d.id].sort(),
+		);
+
+		expect((await call("GET", `/v1/latches/${id}`, a.token)).status).toBe(404);
+		expect(
+			(await call("POST", `/v1/latches/${id}/leave`, a.token)).status,
+		).toBe(404);
+		const mineA = (await (
+			await call("GET", "/v1/latches?type=matched", a.token)
+		).json()) as { items: { id: string }[] };
+		expect(mineA.items.map((i) => i.id)).not.toContain(id);
+		const mineB = (await (
+			await call("GET", "/v1/latches?type=matched", b.token)
+		).json()) as { items: { id: string; participants_count: number }[] };
+		expect(mineB.items.find((i) => i.id === id)?.participants_count).toBe(3);
+
+		const res2 = await call("POST", `/v1/latches/${id}/leave`, b.token);
+		expect(res2.status).toBe(200);
+		expect(((await res2.json()) as { status: string }).status).toBe(
+			"cancelled",
+		);
+	});
+});

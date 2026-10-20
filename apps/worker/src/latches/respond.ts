@@ -53,7 +53,10 @@ const closedReason = (latch: LatchRow, now: Date): RespondFailure | null => {
 	return null;
 };
 
-/** 参加者から見たLATCHと自分の回答。不在・非参加・保留(candidate)はnull(一律404・docs/05 §3.1) */
+/**
+ * 参加者から見たLATCHと自分の回答。不在・非参加・離脱済み・保留(candidate)はnull
+ * (一律404・docs/05 §3.1・離脱者は非参加と同じ扱い・F4b設計 §3.4)
+ */
 const loadForMember = async (
 	db: DrizzleD1Database,
 	latchId: string,
@@ -68,7 +71,11 @@ const loadForMember = async (
 		.select({ userId: latchMembers.userId })
 		.from(latchMembers)
 		.where(
-			and(eq(latchMembers.latchId, latchId), eq(latchMembers.userId, userId)),
+			and(
+				eq(latchMembers.latchId, latchId),
+				eq(latchMembers.userId, userId),
+				isNull(latchMembers.leftAt),
+			),
 		);
 	if (member === undefined) return null;
 	const mine = await responseOf(db, latchId, userId);
@@ -335,7 +342,13 @@ export const retract = async (
 	return failureAfter(db, latchId, now);
 };
 
-/** 成立後の参加取り消し(matchedのみ→cancelled・proposal_historyはmatchedのまま) */
+/**
+ * 成立後の離脱(matchedのみ・F4b設計 §3.4・オーナー裁定3)。本人以外の残り人数(left_atがnull)が
+ * proposal.participants.min以上なら本人のleft_atだけを記録してmatchedのまま続け、下限を割るなら
+ * LATCH全体をcancelledにする(1対1は常に後者)。判定と記録は1文の条件付きUPDATEで行うため、
+ * 並行した離脱もD1の直列化で順に数えられ、下限未満の人数でmatchedのまま残ることはない。
+ * proposal_historyはmatchedのまま(履歴規則null)
+ */
 export const leave = async (
 	db: DrizzleD1Database,
 	latchId: string,
@@ -345,7 +358,22 @@ export const leave = async (
 	const loaded = await loadForMember(db, latchId, userId);
 	if (loaded === null) return fail("not_found");
 	if (loaded.latch.status !== "matched") return fail("invalid_status");
-	// 成立後の離脱はclosed通知を出さない(closedは不成立の総称・docs/05 §2.2)
+	const others = sql`(SELECT COUNT(*) FROM latch_members WHERE latch_id = ${latchId} AND user_id != ${userId} AND left_at IS NULL)`;
+	const recorded = await db
+		.update(latchMembers)
+		.set({ leftAt: now })
+		.where(
+			and(
+				eq(latchMembers.latchId, latchId),
+				eq(latchMembers.userId, userId),
+				isNull(latchMembers.leftAt),
+				sql`EXISTS (SELECT 1 FROM latches WHERE id = ${latchId} AND status = 'matched'
+					AND ${others} >= json_extract(latches.proposal, '$.participants.min'))`,
+			),
+		)
+		.returning({ userId: latchMembers.userId });
+	if (recorded.length > 0) return { ok: true, latchId };
+	// 下限割れ。成立後の離脱はclosed通知を出さない(closedは不成立の総称・docs/05 §2.2)
 	const closed = await closeLatch(
 		db,
 		latchId,

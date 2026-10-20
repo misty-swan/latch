@@ -3,6 +3,7 @@
  * - GET /v1/latches?type=proposals|matched: 自分が参加する提案(proposed/partial_accept)・
  *   成立(matched)の一覧。id降順・cursor/limitはintents一覧と同方式。保留(candidate)は含めない
  * - GET /v1/latches/{id}: 単一取得。参加しない・存在しない・保留中(candidate)は一律404
+ *   (成立後に個別に離脱した参加者は一覧・単一取得・各操作とも非参加と同じ扱い・F4b設計 §3.4)
  * - POST /{id}/response・/response/retract・/leave・/defer-reason: 成功は操作後のLatchDTO(200)。
  *   RespondFailureの写像: not_found→404・その他→400 VALIDATION_FAILED(details.reasons=[reason])
  * 時刻の規律(docs/04 §4): ルートは合成の起点のためsystemClockを使う
@@ -86,12 +87,15 @@ const decodeCursor = (cursor: string): string | null => {
 
 /**
  * 自分が参加するLATCHをLatchDTOにして返す。参加しない・存在しない・candidateはnull。
- * 成立後(matched・matched経由のcancelled)のみ自分を除くmembersとproposalを含める(§4.5)
+ * 成立後(matched・matched経由のcancelled)のみ自分を除くmembersとproposalを含める(§4.5)。
+ * 離脱済み(left_atあり)の参加者は非参加と同じ扱いで、members・participants_countからも除く
+ * (F4b設計 §3.4)。includeLeftは離脱操作そのものの応答に限り、離脱した本人へ返すために使う
  */
 const loadLatchDto = async (
 	db: DrizzleD1Database,
 	latchId: string,
 	userId: string,
+	options: { includeLeft?: boolean } = {},
 ): Promise<LatchDTO | null> => {
 	const [row] = await db
 		.select({ latch: latches })
@@ -101,6 +105,7 @@ const loadLatchDto = async (
 			and(
 				eq(latchMembers.latchId, latches.id),
 				eq(latchMembers.userId, userId),
+				options.includeLeft === true ? undefined : isNull(latchMembers.leftAt),
 			),
 		)
 		.where(and(eq(latches.id, latchId), ne(latches.status, "candidate")));
@@ -112,7 +117,7 @@ const loadLatchDto = async (
 		.select({ user: users })
 		.from(latchMembers)
 		.innerJoin(users, eq(users.id, latchMembers.userId))
-		.where(eq(latchMembers.latchId, latchId));
+		.where(and(eq(latchMembers.latchId, latchId), isNull(latchMembers.leftAt)));
 	const [mine] = await db
 		.select({ response: latchResponses.response })
 		.from(latchResponses)
@@ -152,6 +157,7 @@ const respondResultToResponse = async (
 	c: Context<AppEnv>,
 	result: RespondResult,
 	userId: string,
+	options: { includeLeft?: boolean } = {},
 ) => {
 	if (!result.ok) {
 		const r =
@@ -162,7 +168,7 @@ const respondResultToResponse = async (
 					});
 		return c.json(r.body, r.status);
 	}
-	const dto = await loadLatchDto(dbOf(c.env), result.latchId, userId);
+	const dto = await loadLatchDto(dbOf(c.env), result.latchId, userId, options);
 	if (dto === null) {
 		const r = notFound();
 		return c.json(r.body, r.status);
@@ -221,7 +227,11 @@ latchRoutes.get("/", requireRegistered, async (c) => {
 		.from(latches)
 		.innerJoin(
 			latchMembers,
-			and(eq(latchMembers.latchId, latches.id), eq(latchMembers.userId, sub)),
+			and(
+				eq(latchMembers.latchId, latches.id),
+				eq(latchMembers.userId, sub),
+				isNull(latchMembers.leftAt),
+			),
 		)
 		.where(and(...conditions))
 		.orderBy(desc(latches.id))
@@ -308,7 +318,8 @@ latchRoutes.post("/:id/leave", requireRegistered, async (c) => {
 		sub,
 		systemClock.now(),
 	);
-	return respondResultToResponse(c, result, sub);
+	// 個別に離脱した本人は以降非参加の扱いだが、この操作の応答だけは操作後の状態を返す(F4b設計 §3.4)
+	return respondResultToResponse(c, result, sub, { includeLeft: true });
 });
 
 latchRoutes.post("/:id/defer-reason", requireRegistered, async (c) => {

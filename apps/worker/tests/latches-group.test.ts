@@ -2,6 +2,7 @@
  * グループLATCH(3〜4人)の統合試験(F4b設計 §3)。行を直接INSERTで配置する。
  * - クローズのペア別履歴記録(F4b設計 §3.2・オーナー裁定1・2)
  * - 提案化(proposeSet)の全ペア確保と巻き戻し(F4b設計 §3.1・§3.6)
+ * - 成立後の離脱(leave)の個別離脱と下限割れの取り消し(F4b設計 §3.4・オーナー裁定3)
  */
 import { env } from "cloudflare:test";
 import type { LatchStatus } from "@latch/shared";
@@ -22,7 +23,7 @@ import {
 } from "../src/db/schema";
 import type { Env as WorkerEnv } from "../src/env";
 import { historyBlockedPairs, proposeSet } from "../src/latches/propose";
-import { respond } from "../src/latches/respond";
+import { leave, respond } from "../src/latches/respond";
 import type { IntentRow } from "../src/pipeline/consumer";
 import { runScheduledPipeline } from "../src/pipeline/cron";
 import { intentPairKey } from "../src/pipeline/group";
@@ -638,5 +639,139 @@ describe("historyBlockedPairs(F4b設計 §3.1)", () => {
 		expect([...blocked].sort()).toEqual(
 			[intentPairKey(a.id, b.id), intentPairKey(a.id, c.id)].sort(),
 		);
+	});
+});
+
+/** n人のmatchedのLATCH(participants.min=3)・members・proposal_history(全ペアmatched)を配置する */
+const setupMatchedGroup = async (n: number) => {
+	const members: string[] = [];
+	const intentIds: string[] = [];
+	for (let i = 0; i < n; i++) {
+		const u = await insertUser();
+		members.push(u);
+		intentIds.push((await insertIntent(u, "connection")).id);
+	}
+	const latchId = ulid();
+	await db.insert(latches).values({
+		id: latchId,
+		form: "connection",
+		intentIds,
+		proposal: {
+			form: "connection",
+			topic: "グループ試験の主題",
+			time_window: null,
+			region_name: null,
+			participants: { min: 3, max: 4 },
+			budget: null,
+		},
+		score: 0.9,
+		status: "matched",
+		responseDeadline: later(HOUR),
+		expiresAt: later(30 * DAY),
+		lastMessageAt: ago(HOUR),
+		completedAt: null,
+		proposedAt: ago(HOUR),
+		createdAt: ago(HOUR),
+		updatedAt: ago(HOUR),
+	});
+	await db
+		.insert(latchMembers)
+		.values(members.map((userId) => ({ latchId, userId, leftAt: null })));
+	for (let i = 0; i < n; i++) {
+		for (let j = i + 1; j < n; j++) {
+			const [low, high] = pairKey(members[i] as string, members[j] as string);
+			await db.insert(proposalHistory).values({
+				id: ulid(),
+				userLow: low,
+				userHigh: high,
+				latchId,
+				outcome: "matched",
+				createdAt: ago(HOUR),
+				updatedAt: ago(HOUR),
+			});
+		}
+	}
+	return { latchId, members };
+};
+
+const leftAtOf = async (latchId: string) => {
+	const rows = await db
+		.select()
+		.from(latchMembers)
+		.where(eq(latchMembers.latchId, latchId));
+	return new Map(rows.map((r) => [r.userId, r.leftAt]));
+};
+
+const closedNotificationCount = async (latchId: string) =>
+	(
+		await db
+			.select()
+			.from(notifications)
+			.where(
+				and(
+					eq(notifications.latchId, latchId),
+					eq(notifications.type, "closed"),
+				),
+			)
+	).length;
+
+describe("成立後の離脱(F4b設計 §3.4・オーナー裁定3)", () => {
+	it("4人(min=3)で1人leave → matchedのまま本人のleft_atだけ記録し、2人目のleaveでcancelled(closed通知なし)", async () => {
+		const { latchId, members } = await setupMatchedGroup(4);
+		const [a, b, c, d] = members as [string, string, string, string];
+		expect(await leave(db, latchId, a, NOW)).toEqual({ ok: true, latchId });
+		expect((await latchOf(latchId))?.status).toBe("matched");
+		const left = await leftAtOf(latchId);
+		expect(left.get(a)?.getTime()).toBe(NOW.getTime());
+		expect([left.get(b), left.get(c), left.get(d)]).toEqual([null, null, null]);
+		// 離脱者は非参加と同じ扱い(再度のleaveは404相当)
+		expect(await leave(db, latchId, a, later(MIN))).toEqual({
+			ok: false,
+			reason: "not_found",
+		});
+
+		expect(await leave(db, latchId, b, later(MIN))).toEqual({
+			ok: true,
+			latchId,
+		});
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		expect(await closedNotificationCount(latchId)).toBe(0);
+		// 離脱者を含む提案履歴はmatchedのまま
+		expect((await historyOf(a, b))?.outcome).toBe("matched");
+		expect((await historyOf(c, d))?.outcome).toBe("matched");
+	});
+
+	it("3人(min=3)で2人が並行してleave → cancelledで、matchedのままleft_atが2件ある状態にならない(Review Focus 4)", async () => {
+		const { latchId, members } = await setupMatchedGroup(3);
+		const [, b, c] = members as [string, string, string];
+		const results = await Promise.all([
+			leave(db, latchId, b, NOW),
+			leave(db, latchId, c, NOW),
+		]);
+		expect(results.some((r) => r.ok)).toBe(true);
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		const leftCount = [...(await leftAtOf(latchId)).values()].filter(
+			(v) => v !== null,
+		).length;
+		expect(leftCount).toBe(0);
+		expect(await closedNotificationCount(latchId)).toBe(0);
+	});
+
+	it("4人(min=3)で2人が並行してleave → 1人だけ記録され、もう1人で下限割れとなりcancelled(Review Focus 4)", async () => {
+		const { latchId, members } = await setupMatchedGroup(4);
+		const [, b, c] = members as [string, string, string];
+		const results = await Promise.all([
+			leave(db, latchId, b, NOW),
+			leave(db, latchId, c, NOW),
+		]);
+		expect(results).toEqual([
+			{ ok: true, latchId },
+			{ ok: true, latchId },
+		]);
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		const leftCount = [...(await leftAtOf(latchId)).values()].filter(
+			(v) => v !== null,
+		).length;
+		expect(leftCount).toBe(1);
 	});
 });
