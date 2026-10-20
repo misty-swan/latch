@@ -1,0 +1,98 @@
+/**
+ * match_candidatesのupsertと行idの読み直し(docs/05 §2.2)。
+ * 1対1(evaluate.ts)とPool内の全ペア(group-eval.ts・F4b設計 §2.4)で共用する。
+ * 行はa<b正規化済みで渡す。UNIQUE(a,b,va,vb)の衝突はON CONFLICT DO UPDATEで
+ * 再評価のスコアを上書きする(行は増やさない・status・jev_resultは保持)
+ */
+import { and, inArray, sql } from "drizzle-orm";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { matchCandidates } from "../db/schema";
+import type { JevAxes } from "../llm/types";
+import { intentPairKey } from "./group";
+
+/** 候補upsertの分割幅(13列×7行=91バインド・D1の上限100対策) */
+const UPSERT_CHUNK_SIZE = 7;
+
+/**
+ * 読み直しの分割幅。1チャンクのa側・b側の相異なるidはそれぞれ行数以下のため、
+ * 2つのin句の合計は最大96バインド(docs/06 §3の48件)
+ */
+const READ_CHUNK_SIZE = 48;
+
+/** match_candidatesのUNIQUEキー(intent_a_id, intent_b_id, intent_a_version, intent_b_version)の文字列化 */
+const candidateKey = (r: {
+	intentAId: string;
+	intentBId: string;
+	intentAVersion: number;
+	intentBVersion: number;
+}): string =>
+	`${r.intentAId}:${r.intentBId}:${r.intentAVersion}:${r.intentBVersion}`;
+
+/**
+ * 行をupsertし、UNIQUEキーで読み直した実際の行id(衝突時は既存行のid)と
+ * jev_resultを返す。戻り値のキーはintentPairKey(intentAId, intentBId)
+ */
+export const upsertCandidateRows = async (
+	db: DrizzleD1Database,
+	rows: (typeof matchCandidates.$inferInsert)[],
+	now: Date,
+): Promise<Map<string, { id: string; jevResult: JevAxes | null }>> => {
+	for (let i = 0; i < rows.length; i += UPSERT_CHUNK_SIZE) {
+		await db
+			.insert(matchCandidates)
+			.values(rows.slice(i, i + UPSERT_CHUNK_SIZE))
+			.onConflictDoUpdate({
+				target: [
+					matchCandidates.intentAId,
+					matchCandidates.intentBId,
+					matchCandidates.intentAVersion,
+					matchCandidates.intentBVersion,
+				],
+				set: {
+					retrievalScore: sql`excluded.retrieval_score`,
+					cheapJudgeScore: sql`excluded.cheap_judge_score`,
+					// statusは上書きしない(新規INSERTの行だけがcandidateになり、
+					// 提案済み・クローズ済みの既存行は状態を保つ)
+					updatedAt: now,
+				},
+			});
+	}
+
+	// upsertは衝突時に既存行のidを保持するため、UNIQUEキーで読み直して実際の行idを得る。
+	// in句は版を含まないため、版違いの行は完全キーの照合で除く
+	const wanted = new Set(rows.map(candidateKey));
+	const out = new Map<string, { id: string; jevResult: JevAxes | null }>();
+	for (let i = 0; i < rows.length; i += READ_CHUNK_SIZE) {
+		const chunk = rows.slice(i, i + READ_CHUNK_SIZE);
+		const saved = await db
+			.select({
+				id: matchCandidates.id,
+				intentAId: matchCandidates.intentAId,
+				intentBId: matchCandidates.intentBId,
+				intentAVersion: matchCandidates.intentAVersion,
+				intentBVersion: matchCandidates.intentBVersion,
+				jevResult: matchCandidates.jevResult,
+			})
+			.from(matchCandidates)
+			.where(
+				and(
+					inArray(matchCandidates.intentAId, [
+						...new Set(chunk.map((r) => r.intentAId)),
+					]),
+					inArray(matchCandidates.intentBId, [
+						...new Set(chunk.map((r) => r.intentBId)),
+					]),
+				),
+			);
+		for (const r of saved) {
+			if (!wanted.has(candidateKey(r))) {
+				continue;
+			}
+			out.set(intentPairKey(r.intentAId, r.intentBId), {
+				id: r.id,
+				jevResult: (r.jevResult as JevAxes | null) ?? null,
+			});
+		}
+	}
+	return out;
+};

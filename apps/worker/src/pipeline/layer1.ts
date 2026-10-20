@@ -106,7 +106,7 @@ const timeOverlapMs = (a: IntentRow, b: IntentRow): number | null => {
 };
 
 /** 中心間のハバーシン距離(メートル)。度→ラジアン変換の標準式・地球半径6371km */
-const haversineM = (
+export const haversineM = (
 	a: { lat: number; lng: number },
 	b: { lat: number; lng: number },
 ): number => {
@@ -347,4 +347,63 @@ export const fetchL1Data = async (
 	}
 
 	return { intents: intentsRecord, birthDates, blockedPairs, historyPairs };
+};
+
+/**
+ * Poolのメンバー(起点+Pool・最大16人)全員のユーザー間について、Layer 1の判定データを
+ * 取得する(F4b設計 §2.2)。起点↔候補だけでなく他人どうしのblocks・proposal_history
+ * (matched/rejected)も含む。ユーザーは最大16人のため、各表とも両側in句の1文で足りる
+ * (users=16・blocks=16+16=32・proposal_history=2+16+16=34バインド・D1の上限100内)。
+ * 戻り値の集合はpairKey(userA, userB)で正規化する
+ */
+export const fetchMembersL1Data = async (
+	db: DrizzleD1Database,
+	members: IntentRow[],
+): Promise<Omit<L1Data, "intents">> => {
+	const userIds = [...new Set(members.map((m) => m.userId))];
+	const birthDates: Record<string, string> = {};
+	const blockedPairs = new Set<string>();
+	const historyPairs = new Set<string>();
+	if (userIds.length === 0) {
+		return { birthDates, blockedPairs, historyPairs };
+	}
+
+	const userRows = await db
+		.select({ id: users.id, birthDate: users.birthDate })
+		.from(users)
+		.where(inArray(users.id, userIds));
+	for (const row of userRows) {
+		birthDates[row.id] = row.birthDate;
+	}
+
+	// blocks(両端がメンバーの行。向きは問わず1キーにまとめる)
+	const blockRows = await db
+		.select()
+		.from(blocks)
+		.where(
+			and(
+				inArray(blocks.blockerUserId, userIds),
+				inArray(blocks.blockedUserId, userIds),
+			),
+		);
+	for (const row of blockRows) {
+		blockedPairs.add(pairKey(row.blockerUserId, row.blockedUserId));
+	}
+
+	// proposal_history(恒久排除はmatched/rejected行の存在のみ・docs/01 §8)
+	const historyRows = await db
+		.select()
+		.from(proposalHistory)
+		.where(
+			and(
+				inArray(proposalHistory.outcome, ["matched", "rejected"]),
+				inArray(proposalHistory.userLow, userIds),
+				inArray(proposalHistory.userHigh, userIds),
+			),
+		);
+	for (const row of historyRows) {
+		historyPairs.add(pairKey(row.userLow, row.userHigh));
+	}
+
+	return { birthDates, blockedPairs, historyPairs };
 };

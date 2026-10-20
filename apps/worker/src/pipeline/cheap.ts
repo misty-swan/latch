@@ -10,6 +10,11 @@
  * Embeddingに限る)
  */
 import { PARTICIPANTS_MAX, PARTICIPANTS_MIN } from "@latch/shared";
+import type { intents } from "../db/schema";
+import { haversineM } from "./layer1";
+
+/** intents行の型(db/schemaの$inferSelect) */
+type IntentRow = typeof intents.$inferSelect;
 
 /** 類似度側の合成重み(docs/06 §3・D-C-02暫定値) */
 const SIMILARITY_WEIGHT = 0.7;
@@ -118,4 +123,24 @@ export const cheapJudgeScore = (input: CheapJudgeInput): number => {
 	return (
 		SIMILARITY_WEIGHT * clamp01(input.similarity) + RULE_WEIGHT * ruleScore
 	);
+};
+
+/** geo3点(lat/lng/radius)が揃っている場合のみ中心を返す(片方のみ・未添付はnull) */
+const geoCenterOf = (intent: IntentRow): { lat: number; lng: number } | null =>
+	intent.geoCenterLat !== null &&
+	intent.geoCenterLng !== null &&
+	intent.geoRadiusM !== null
+		? { lat: intent.geoCenterLat, lng: intent.geoCenterLng }
+		: null;
+
+/**
+ * 両Intentの中心間距離(m)。片方・双方の地理未添付はnull
+ * (geoProximityはnullを中立値として扱う・docs/06 §3)。距離の式はLayer 1と
+ * 同じhaversineM(半径の和との比較判定はLayer 1が担うためここでは行わない)。
+ * 1対1(evaluate.ts)とPool内の他人どうし(group-eval.ts・F4b設計 §2.2)で共用する
+ */
+export const geoDistanceM = (a: IntentRow, b: IntentRow): number | null => {
+	const geoA = geoCenterOf(a);
+	const geoB = geoCenterOf(b);
+	return geoA === null || geoB === null ? null : haversineM(geoA, geoB);
 };

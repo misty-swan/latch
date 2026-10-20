@@ -10,7 +10,7 @@
  * 共通に行い、起点イベントpayloadへの反映は呼び出し側(consumer.ts)が行う
  */
 import { LATCH, PIPELINE } from "@latch/shared";
-import { and, eq, inArray, or, type SQL, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Clock } from "../clock/clock";
 import { intents, matchCandidates } from "../db/schema";
@@ -21,7 +21,9 @@ import { blockedForProposal, proposeSet } from "../latches/propose";
 import type { JevFn } from "../llm/types";
 import { createLogger } from "../logging/logger";
 import { createVectorStore } from "../vectorstore";
-import { cheapJudgeScore } from "./cheap";
+import { upsertCandidateRows } from "./candidates";
+import { cheapJudgeScore, geoDistanceM } from "./cheap";
+import { intentPairKey } from "./group";
 import { fetchL1Data, layer1Judge, pairKey } from "./layer1";
 import { type L4Candidate, runLayer4 } from "./layer4";
 import { type L5Item, latchScore, pickProposals, recheckHard } from "./layer5";
@@ -65,49 +67,6 @@ export interface EvaluateOptions {
 	jev?: { primary: JevFn; fallback: JevFn };
 }
 
-/** 地球半径(メートル)。ハバーシン距離の計算に使う(layer1.tsと同一の式) */
-const EARTH_RADIUS_M = 6_371_000;
-
-/** 度→ラジアン */
-const toRad = (deg: number): number => (deg * Math.PI) / 180;
-
-/**
- * 中心間のハバーシン距離(メートル)。Layer 3の地理近接の入力用。
- * 式はlayer1.tsのhaversineMと同一(半径の和との比較判定はLayer 1が担うため
- * こちらでは行わない)
- */
-const haversineM = (
-	a: { lat: number; lng: number },
-	b: { lat: number; lng: number },
-): number => {
-	const dLat = toRad(b.lat - a.lat);
-	const dLng = toRad(b.lng - a.lng);
-	const h =
-		Math.sin(dLat / 2) ** 2 +
-		Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
-	return EARTH_RADIUS_M * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-};
-
-/** geo3点(lat/lng/radius)が揃っている場合のみ中心を返す(片方のみ・未添付はnull) */
-const geoOf = (intent: IntentRow): { lat: number; lng: number } | null =>
-	intent.geoCenterLat !== null &&
-	intent.geoCenterLng !== null &&
-	intent.geoRadiusM !== null
-		? { lat: intent.geoCenterLat, lng: intent.geoCenterLng }
-		: null;
-
-/**
- * 両Intentの中心間距離(m)。片方・双方の地理未添付はnull
- * (Layer 3のgeoProximityはnullを中立値として扱う・docs/06 §3)
- */
-const geoDistanceM = (a: IntentRow, b: IntentRow): number | null => {
-	const originGeo = geoOf(a);
-	const candidateGeo = geoOf(b);
-	return originGeo === null || candidateGeo === null
-		? null
-		: haversineM(originGeo, candidateGeo);
-};
-
 /** スコア降順・同点はULID昇順(docs/06 §3の同点の規律)の比較関数 */
 const byScoreDescThenIdAsc = (
 	a: { id: string; score: number },
@@ -121,18 +80,6 @@ const byScoreDescThenIdAsc = (
 	}
 	return a.id < b.id ? -1 : 1;
 };
-
-/** 候補upsertの分割幅(13列×7行=91バインド・D1の上限100対策) */
-const UPSERT_CHUNK_SIZE = 7;
-
-/** match_candidatesのUNIQUEキー(intent_a_id, intent_b_id, intent_a_version, intent_b_version)の文字列化 */
-const candidateKey = (r: {
-	intentAId: string;
-	intentBId: string;
-	intentAVersion: number;
-	intentBVersion: number;
-}): string =>
-	`${r.intentAId}:${r.intentBId}:${r.intentAVersion}:${r.intentBVersion}`;
 
 /**
  * 評価実行(第2段・docs/06 §2〜§3)。対象外(active以外・行不在)・30分抑制中
@@ -276,58 +223,8 @@ export const evaluateIntent = async (
 			updatedAt: now,
 		} satisfies typeof matchCandidates.$inferInsert;
 	});
-	for (let i = 0; i < rows.length; i += UPSERT_CHUNK_SIZE) {
-		await db
-			.insert(matchCandidates)
-			.values(rows.slice(i, i + UPSERT_CHUNK_SIZE))
-			.onConflictDoUpdate({
-				target: [
-					matchCandidates.intentAId,
-					matchCandidates.intentBId,
-					matchCandidates.intentAVersion,
-					matchCandidates.intentBVersion,
-				],
-				set: {
-					retrievalScore: sql`excluded.retrieval_score`,
-					cheapJudgeScore: sql`excluded.cheap_judge_score`,
-					// statusは上書きしない(新規INSERTの行だけがcandidateになり、
-					// 提案済み・クローズ済みの既存行は状態を保つ)
-					updatedAt: now,
-				},
-			});
-	}
-
-	// upsertは衝突時に既存行のidを保持するため、UNIQUEキーで読み直して実際の行idを得る
-	const rowIdByKey = new Map<string, string>();
-	const otherIds = l3Scored.map((item) => item.candidate.id);
-	if (otherIds.length > 0) {
-		const saved = await db
-			.select({
-				id: matchCandidates.id,
-				intentAId: matchCandidates.intentAId,
-				intentBId: matchCandidates.intentBId,
-				intentAVersion: matchCandidates.intentAVersion,
-				intentBVersion: matchCandidates.intentBVersion,
-			})
-			.from(matchCandidates)
-			.where(
-				or(
-					and(
-						eq(matchCandidates.intentAId, intent.id),
-						eq(matchCandidates.intentAVersion, intent.version),
-						inArray(matchCandidates.intentBId, otherIds),
-					),
-					and(
-						eq(matchCandidates.intentBId, intent.id),
-						eq(matchCandidates.intentBVersion, intent.version),
-						inArray(matchCandidates.intentAId, otherIds),
-					),
-				) as SQL,
-			);
-		for (const r of saved) {
-			rowIdByKey.set(candidateKey(r), r.id);
-		}
-	}
+	// upsertと実際の行id(衝突時は既存行のid)の読み直しはcandidates.tsが担う
+	const savedRows = await upsertCandidateRows(db, rows, now);
 	// 提案履歴により今は提案できない相手(既存行あり かつ 再提案不可・抑制期間中)は
 	// Layer 4へ渡さない(Jevの枠と予算を使わない・docs/06 §5)。Layer 1の恒久排除とは
 	// 別に数える。proposeSet側の判定も残す(並行時の正)
@@ -341,14 +238,14 @@ export const evaluateIntent = async (
 	// 相手=候補Intentで渡す(予算計上が起点基準のため行の向きに依らない)
 	const l4Candidates: L4Candidate[] = [];
 	let l4SkippedHistory = 0;
-	for (const [index, item] of l3Scored.entries()) {
+	for (const item of l3Scored) {
 		if (historyBlocked.has(item.candidate.id)) {
 			l4SkippedHistory += 1;
 			continue;
 		}
-		const row = rows[index];
-		const rowId =
-			row === undefined ? undefined : rowIdByKey.get(candidateKey(row));
+		const rowId = savedRows.get(
+			intentPairKey(intent.id, item.candidate.id),
+		)?.id;
 		if (rowId === undefined) {
 			// 到達しない(直前のupsertで必ず存在する)・防御
 			continue;
