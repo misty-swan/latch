@@ -1,5 +1,5 @@
 /**
- * 提案化(proposePair)の統合試験(F4a設計 §3.2〜§3.4・§3.6)。
+ * 提案化(proposeSet・1対1=2人の集合)の統合試験(F4a設計 §3.2〜§3.4・§3.6)。
  * 行を直接INSERTし、履歴確保を条件とする1バッチ書き込み・並行時の1件化・
  * 再提案条件・通知上限と同時進行上限による保留・75分判定を確認する。
  */
@@ -19,7 +19,7 @@ import {
 	users,
 } from "../src/db/schema";
 import type { Env as WorkerEnv } from "../src/env";
-import { proposePair } from "../src/latches/propose";
+import { proposeSet } from "../src/latches/propose";
 import type { IntentRow } from "../src/pipeline/consumer";
 
 const db = drizzle((env as unknown as WorkerEnv).DB);
@@ -124,7 +124,16 @@ const setup = async (
 		createdAt: NOW,
 		updatedAt: NOW,
 	});
-	return { a, b, rowId, input: { rowId, a, b, score } };
+	return {
+		a,
+		b,
+		rowId,
+		input: {
+			members: [a, b],
+			score,
+			source: { kind: "pair" as const, rowId },
+		},
+	};
 };
 
 const [lowOf, highOf] = [
@@ -194,10 +203,10 @@ const candidateOf = async (rowId: string) => {
 	return row;
 };
 
-describe("proposePair", () => {
+describe("proposeSet(1対1)", () => {
 	it("(a) 新規ペアはproposed・LATCH1件・members2・通知2・履歴が新LATCHを指す", async () => {
 		const { a, b, rowId, input } = await setup("occasion");
-		expect(await proposePair(db, input, NOW)).toBe("proposed");
+		expect(await proposeSet(db, input, NOW)).toBe("proposed");
 
 		const ls = await latchesOf(a.id);
 		expect(ls).toHaveLength(1);
@@ -246,8 +255,8 @@ describe("proposePair", () => {
 	it("(b) 同じinputの並行2回でもLATCHは1件・片方はskipped", async () => {
 		const { a, b, input } = await setup("connection");
 		const outcomes = await Promise.all([
-			proposePair(db, input, NOW),
-			proposePair(db, input, NOW),
+			proposeSet(db, input, NOW),
+			proposeSet(db, input, NOW),
 		]);
 		expect([...outcomes].sort()).toEqual(["proposed", "skipped"]);
 
@@ -269,7 +278,7 @@ describe("proposePair", () => {
 		async (outcome) => {
 			const { a, b, rowId, input } = await setup("occasion");
 			await insertHistory(a, b, outcome, ago(48 * HOUR));
-			expect(await proposePair(db, input, NOW)).toBe("skipped");
+			expect(await proposeSet(db, input, NOW)).toBe("skipped");
 			expect(await latchesOf(a.id)).toHaveLength(1);
 			expect((await candidateOf(rowId)).status).toBe("candidate");
 		},
@@ -278,7 +287,7 @@ describe("proposePair", () => {
 	it("(d) つながりで履歴outcome=deferredならskipped", async () => {
 		const { a, b, input } = await setup("connection");
 		await insertHistory(a, b, "deferred", ago(30 * 24 * HOUR));
-		expect(await proposePair(db, input, NOW)).toBe("skipped");
+		expect(await proposeSet(db, input, NOW)).toBe("skipped");
 		expect(await latchesOf(a.id)).toHaveLength(1);
 	});
 
@@ -287,7 +296,7 @@ describe("proposePair", () => {
 			// 見送り1時間前・対象+4時間 → 抑制=min(24時間, 5時間/2)=2.5時間
 			const { a, b, rowId, input } = await setup("occasion", {}, 0.95);
 			await insertHistory(a, b, "deferred", ago(1 * HOUR), 0.9);
-			expect(await proposePair(db, input, NOW)).toBe("skipped");
+			expect(await proposeSet(db, input, NOW)).toBe("skipped");
 			expect(await latchesOf(a.id)).toHaveLength(1);
 			// 前回latch.scoreを記録する
 			expect((await candidateOf(rowId)).prevLatchScore).toBe(0.9);
@@ -297,7 +306,7 @@ describe("proposePair", () => {
 			// 見送り4時間前・対象+4時間 → 抑制=min(24時間, 8時間/2)=4時間 → ちょうど経過
 			const { a, b, rowId, input } = await setup("occasion", {}, 0.9);
 			await insertHistory(a, b, "deferred", ago(4 * HOUR), 0.9);
-			expect(await proposePair(db, input, NOW)).toBe("skipped");
+			expect(await proposeSet(db, input, NOW)).toBe("skipped");
 			expect(await latchesOf(a.id)).toHaveLength(1);
 			expect((await candidateOf(rowId)).prevLatchScore).toBe(0.9);
 		});
@@ -309,7 +318,7 @@ describe("proposePair", () => {
 				0.9,
 			);
 			const prev = await insertHistory(a, b, "deferred", ago(4 * HOUR), 0.9);
-			expect(await proposePair(db, input, NOW)).toBe("proposed");
+			expect(await proposeSet(db, input, NOW)).toBe("proposed");
 
 			const ls = (await latchesOf(a.id)).filter((l) => l.id !== prev.latchId);
 			expect(ls).toHaveLength(1);
@@ -327,7 +336,7 @@ describe("proposePair", () => {
 		it("経過後かつscore変化ならproposed(expiredも対象)", async () => {
 			const { a, b, input } = await setup("occasion", {}, 0.95);
 			await insertHistory(a, b, "expired", ago(4 * HOUR), 0.9);
-			expect(await proposePair(db, input, NOW)).toBe("proposed");
+			expect(await proposeSet(db, input, NOW)).toBe("proposed");
 			expect(await latchesOf(a.id)).toHaveLength(2);
 		});
 	});
@@ -344,7 +353,7 @@ describe("proposePair", () => {
 				createdAt: ago(1 * HOUR),
 			});
 		}
-		expect(await proposePair(db, input, NOW)).toBe("held");
+		expect(await proposeSet(db, input, NOW)).toBe("held");
 		const ls = await latchesOf(a.id);
 		expect(ls).toHaveLength(1);
 		expect(ls[0].status).toBe("candidate");
@@ -373,7 +382,7 @@ describe("proposePair", () => {
 				createdAt: ago(13 * HOUR),
 			});
 		}
-		expect(await proposePair(db, input, NOW)).toBe("proposed");
+		expect(await proposeSet(db, input, NOW)).toBe("proposed");
 	});
 
 	it("(g) Intentの進行中LATCHが3件ならheld", async () => {
@@ -395,7 +404,7 @@ describe("proposePair", () => {
 				updatedAt: NOW,
 			});
 		}
-		expect(await proposePair(db, input, NOW)).toBe("held");
+		expect(await proposeSet(db, input, NOW)).toBe("held");
 	});
 
 	it("保留中(candidate)のLATCHは進行中に数えない", async () => {
@@ -417,16 +426,16 @@ describe("proposePair", () => {
 				updatedAt: NOW,
 			});
 		}
-		expect(await proposePair(db, input, NOW)).toBe("proposed");
+		expect(await proposeSet(db, input, NOW)).toBe("proposed");
 	});
 
 	it("(h) 機会で対象時刻まで74分ならskipped", async () => {
-		const { a, rowId, input } = await setup("occasion", {
+		const { a, b, rowId, input } = await setup("occasion", {
 			startsAt: later(74 * MIN),
 		});
-		expect(await proposePair(db, input, NOW)).toBe("skipped");
+		expect(await proposeSet(db, input, NOW)).toBe("skipped");
 		expect(await latchesOf(a.id)).toHaveLength(0);
-		expect(await historyOf(input.a, input.b)).toHaveLength(0);
+		expect(await historyOf(a, b)).toHaveLength(0);
 		expect((await candidateOf(rowId)).status).toBe("candidate");
 	});
 });

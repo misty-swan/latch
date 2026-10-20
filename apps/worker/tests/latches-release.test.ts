@@ -19,7 +19,7 @@ import {
 } from "../src/db/schema";
 import type { Env as WorkerEnv } from "../src/env";
 import { closeLatch } from "../src/latches/close";
-import { proposePair } from "../src/latches/propose";
+import { proposeSet } from "../src/latches/propose";
 import { expireHeld, releaseHeld } from "../src/latches/release";
 import type { IntentRow } from "../src/pipeline/consumer";
 
@@ -819,9 +819,13 @@ describe("履歴の解放(未提示・システムの都合で閉じた提案は
 		expect((await latchOf(latchId))?.status).toBe("expired");
 		const [low, high] = a.id < b.id ? [a, b] : [b, a];
 		expect(
-			await proposePair(
+			await proposeSet(
 				db,
-				{ rowId: ulid(), a: low, b: high, score: 0.9 },
+				{
+					members: [low, high],
+					score: 0.9,
+					source: { kind: "pair", rowId: ulid() },
+				},
 				NOW,
 			),
 		).toBe("proposed");

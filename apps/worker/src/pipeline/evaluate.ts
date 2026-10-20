@@ -17,7 +17,7 @@ import { intents, matchCandidates } from "../db/schema";
 import type { Env } from "../env";
 import { newUlid } from "../ids";
 import type { JevHeldReason } from "../jev/runner";
-import { blockedForProposal, proposePair } from "../latches/propose";
+import { blockedForProposal, proposeSet } from "../latches/propose";
 import type { JevFn } from "../llm/types";
 import { createLogger } from "../logging/logger";
 import { createVectorStore } from "../vectorstore";
@@ -54,9 +54,9 @@ export interface Stage2Result {
 	jevLatencyMs: number;
 	/** Layer 5でLATCH Scoreが閾値を超えた件数(ペア単位の絞り込み前) */
 	l5OverThreshold: number;
-	/** 提案化して提示した件数(proposePairが"proposed") */
+	/** 提案化して提示した件数(proposeSetが"proposed") */
 	proposed: number;
-	/** 提案化したが通知上限で保留した件数(proposePairが"held") */
+	/** 提案化したが通知上限で保留した件数(proposeSetが"held") */
 	held: number;
 }
 
@@ -330,7 +330,7 @@ export const evaluateIntent = async (
 	}
 	// 提案履歴により今は提案できない相手(既存行あり かつ 再提案不可・抑制期間中)は
 	// Layer 4へ渡さない(Jevの枠と予算を使わない・docs/06 §5)。Layer 1の恒久排除とは
-	// 別に数える。proposePair側の判定も残す(並行時の正)
+	// 別に数える。proposeSet側の判定も残す(並行時の正)
 	const historyBlocked = await blockedForProposal(
 		db,
 		intent,
@@ -407,11 +407,15 @@ export const evaluateIntent = async (
 			if (other === undefined || !passedIds.has(other.id)) {
 				continue;
 			}
-			// a/bはmatch_candidatesの正規化順(a.id < b.id)
-			const [a, b] = intent.id < other.id ? [intent, other] : [other, intent];
-			const outcome = await proposePair(
+			// membersはid昇順(match_candidatesの正規化順と同じ)
+			const members = intent.id < other.id ? [intent, other] : [other, intent];
+			const outcome = await proposeSet(
 				db,
-				{ rowId: pick.rowId, a, b, score: pick.score },
+				{
+					members,
+					score: pick.score,
+					source: { kind: "pair", rowId: pick.rowId },
+				},
 				now,
 			);
 			if (outcome === "proposed") {
