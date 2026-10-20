@@ -5,11 +5,14 @@ import {
 	CATEGORIES,
 	CONSTRAINT_ITEM_MAX_LENGTH,
 	CONSTRAINT_MAX_ITEMS,
+	DEFER_REASONS,
 	ERROR_CODES,
 	GEO_RADIUS_MAX_M,
 	GEO_RADIUS_MIN_M,
 	INTENT_FORMS,
 	INTENT_STATUSES,
+	LATCH_RESPONSE_VALUES,
+	LATCH_STATUSES,
 	LIMITS,
 	PARTICIPANTS_MAX,
 	PARTICIPANTS_MIN,
@@ -295,3 +298,41 @@ export const latchProposalSchema = z.object({
 		.nullable(),
 });
 export type LatchProposal = z.infer<typeof latchProposalSchema>;
+
+/** POST /v1/latches/{id}/response のリクエスト(noはAPI専用・F4a設計 §4.1) */
+export const latchResponseRequestSchema = z
+	.object({ response: z.enum(LATCH_RESPONSE_VALUES) })
+	.strict();
+export type LatchResponseRequest = z.infer<typeof latchResponseRequestSchema>;
+
+/** POST /v1/latches/{id}/defer-reason のリクエスト(F4a設計 §4.1) */
+export const deferReasonRequestSchema = z
+	.object({ reason: z.enum(DEFER_REASONS) })
+	.strict();
+export type DeferReasonRequest = z.infer<typeof deferReasonRequestSchema>;
+
+/**
+ * LatchDTO(F4a設計 §4.5)。成立前はproposal・membersのキー自体を含めない(#20)。
+ * 成立後(matched・matched経由のcancelled)のみproposalと、自分を除くmembersを含める
+ */
+export const latchDtoSchema = z.object({
+	id: z.string(),
+	form: intentFormSchema,
+	status: z.enum(LATCH_STATUSES),
+	response_deadline: isoDateTimeSchema,
+	participants_count: z.number().int().min(0),
+	my_response: z.enum(LATCH_RESPONSE_VALUES).nullable(),
+	score: z.number(),
+	proposal: latchProposalSchema.optional(),
+	members: z
+		.array(
+			z.object({
+				user_id: z.string(),
+				display_name: z.string(),
+				bio: z.string().nullable(),
+				has_icon: z.boolean(),
+			}),
+		)
+		.optional(),
+});
+export type LatchDTO = z.infer<typeof latchDtoSchema>;

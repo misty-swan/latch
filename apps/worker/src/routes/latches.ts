@@ -1,0 +1,332 @@
+/**
+ * LATCH(提案)APIルート(F4a設計 §4.1・docs/05 §3.2)。
+ * - GET /v1/latches?type=proposals|matched: 自分が参加する提案(proposed/partial_accept)・
+ *   成立(matched)の一覧。id降順・cursor/limitはintents一覧と同方式。保留(candidate)は含めない
+ * - GET /v1/latches/{id}: 単一取得。参加しない・存在しない・保留中(candidate)は一律404
+ * - POST /{id}/response・/response/retract・/leave・/defer-reason: 成功は操作後のLatchDTO(200)。
+ *   RespondFailureの写像: not_found→404・その他→400 VALIDATION_FAILED(details.reasons=[reason])
+ * 時刻の規律(docs/04 §4): ルートは合成の起点のためsystemClockを使う
+ */
+
+import {
+	deferReasonRequestSchema,
+	type LatchDTO,
+	type LatchResponseValue,
+	latchResponseRequestSchema,
+} from "@latch/shared";
+import { and, desc, eq, inArray, isNull, lt, ne } from "drizzle-orm";
+import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
+import type { Context } from "hono";
+import { Hono } from "hono";
+import { type AppEnv, requireRegistered } from "../auth/middleware";
+import { systemClock } from "../clock/clock";
+import {
+	latches,
+	latchMembers,
+	latchResponses,
+	latchStatusEvents,
+	users,
+} from "../db/schema";
+import type { Env } from "../env";
+import { errorJson } from "../http/errors";
+import {
+	leave,
+	type RespondResult,
+	respond,
+	retract,
+	saveDeferReason,
+} from "../latches/respond";
+import { toLatchDto } from "../latches/view";
+
+/** LATCH APIのサブアプリ。index.tsが /v1/latches にマウントする */
+export const latchRoutes = new Hono<AppEnv>();
+
+const dbOf = (env: Env): DrizzleD1Database => drizzle(env.DB);
+
+/** JSONボディを読む。空ボディは{}・JSON不正はundefined(400扱い)(intents.tsと同一のhelper) */
+const readJsonBody = async (c: Context<AppEnv>): Promise<unknown> => {
+	try {
+		const text = await c.req.text();
+		return text === "" ? {} : JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+};
+
+const validationFailed = () =>
+	errorJson("VALIDATION_FAILED", "リクエストが不正です");
+
+/** 404。参加しない・存在しない・保留中は区別しない(docs/05 §3.1) */
+const notFound = () => errorJson("NOT_FOUND", "LATCHが見つかりません");
+
+/** requireRegisteredが保証するため到達しない防御応答 */
+const unauthorized = () =>
+	errorJson(
+		"UNAUTHORIZED",
+		"この操作には登録済みユーザーのアクセストークンが必要です",
+	);
+
+/** 一覧cursorの不透明化(intents一覧と同方式・docs/05 §3.1) */
+const encodeCursor = (id: string): string =>
+	btoa(id).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+
+const decodeCursor = (cursor: string): string | null => {
+	let base64 = cursor.replaceAll("-", "+").replaceAll("_", "/");
+	while (base64.length % 4 !== 0) {
+		base64 += "=";
+	}
+	let decoded: string;
+	try {
+		decoded = atob(base64);
+	} catch {
+		return null;
+	}
+	return /^[0-9A-HJKMNP-TV-Z]{26}$/u.test(decoded) ? decoded : null;
+};
+
+/**
+ * 自分が参加するLATCHをLatchDTOにして返す。参加しない・存在しない・candidateはnull。
+ * 成立後(matched・matched経由のcancelled)のみ自分を除くmembersとproposalを含める(§4.5)
+ */
+const loadLatchDto = async (
+	db: DrizzleD1Database,
+	latchId: string,
+	userId: string,
+): Promise<LatchDTO | null> => {
+	const [row] = await db
+		.select({ latch: latches })
+		.from(latches)
+		.innerJoin(
+			latchMembers,
+			and(
+				eq(latchMembers.latchId, latches.id),
+				eq(latchMembers.userId, userId),
+			),
+		)
+		.where(and(eq(latches.id, latchId), ne(latches.status, "candidate")));
+	if (row === undefined) {
+		return null;
+	}
+	const latch = row.latch;
+	const memberRows = await db
+		.select({ user: users })
+		.from(latchMembers)
+		.innerJoin(users, eq(users.id, latchMembers.userId))
+		.where(eq(latchMembers.latchId, latchId));
+	const [mine] = await db
+		.select({ response: latchResponses.response })
+		.from(latchResponses)
+		.where(
+			and(
+				eq(latchResponses.latchId, latchId),
+				eq(latchResponses.userId, userId),
+				isNull(latchResponses.retractedAt),
+			),
+		);
+	let revealed = latch.status === "matched";
+	if (!revealed && latch.status === "cancelled") {
+		// matched経由のcancelled(leave等)はlatch_status_eventsにto=matchedの記録がある
+		const [ev] = await db
+			.select({ id: latchStatusEvents.id })
+			.from(latchStatusEvents)
+			.where(
+				and(
+					eq(latchStatusEvents.latchId, latchId),
+					eq(latchStatusEvents.toStatus, "matched"),
+				),
+			)
+			.limit(1);
+		revealed = ev !== undefined;
+	}
+	return toLatchDto(latch, {
+		participantsCount: memberRows.length,
+		myResponse: (mine?.response ?? null) as LatchResponseValue | null,
+		members: revealed
+			? memberRows.filter((m) => m.user.id !== userId).map((m) => m.user)
+			: undefined,
+	});
+};
+
+/** RespondResultをHTTP応答へ写す。成功は操作後のLatchDTO(200) */
+const respondResultToResponse = async (
+	c: Context<AppEnv>,
+	result: RespondResult,
+	userId: string,
+) => {
+	if (!result.ok) {
+		const r =
+			result.reason === "not_found"
+				? notFound()
+				: errorJson("VALIDATION_FAILED", "この操作はできません", {
+						reasons: [result.reason],
+					});
+		return c.json(r.body, r.status);
+	}
+	const dto = await loadLatchDto(dbOf(c.env), result.latchId, userId);
+	if (dto === null) {
+		const r = notFound();
+		return c.json(r.body, r.status);
+	}
+	return c.json(dto, 200);
+};
+
+latchRoutes.get("/", requireRegistered, async (c) => {
+	const sub = c.var.auth.sub;
+	if (sub === undefined) {
+		const r = unauthorized();
+		return c.json(r.body, r.status);
+	}
+	const type = c.req.query("type");
+	if (type !== "proposals" && type !== "matched") {
+		const r = validationFailed();
+		return c.json(r.body, r.status);
+	}
+	let limit = 20;
+	const limitParam = c.req.query("limit");
+	if (limitParam !== undefined) {
+		if (!/^[0-9]{1,2}$/u.test(limitParam)) {
+			const r = validationFailed();
+			return c.json(r.body, r.status);
+		}
+		const parsedLimit = Number(limitParam);
+		if (parsedLimit < 1 || parsedLimit > 50) {
+			const r = validationFailed();
+			return c.json(r.body, r.status);
+		}
+		limit = parsedLimit;
+	}
+	let cursorId: string | undefined;
+	const cursorParam = c.req.query("cursor");
+	if (cursorParam !== undefined) {
+		const decoded = decodeCursor(cursorParam);
+		if (decoded === null) {
+			const r = validationFailed();
+			return c.json(r.body, r.status);
+		}
+		cursorId = decoded;
+	}
+	const db = dbOf(c.env);
+	const conditions = [
+		inArray(
+			latches.status,
+			type === "proposals" ? ["proposed", "partial_accept"] : ["matched"],
+		),
+	];
+	if (cursorId !== undefined) {
+		conditions.push(lt(latches.id, cursorId));
+	}
+	// 終端判定のためlimit+1件取得する(id降順・自分が参加するもののみ)
+	const rows = await db
+		.select({ id: latches.id })
+		.from(latches)
+		.innerJoin(
+			latchMembers,
+			and(eq(latchMembers.latchId, latches.id), eq(latchMembers.userId, sub)),
+		)
+		.where(and(...conditions))
+		.orderBy(desc(latches.id))
+		.limit(limit + 1);
+	const hasMore = rows.length > limit;
+	const pageIds = (hasMore ? rows.slice(0, limit) : rows).map((r) => r.id);
+	const items: LatchDTO[] = [];
+	for (const id of pageIds) {
+		const dto = await loadLatchDto(db, id, sub);
+		if (dto !== null) {
+			items.push(dto);
+		}
+	}
+	const lastId = pageIds[pageIds.length - 1];
+	return c.json(
+		{
+			items,
+			next_cursor:
+				hasMore && lastId !== undefined ? encodeCursor(lastId) : null,
+		},
+		200,
+	);
+});
+
+latchRoutes.get("/:id", requireRegistered, async (c) => {
+	const sub = c.var.auth.sub;
+	if (sub === undefined) {
+		const r = unauthorized();
+		return c.json(r.body, r.status);
+	}
+	const dto = await loadLatchDto(dbOf(c.env), c.req.param("id"), sub);
+	if (dto === null) {
+		const r = notFound();
+		return c.json(r.body, r.status);
+	}
+	return c.json(dto, 200);
+});
+
+latchRoutes.post("/:id/response", requireRegistered, async (c) => {
+	const sub = c.var.auth.sub;
+	if (sub === undefined) {
+		const r = unauthorized();
+		return c.json(r.body, r.status);
+	}
+	const parsed = latchResponseRequestSchema.safeParse(await readJsonBody(c));
+	if (!parsed.success) {
+		const r = validationFailed();
+		return c.json(r.body, r.status);
+	}
+	const result = await respond(
+		dbOf(c.env),
+		c.req.param("id"),
+		sub,
+		parsed.data.response,
+		systemClock.now(),
+	);
+	return respondResultToResponse(c, result, sub);
+});
+
+latchRoutes.post("/:id/response/retract", requireRegistered, async (c) => {
+	const sub = c.var.auth.sub;
+	if (sub === undefined) {
+		const r = unauthorized();
+		return c.json(r.body, r.status);
+	}
+	const result = await retract(
+		dbOf(c.env),
+		c.req.param("id"),
+		sub,
+		systemClock.now(),
+	);
+	return respondResultToResponse(c, result, sub);
+});
+
+latchRoutes.post("/:id/leave", requireRegistered, async (c) => {
+	const sub = c.var.auth.sub;
+	if (sub === undefined) {
+		const r = unauthorized();
+		return c.json(r.body, r.status);
+	}
+	const result = await leave(
+		dbOf(c.env),
+		c.req.param("id"),
+		sub,
+		systemClock.now(),
+	);
+	return respondResultToResponse(c, result, sub);
+});
+
+latchRoutes.post("/:id/defer-reason", requireRegistered, async (c) => {
+	const sub = c.var.auth.sub;
+	if (sub === undefined) {
+		const r = unauthorized();
+		return c.json(r.body, r.status);
+	}
+	const parsed = deferReasonRequestSchema.safeParse(await readJsonBody(c));
+	if (!parsed.success) {
+		const r = validationFailed();
+		return c.json(r.body, r.status);
+	}
+	const result = await saveDeferReason(
+		dbOf(c.env),
+		c.req.param("id"),
+		sub,
+		parsed.data.reason,
+	);
+	return respondResultToResponse(c, result, sub);
+});

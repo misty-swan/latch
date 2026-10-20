@@ -11,6 +11,7 @@ import { authRoutes } from "./routes/auth";
 import { devRoutes } from "./routes/dev";
 import { iconRoutes } from "./routes/icons";
 import { intentRoutes } from "./routes/intents";
+import { latchRoutes } from "./routes/latches";
 import { userRoutes } from "./routes/users";
 
 // 各ルートがBindingsにEnv・Variablesにauthクレームを期待する(docs/05 §3.1)
@@ -31,6 +32,8 @@ app.route("/v1/users", iconRoutes);
 // Intent API(構造化プレビュー・作成・一覧・取得・更新・削除・docs/05 §3.2)。
 // pause/resumeは後続タスクでintentRoutesに追加する
 app.route("/v1/intents", intentRoutes);
+// LATCH(提案)API(一覧・取得・回答・取り消し・離脱・見送り理由・F4a設計 §4.1)
+app.route("/v1/latches", latchRoutes);
 // dev専用サインインAPI(POST /v1/dev/idp-token・F2'計画Task 2)。テスト鍵モードの
 // ローカル/CI/E2Eでのみ存在し、prodでは404+起動ガードの二重防御(docs/10 §2)
 app.route("/v1/dev", devRoutes);
