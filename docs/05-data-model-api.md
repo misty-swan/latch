@@ -1,9 +1,9 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.10
+- 文書バージョン: v0.11
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.10更新: 2026-10-20)
+- 作成日: 2026-10-17(v0.11更新: 2026-10-20)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
@@ -13,7 +13,8 @@
 - v0.8の変更点: 前提文書欄の版数同期(F2'実装に伴う04改版への追従)。内容の変更はない
 - v0.9の変更点: F3実装に伴い§2.2のintentsへdelayed_reeval_at列(つながりIntentの1回きり遅延再評価の実行済みマーカー)を追記し、§2.3へVectorizeのローカル代替(LATCH_ENV=localはインメモリ実装・取得系getByIdsの用途)を追記。§2.5へIntent削除時はベクトル削除を先に行い失敗時は500で中断する実行順序を追記。§3.3へdev専用観測API(GET /v1/dev/match-events・match-candidates)の応答形状を追記。前提文書欄の版数を更新
 - v0.10の変更点: F4a(1対1の提案〜成立)実装に伴い§2.2へlatches.proposed_at・proposal_history.updated_at(見送り時刻の基準)の列と、match_candidatesのupsertが既存行のstatusを上書きしない規定・機会LATCH成立時の参加Intentの更新範囲・geofeaturesのgrid_key書式と逆引き規則を追記し、§2.3へKVバインディングPIPELINE_KVのキーを、§2.4へ提案化・回答期限・通知上限の索引を追記。§3.2へGET /v1/latches/{id}・POST /v1/latches/{id}/defer-reasonを追加し、§3.3へLatchDTO(成立前はproposal・membersのキー自体を出さない表示範囲)・一覧のtype別の状態・回答系の理由コード・dev専用API(backdate・LATCH・提案履歴の観測)の確定形状を追記。前提文書欄の版数を更新
-- 前提文書: 01 要件定義書 v0.10 / 02 スコープ・受け入れ条件合意書 v0.4 / 04 アーキテクチャ設計書 v0.11
+- v0.11の変更点: F4aの最終レビューの修正に伴い§2.2のnotificationsへ成立後の離脱(leave)はclosedを作らない規定を、§3.2のPATCHへactive Intentの意味フィールドの変更・期限の短縮で進行中の提案を取り消す規定(01 §8の不成立経路「Hard Constraintが変化した」)を、§3.3の回答と取り消しの状態遷移へleaveの通知の扱いを追記。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.10 / 02 スコープ・受け入れ条件合意書 v0.4 / 04 アーキテクチャ設計書 v0.12
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -209,7 +210,7 @@ INDEX(latch_id, id)
 
 **blocks**: `blocker_user_id / blocked_user_id / created_at — PK(blocker, blocked)`。**reports**: `id / reporter / reportee / reason(spam|harassment|inappropriate|other) / latch_id|null / note(0..500) / status(open|resolved) / created_at`。
 
-**notifications**: `id / user_id / type(proposal|matched|closed|system) / latch_id|null / read_at / created_at — INDEX(user_id, read_at)・UNIQUE(latch_id, user_id, type)`。closedは不成立(rejected / expired / cancelled)の総称。成立前の意思・条件サマリは格納しない(visibility単値化・01 §21)。
+**notifications**: `id / user_id / type(proposal|matched|closed|system) / latch_id|null / read_at / created_at — INDEX(user_id, read_at)・UNIQUE(latch_id, user_id, type)`。closedは不成立(rejected / expired / cancelled)の総称であり、成立後の離脱(leave・matched→cancelled)ではclosedを作らない(F4a実装確定)。成立前の意思・条件サマリは格納しない(visibility単値化・01 §21)。
 
 **push_subscriptions**: `id / user_id / endpoint(string UNIQUE) / p256dh / auth / status(active|failed) / last_success_at / created_at`。
 
@@ -376,7 +377,7 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 
 **GET /v1/intents** — 200 `{items: IntentDTO[], next_cursor: string|null}`。自Intentのみ・順序はid降順(ULID=新着順)。`?status=<単一値>`で絞り込み(不明な値は400)。limit=1..50(既定20・範囲外は400)。cursorは不透明(直前ページ最終idのbase64url化・復号できない値は400)
 
-**GET・PATCH・DELETE /v1/intents/{id}** — 200 IntentDTO / 200 IntentDTO(version+1) / 204。他人の・存在しないは一律404(§3.1)。PATCHの可変フィールド: draft=全項目+status:"active"(active化)・active=topic・time・geo・participants・budget・constraints(3種)・notification_levelのみ(他のフィールド指定は400 field_not_allowed)。draft・active以外(paused/matched/expired/cancelled)へのPATCHは400 invalid_status。draft宛のexpires_in_daysは同一リクエストがstatus:"active"を伴う場合を除き400 expires_choice_on_draft(status:"active"を伴う場合でも結果formが機会なら400 expires_in_days_not_allowed・つながりは期限の選択として有効)。active機会Intentのtime変更は範囲を再検証し、現在のexpires_at以降へは変更できない(400 starts_at_after_expires)。PATCH・pause・resumeのUPDATEは**version楽観ロック**(01 §16)を持ち、読み出し時のversionと一致する行のみ更新する(並行更新の後勝ち上書きを防止)。競合で更新が0行だった場合は1回だけ再読込して判定し、行が残っていれば400 VALIDATION_FAILED(理由コードversion_conflict)・消えていれば一律404(§3.1)を返す
+**GET・PATCH・DELETE /v1/intents/{id}** — 200 IntentDTO / 200 IntentDTO(version+1) / 204。他人の・存在しないは一律404(§3.1)。PATCHの可変フィールド: draft=全項目+status:"active"(active化)・active=topic・time・geo・participants・budget・constraints(3種)・notification_levelのみ(他のフィールド指定は400 field_not_allowed)。draft・active以外(paused/matched/expired/cancelled)へのPATCHは400 invalid_status。draft宛のexpires_in_daysは同一リクエストがstatus:"active"を伴う場合を除き400 expires_choice_on_draft(status:"active"を伴う場合でも結果formが機会なら400 expires_in_days_not_allowed・つながりは期限の選択として有効)。active機会Intentのtime変更は範囲を再検証し、現在のexpires_at以降へは変更できない(400 starts_at_after_expires)。PATCH・pause・resumeのUPDATEは**version楽観ロック**(01 §16)を持ち、読み出し時のversionと一致する行のみ更新する(並行更新の後勝ち上書きを防止)。競合で更新が0行だった場合は1回だけ再読込して判定し、行が残っていれば400 VALIDATION_FAILED(理由コードversion_conflict)・消えていれば一律404(§3.1)を返す。**PATCHによる進行中の提案の取り消し(F4a実装確定)。** active Intentで意味フィールド(topic・time・geo・participants・budget・constraints=intent_updatedを発行する変更・06 §2)が変わった場合、または期限(expires_at)が短くなる場合は、当該Intentを含む進行中の提案(candidate・proposed・partial_accept)をIntent削除と同じ流れでcancelledに閉じる(proposal_historyのoutcomeはexpired・提示済みなら参加者へclosed通知・更新者以外の参加者の保留を解放する。01 §8の不成立経路「Hard Constraintが変化した」)。notification_level等の表示系だけの変更では閉じず、matchedは変えない。再評価は既存どおりintent_updatedで走り、新しい内容で再提案され得る
 
 **POST /v1/intents/{id}/pause・resume** — 200 IntentDTO(version+1)。pauseはactiveのみ実行可(他は400 invalid_status)・status=paused・期限は不変。resumeはpausedのみ実行可(他は400 invalid_status)・期限切れ(expires_at<=now)は400(理由コードexpired)・status=active・期限は据え置き(再計算しない)。参加中active数の上限5件は作成・draft→active化・resumeの3経路で検証し、超過は422 ACTIVE_INTENT_LIMIT(§3.1)
 
@@ -388,7 +389,7 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 
 **POST /v1/latches/{id}/defer-reason** — 200 LatchDTO。見送った(defer)本人だけが1回だけ保存できる(latch_responses.defer_reason)。理由の値はno_capacity / schedule_mismatch / just_not_now / otherの4種(他の値・余分なキーは400)。
 
-**回答と取り消しの状態遷移。** defer=[今回は見送る]は提案を即時にrejectedで閉じる(proposal_historyのoutcomeはdeferred)。no=API契約経由の明示の拒否(同rejected・outcome=rejectedで恒久排除)。retract(回答取り消し)は回答期限内・未成立のみ可とし、partial_accept→proposedへ復帰する(双方YES成立後は不可。離脱はleaveを使う)。leave(参加取り消し)はmatchedのLATCHをcancelledとし、チャットを双方読み取り専用にする(02 D-08)。グループで必要人数の下限を割った場合もLATCH全体をcancelledとする。
+**回答と取り消しの状態遷移。** defer=[今回は見送る]は提案を即時にrejectedで閉じる(proposal_historyのoutcomeはdeferred)。no=API契約経由の明示の拒否(同rejected・outcome=rejectedで恒久排除)。retract(回答取り消し)は回答期限内・未成立のみ可とし、partial_accept→proposedへ復帰する(双方YES成立後は不可。離脱はleaveを使う)。leave(参加取り消し)はmatchedのLATCHをcancelledとし、チャットを双方読み取り専用にする(02 D-08)。leaveではclosed通知を作らない(closedは不成立の総称・§2.2)。グループで必要人数の下限を割った場合もLATCH全体をcancelledとする。
 
 **dev専用観測API(F3実装確定・テスト専用)** — GET /v1/dev/match-events・GET /v1/dev/match-candidates。worker E2Eがゲートの合格証拠(match_eventsの計測payload・match_candidatesの生成記録)を観測するためのdev専用API。クエリはintent_id(必須・ULID形式外は400)・limit=1..50既定20・cursor(§3.1と同一の不透明cursor)。応答は`{items, next_cursor}`(id降順)で、itemsはmatch_events行=id / event_type / source_intent_id / version / status / payload / created_at / processed_at・match_candidates行=id / intent_a_id / intent_b_id / intent_a_version / intent_b_version / form / retrieval_score / cheap_judge_score / status / created_at / updated_at(テーブル列の範囲のみ・jev_result等の内部列は含めない)。起点Intentとの一致条件はmatch_events=source_intent_id・match_candidates=intent_a_idかintent_b_idのいずれか。所有者に限定しない(候補は2ユーザーのIntentで構成されるため・観測の実行は認証済みユーザーが行う)。存在隠しはPOST /v1/dev/idp-token(04 §4)と同一条件(prod・テスト鍵2変数のいずれか未設定は認証・クエリ検証より先に一律404・理由は区別しない)。
 

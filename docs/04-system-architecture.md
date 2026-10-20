@@ -1,9 +1,9 @@
 # LATCH アーキテクチャ設計書
 
-- 文書バージョン: v0.11
+- 文書バージョン: v0.12
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.11更新: 2026-10-20)
+- 作成日: 2026-10-17(v0.12更新: 2026-10-20)
 - v0.2の変更点: §3を全面改訂し、スタックを「バックエンド・フロントエンドの構成部品」(DBアクセス・マイグレーション・入力検証・プッシュ実装・フォーム等)まで確定した。D-A-06(Biome)を解消し、D-A-07(スタイリング=03で確定)を新設した
 - v0.3の変更点: 07(LLM利用仕様書)の策定に伴いD-A-01(Embedding)を解消した(Workers AI bge-m3・1024次元・cosine)。R2(ユーザーアイコン)をスタックへ追加した
 - v0.4の変更点: 本書が単体で完結するよう記述を整理した(変更の経緯はgit履歴を参照)
@@ -14,6 +14,7 @@
 - v0.9の変更点: F2'(フロント基盤)実装に伴い§4へdev専用サインイン(POST /v1/dev/idp-token)とWorkers Assets同一オリジン配信の実装確定を追記し、§3.2に稼働状況と移植運用を追記した。前提文書欄の変更はない
 - v0.10の変更点: F3実装に伴い§4へVectorStore抽象(upsert/query/getByIds/deleteByIds・LATCH_ENV=localはインメモリ実装・staging/prodはVectorizeラップ)・Analytics Engine束縛(PIPELINE_AX・dataset=latch_metrics)・DLQのdead反映consumerの実装確定を追記し、§4のCron列挙を06 §2の(a)〜(i)に揃えた(実装済み/F4・F5計上の区別を含む)。§3.3・§6の開発環境の表記をVectorizeはインメモリ代替となる実態に整合。前提文書欄の変更はない
 - v0.11の変更点: F4a(1対1の提案〜成立)実装に伴い§4へKVバインディングPIPELINE_KV(Jevのcircuit breakerの状態・予算アラートの送信済み印)の実装確定を追記し、§4のCron列挙の実装状況を更新した((f)(i)と回答期限切れ・pending残留の掃査はF4aで実装済み・(d)はF5)。§4の地名データの逆引きを実装確定(周囲3×3セルのハバーシン最近傍・05 §2.2)に精緻化し、§6のCI段落の試験対象の表記をVectorizeはインメモリ代替となる実態(§3.3)に整合。前提文書欄の変更はない
+- v0.12の変更点: §4のパイプラインKVへcircuit breakerの書き込み方針(1波につき最大1回・状態が変わらないときは書かない・KVの読み書きの失敗は評価を止めない)の実装確定を追記した(F4aの最終レビューの修正)。前提文書欄の変更はない
 - 前提文書: 01 要件定義書 v0.10 / 02 スコープ・受け入れ条件合意書 v0.4
 - 本書の位置づけ: 01第19節の技術スタック選定を確定させる文書。UIの正本は`prototype/`(03は不作成)。スタイリング手法(D-A-07)はバニラCSS(グローバル)に確定済み(§3.2・決定記録(2026-10-19))
 
@@ -148,7 +149,7 @@
 
 **イベント駆動(01 §16の実装)。** Intentの作成はapi出口で即時にQueuesへ送信(第1段=Embedding要求。draft→active化も即時とし、初回提案のレイテンシを守る)。Embedding完了時に派生イベント(embedding_completed)を再送し(第2段=Layer 1〜5)。**更新のみ**10秒の遅延配信とし、消費側で現行versionと突き合わせて古ければ破棄する(idempotency。match_eventsのUNIQUE制約が二重投入も許さない)。失敗は再試行上限(max_retries=3初期値)ののちDLQへ隔離し、DLQを見る最小のconsumerがmatch_eventsのstatusをdeadへ反映して警報する。誤った提案より提示の見送りを優先する方針である。deadの再処理は、UNIQUE衝突を避けるため新規イベントとして再発行する(手動)。
 
-**VectorStore抽象と観測束縛(F3実装確定)。** Vectorizeにはローカルシミュレータが存在しないため、VectorStoreインタフェース(upsert/query/getByIds/deleteByIds)の背後に2実装を置く。LATCH_ENV=local(単体・統合試験・wrangler dev・E2E)はコサイン距離・metadata filter込みのインメモリ実装、staging/prodはenv.VECTORS(Vectorize)のラップ実装であり、選択はLATCH_ENVで行う(05 §2.3)。パイプラインの計測はAnalytics EngineバインディングPIPELINE_AX(dataset=latch_metrics)へ層通過のdata pointをイベント単位で書く(06 §7・バインド未設定の環境では送信を省略)。DLQを見る最小のconsumer(match_eventsへのdead反映・警報)は第1段の消費と同一Workerに実装済みである。**パイプラインKV(F4a実装確定)。** 失効リスト用のKV(REVOCATION_KV)とは別にKVバインディングPIPELINE_KVを置き、Jevのcircuit breakerの状態(06 §5)と予算アラートの送信済み印(同一periodで1回・06 §6)を保持する(キーは05 §2.3)。
+**VectorStore抽象と観測束縛(F3実装確定)。** Vectorizeにはローカルシミュレータが存在しないため、VectorStoreインタフェース(upsert/query/getByIds/deleteByIds)の背後に2実装を置く。LATCH_ENV=local(単体・統合試験・wrangler dev・E2E)はコサイン距離・metadata filter込みのインメモリ実装、staging/prodはenv.VECTORS(Vectorize)のラップ実装であり、選択はLATCH_ENVで行う(05 §2.3)。パイプラインの計測はAnalytics EngineバインディングPIPELINE_AX(dataset=latch_metrics)へ層通過のdata pointをイベント単位で書く(06 §7・バインド未設定の環境では送信を省略)。DLQを見る最小のconsumer(match_eventsへのdead反映・警報)は第1段の消費と同一Workerに実装済みである。**パイプラインKV(F4a実装確定)。** 失効リスト用のKV(REVOCATION_KV)とは別にKVバインディングPIPELINE_KVを置き、Jevのcircuit breakerの状態(06 §5)と予算アラートの送信済み印(同一periodで1回・06 §6)を保持する(キーは05 §2.3)。Workers KVは同一キーへの書き込みが1秒に1回までのため、circuit breakerの状態の書き込みは1波(並列呼び出しの1回分)の結果をまとめて最大1回とし、状態が変わらないとき(成功のみで失敗数が既に0等)は書かない。KVの読み書きの失敗は評価を止めない(読めなければ閉とみなし、書けなければログjev.breaker.kv_failedを出して続行する。安全装置としての近似・06 §5)。
 
 **Cron(毎分)。** 記号と内容は06 §2に揃える。(a)機会Intentのbucket到来の再評価、(b)期限前catch-up走査(expires_atまで2時間以内かつlast_evaluated_atから30分以上経過・01 §16)、(c)全active Intentの期限切れバッチ、(d)つながりLATCHのチャット非活動90日判定(completed)、(e)埋め込み未完了のIntentのバックフィル再試行、(f)usage_counters集計とJev予算の80%到達検知とアラート、(g)埋め込み済みかつ未評価のactive Intentの回収再評価(キュー消失の安全網)、(h)active化後10分経過のつながりIntentの1回きり遅延再評価、(i)提案クローズ後続処理。F3で(a)(b)(c)(e)(g)(h)と保持期間削除(05 §2.6)を、F4aで(f)(i)と回答期限切れ・pending残留の掃査を実装済みであり、(d)はF5で計上する(06 §2)。毎分1回のCron Trigger内で走査対象をインデックス(status・starts_at・expires_at)で最小化する。
 

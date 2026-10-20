@@ -516,6 +516,13 @@
 
 - D1バッチ内の `PRAGMA defer_foreign_keys = ON`(提案化の1バッチ先頭・06 §3)が実D1で効くこと。効かない場合はproposal_history.latch_idの外部キー検査で提案化が常に失敗するため、staging初回の提案化で提案が生成されることを確認する
 - F3計画の同節の項目(Vectorize getByIdsのvalues返却・VectorFloatArrayの透過)も引き続き確認する
+- Jevを複数件含む評価を1回流して failed にならないこと(実KVの同一キー書き込み上限=1秒に1回でcircuit breakerの記録が例外にならないこと・06 §5。miniflareでは再現しない)
+- Cron 1回のD1照会数が上限内であること(追加4走査を含む1回の実行で、実D1の1呼び出しあたりの照会数上限を超えないこと)
+
+### 最終レビューの修正(2026-10-20)
+
+- ブランチ全体のレビュー指摘F1〜F7を1回の修正波で修正した: circuit breakerのKV書き込みを1波1回・状態不変時は書かない・KVとJevの例外を握る(F1)/releaseHeldから全体のexpireHeldを外し範囲内の期限処理とチャンク分割(F2)/Cronの追加4走査とreleaseHeldの1件ごとの処理の隔離(F3)/activeのPATCHでの進行中の提案の取り消し(F4)/提案履歴で提案できないペアのLayer 4前の除外(F5)/leaveでclosed通知を出さない(F6)/closeLatchのstatus IN fromStatusesの楽観照合(F7)
+- 文書反映: 04 v0.12・05〜07 v0.11・08 v0.11・09 v0.10・10〜12 v0.11・00 v0.11(§1版数表)
 
 ### 次の工程
 
