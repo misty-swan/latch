@@ -73,11 +73,12 @@
 - `GET /v1/latches?type=matched`はstatusがmatched・completedのものを返す(id降順・既存の規則)
 - `GET /v1/latches/{id}`・LatchDTOは、completedでもmatchedと同じく提案内容・members・matched_atを返す(成立後の開示範囲・05 §3.3)
 - 各操作(response・retract・leave・defer-reason)はcompletedに対して従来どおりinvalid_statusとなる(matched・提案中のみが対象のため、変更なし)
+- web: `/latches/:id`の状態判定(`selectLatchView`)でcompletedを「このつながりは終了しました」(ended)へ振り分ける。現状はcompletedを知らず「成立しませんでした」(closed)を出すため、誤った文言を防ぐ最小の修正として本工程に含める(completedの専用の表示はF6)
 
 ## 4. 失敗と計測
 
 - 走査の失敗はログ`cron.sweep.failed`(layer=completion・error_code)を出して次の走査へ進む。1件ごとの失敗は`cron.item.failed`(latch_id・error_code)を出して続行する(F4aの方式・06 §2)
-- 完了件数をform別に許可リストの構造化ログへ出す(`cron.completion.done`・connection_count・occasion_count。個人情報は含めない)
+- 完了件数をform別に許可リストの構造化ログへ出す(`cron.completion.done`・layer=connection|occasion・count。許可リストの既存フィールドだけを使い、個人情報は含めない)
 
 ## 5. 試験
 
