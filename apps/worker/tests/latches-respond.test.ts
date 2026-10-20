@@ -440,6 +440,75 @@ describe("成立後処理", () => {
 		expect((await intentOf(y3.id))?.status).toBe("active");
 	});
 
+	/** 機会Intent X(ux)を含む L1(X–Y1)・L2(X–Y2) を、X側のyes済みのpartial_acceptで配置する */
+	const setupSharedIntent = async () => {
+		const ux = await insertUser();
+		const u1 = await insertUser();
+		const u2 = await insertUser();
+		const x = await insertIntent(ux, "occasion");
+		const y1 = await insertIntent(u1, "occasion");
+		const y2 = await insertIntent(u2, "occasion");
+		const l1 = await insertLatch(x, y1, { status: "partial_accept" });
+		const l2 = await insertLatch(x, y2, { status: "partial_accept" });
+		await insertYes(l1, ux);
+		await insertYes(l2, ux);
+		return { x, y1, y2, l1, l2, u1, u2 };
+	};
+
+	it("(h2) 同じ機会Intentを含む2つのLATCHへの同時のyesでも、成立するのはちょうど1件", async () => {
+		const { x, l1, l2, u1, u2 } = await setupSharedIntent();
+
+		await Promise.all([
+			respond(db, l1, u1, "yes", NOW),
+			respond(db, l2, u2, "yes", NOW),
+		]);
+
+		const statuses = [(await latchOf(l1))?.status, (await latchOf(l2))?.status];
+		expect(statuses.filter((s) => s === "matched")).toHaveLength(1);
+		expect(statuses.filter((s) => s === "cancelled")).toHaveLength(1);
+		expect((await intentOf(x.id))?.status).toBe("matched");
+		const matchedEvents = [
+			...(await eventsOf(l1)),
+			...(await eventsOf(l2)),
+		].filter((e) => e.toStatus === "matched");
+		expect(matchedEvents).toHaveLength(1);
+	});
+
+	it("(h3) 後着のyesは invalid_status で、先に成立したLATCHのみがmatched", async () => {
+		const { x, y1, l1, l2, u1, u2 } = await setupSharedIntent();
+
+		expect(await respond(db, l1, u1, "yes", NOW)).toEqual({
+			ok: true,
+			latchId: l1,
+		});
+		expect(await respond(db, l2, u2, "yes", NOW)).toEqual({
+			ok: false,
+			reason: "invalid_status",
+		});
+		expect((await latchOf(l1))?.status).toBe("matched");
+		expect((await latchOf(l2))?.status).toBe("cancelled");
+		expect((await intentOf(x.id))?.status).toBe("matched");
+		expect((await intentOf(y1.id))?.status).toBe("matched");
+	});
+
+	it("(h4) 参加Intentが既にmatched(排他の後続処理の前)なら、yesのバッチは何も書かずinvalid_status", async () => {
+		const { x, l2, u2 } = await setupSharedIntent();
+		// 別のLATCHの成立バッチがXをmatchedにした直後(onMatchedの排他がL2を閉じる前)を再現する
+		await db
+			.update(intents)
+			.set({ status: "matched" })
+			.where(eq(intents.id, x.id));
+
+		expect(await respond(db, l2, u2, "yes", NOW)).toEqual({
+			ok: false,
+			reason: "invalid_status",
+		});
+		expect((await latchOf(l2))?.status).toBe("partial_accept");
+		const rows = await responsesOf(l2);
+		expect(rows.map((r) => r.userId)).not.toContain(u2);
+		expect(await eventsOf(l2)).toHaveLength(0);
+	});
+
 	it("(i) つながりの成立では両Intentはactiveのまま", async () => {
 		const { a, b, latchId, ua, ub } = await setupPair("connection");
 		await respond(db, latchId, ua, "yes", NOW);

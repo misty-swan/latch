@@ -121,8 +121,10 @@ const isActive = (row: ResponseRow | undefined): row is ResponseRow =>
 	row !== undefined && row.retractedAt === null;
 
 /**
- * yes。1バッチで (1) 回答のupsert (2) 状態遷移の記録 (3) 状態の更新 の順に書き、
- * いずれも「LATCHが回答可能(proposed/partial_accept・期限内)」で条件付ける(F4a設計 §4.3)
+ * yes。1バッチで (1) 回答のupsert (2) 状態遷移の記録 (3) 状態の更新 (4) 機会の参加Intentのmatched化
+ * の順に書き、(1)〜(3)は「LATCHが回答可能(proposed/partial_accept・期限内・参加Intentに
+ * matchedが無い)」で条件付ける(F4a設計 §4.3)。参加Intentのmatched化を同じバッチで行うため、
+ * 同じ機会Intentを含む別のLATCHが並行して成立することは無い(#23)
  */
 const respondYes = async (
 	db: DrizzleD1Database,
@@ -131,7 +133,9 @@ const respondYes = async (
 	now: Date,
 ): Promise<RespondResult> => {
 	const nowMs = now.getTime();
-	const open = sql`EXISTS (SELECT 1 FROM latches WHERE id = ${latchId} AND status IN ('proposed', 'partial_accept') AND response_deadline > ${nowMs})`;
+	// つながりのIntentはmatchedにならないため、参加Intentの条件は機会にのみ効く
+	const open = sql`EXISTS (SELECT 1 FROM latches WHERE id = ${latchId} AND status IN ('proposed', 'partial_accept') AND response_deadline > ${nowMs}
+		AND NOT EXISTS (SELECT 1 FROM intents WHERE id IN (SELECT value FROM json_each(latches.intent_ids)) AND status = 'matched'))`;
 	const member = sql`EXISTS (SELECT 1 FROM latch_members WHERE latch_id = ${latchId} AND user_id = ${userId})`;
 	// このバッチで自分のyesが記録されたこと(既存の有効な回答は上書きしない)
 	const recorded = sql`EXISTS (SELECT 1 FROM latch_responses WHERE latch_id = ${latchId} AND user_id = ${userId} AND response = 'yes' AND retracted_at IS NULL AND responded_at = ${nowMs})`;
@@ -168,10 +172,23 @@ const respondYes = async (
 				eq(latches.id, latchId),
 				inArray(latches.status, [...OPEN_STATUSES]),
 				sql`${latches.responseDeadline} > ${nowMs}`,
+				open,
 				recorded,
 			),
 		);
-	await db.batch([upsert, insertEvent, update]);
+	// このバッチで成立した機会のLATCHに限り、参加Intentをmatchedにする(versionは上げない・
+	// Layer 1がD1のstatusで除外する)。onMatched側の同じ更新は冪等な安全網として残す
+	const matchIntents = db
+		.update(intents)
+		.set({ status: "matched", updatedAt: now })
+		.where(
+			and(
+				sql`${intents.id} IN (SELECT value FROM json_each((SELECT intent_ids FROM latches WHERE id = ${latchId})))`,
+				inArray(intents.status, ["active", "paused"]),
+				sql`EXISTS (SELECT 1 FROM latches WHERE id = ${latchId} AND form = 'occasion' AND status = 'matched' AND updated_at = ${nowMs})`,
+			),
+		);
+	await db.batch([upsert, insertEvent, update, matchIntents]);
 
 	const mine = await responseOf(db, latchId, userId);
 	if (
