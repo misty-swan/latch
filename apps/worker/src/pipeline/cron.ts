@@ -39,19 +39,10 @@ import { createVectorStore } from "../vectorstore";
 import { syncVectorStatus } from "../vectorstore/sync-status";
 import type { StoredVector } from "../vectorstore/types";
 import { type IntentRow, runEmbeddingStage } from "./consumer";
+import { errorCodeOf } from "./errors";
 import { evaluateIntent } from "./evaluate";
 
 const logger = createLogger();
-
-/**
- * エラーメッセージ先頭のコード部(「CODE: 〜」形式)を取り出す。
- * コード形式でないメッセージはINTERNALに倒す(consumer.tsと同一の規約)
- */
-const errorCodeOf = (error: unknown): string => {
-	const raw = error instanceof Error ? error.message : String(error);
-	const code = raw.split(":")[0]?.trim() ?? "";
-	return /^[A-Z0-9_]+$/.test(code) ? code : "INTERNAL";
-};
 
 /**
  * バケット幅のSQLリテラル(モジュール定数の埋め込みのためsql.rawで書く。

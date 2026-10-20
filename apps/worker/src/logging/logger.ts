@@ -67,9 +67,9 @@ const createLevelMethod =
 		sink(JSON.stringify({ level, event, ...serializeFields(fields) }));
 	};
 
-/** 構造化ロガーを生成する。sinkの既定はconsole.log(1呼び出しにつき1行出力) */
+/** 構造化ロガーを生成する。sinkの既定は呼び出し時点のconsole.log(1呼び出しにつき1行出力・試験のspyが効く) */
 export const createLogger = (
-	sink: (line: string) => void = console.log,
+	sink: (line: string) => void = (line) => console.log(line),
 ): Logger => ({
 	debug: createLevelMethod("debug", sink),
 	info: createLevelMethod("info", sink),

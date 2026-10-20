@@ -8,7 +8,7 @@
 import type { MatchEventType } from "@latch/shared";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { systemClock } from "../clock/clock";
+import type { Clock } from "../clock/clock";
 import { matchEvents } from "../db/schema";
 import type { Env } from "../env";
 import { newUlid } from "../ids";
@@ -70,13 +70,15 @@ const sendToMatchQueue = async (
  * match_events行をINSERT(status=pending・payload={})してMATCH_QUEUEへ送る。
  * 戻り値はイベントのid。INSERTはawaitして完了を待ってからsendする。
  * UNIQUE衝突時は既存同一イベントの再発行として、既存行のidでsendだけを行う(冪等)。
+ * 時刻はClock注入(docs/04 §4): ルートはsystemClock・pipelineは注入Clockを渡す。
  * ルートからはc.executionCtx.waitUntil(...)経由で呼び、応答をブロックしない
  * (docs/04 §7の保存p95)
  */
 export const emitMatchEvent = async (
 	env: Env,
 	params: EmitMatchEventParams,
-	opts?: EmitMatchEventOptions,
+	opts: EmitMatchEventOptions | undefined,
+	clock: Clock,
 ): Promise<string> => {
 	const db = drizzle(env.DB);
 	const eventId = newUlid();
@@ -88,7 +90,7 @@ export const emitMatchEvent = async (
 			version: params.version,
 			payload: {},
 			status: "pending",
-			createdAt: systemClock.now(),
+			createdAt: clock.now(),
 		});
 	} catch (error) {
 		if (!isUniqueViolation(error)) {

@@ -461,11 +461,16 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 	// draft保存では発行しない。waitUntilでsendし、応答をブロックしない(04 §7の保存p95)
 	if (inserted.status === "active") {
 		c.executionCtx.waitUntil(
-			emitMatchEvent(c.env, {
-				eventType: "intent_created",
-				intentId: inserted.id,
-				version: inserted.version,
-			}),
+			emitMatchEvent(
+				c.env,
+				{
+					eventType: "intent_created",
+					intentId: inserted.id,
+					version: inserted.version,
+				},
+				undefined,
+				systemClock,
+			),
 		);
 	}
 	return c.json(toIntentDto(inserted), 201);
@@ -852,11 +857,16 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 	// draftままでの編集は発行しない)。waitUntilでsendし、応答をブロックしない
 	if (row.status === "draft" && result.row.status === "active") {
 		c.executionCtx.waitUntil(
-			emitMatchEvent(c.env, {
-				eventType: "intent_created",
-				intentId: result.row.id,
-				version: result.row.version,
-			}),
+			emitMatchEvent(
+				c.env,
+				{
+					eventType: "intent_created",
+					intentId: result.row.id,
+					version: result.row.version,
+				},
+				undefined,
+				systemClock,
+			),
 		);
 	} else if (row.status === "active" && intentMeaningChanged(row, result.row)) {
 		c.executionCtx.waitUntil(
@@ -868,6 +878,7 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 					version: result.row.version,
 				},
 				{ delaySeconds: PIPELINE.UPDATE_EVENT_DELAY_SECONDS },
+				systemClock,
 			),
 		);
 	}
@@ -1092,11 +1103,16 @@ intentRoutes.post("/:id/resume", requireRegistered, async (c) => {
 	// イベント発行(docs/06 §2「resumeはintent_updatedイベントを発行して再評価する」)。
 	// 即時投入・versionは再開後の値。waitUntilでsendし、応答をブロックしない
 	c.executionCtx.waitUntil(
-		emitMatchEvent(c.env, {
-			eventType: "intent_updated",
-			intentId: result.row.id,
-			version: result.row.version,
-		}),
+		emitMatchEvent(
+			c.env,
+			{
+				eventType: "intent_updated",
+				intentId: result.row.id,
+				version: result.row.version,
+			},
+			undefined,
+			systemClock,
+		),
 	);
 	logger.info("intents.resumed", {
 		intent_id: result.row.id,

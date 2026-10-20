@@ -369,3 +369,56 @@ describe("DLQの消費(docs/06 §5: dead反映と警報)", () => {
 		expect(origin?.status).toBe("dead");
 	});
 });
+
+/** console.logへ出た構造化ログ(JSON1行)のうち、指定eventのものを返す */
+const logsOf = (
+	spy: ReturnType<typeof vi.spyOn>,
+	event: string,
+): Record<string, unknown>[] =>
+	spy.mock.calls
+		.map(
+			(call: unknown[]) =>
+				JSON.parse(String(call[0])) as Record<string, unknown>,
+		)
+		.filter((line: Record<string, unknown>) => line.event === event);
+
+describe("ログの分離と計測(docs/06 §7・docs/08 §6)", () => {
+	it("第2段のevaluateIntentが例外ならstage2.failedを出し(stage1.failedは出さず)起点はfailed", async () => {
+		const { intentId, eventId } = await seedEvent({
+			eventType: "embedding_completed",
+		});
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		// local以外でVECTORSが無いとcreateVectorStore経由のgetByIdsで例外になる
+		const brokenEnv = {
+			...testEnv,
+			LATCH_ENV: "staging",
+			VECTORS: undefined,
+		} as unknown as WorkerEnv;
+
+		const result = await runBatch("match-events", [eventId], brokenEnv);
+
+		expectAcked(result);
+		expect(logsOf(logSpy, "pipeline.stage2.failed")).toHaveLength(1);
+		expect(logsOf(logSpy, "pipeline.stage2.failed")[0]?.intent_id).toBe(
+			intentId,
+		);
+		expect(logsOf(logSpy, "pipeline.stage1.failed")).toHaveLength(0);
+		const [origin] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		expect(origin?.status).toBe("failed");
+	});
+
+	it("stage1.completedログにcountが載る", async () => {
+		const { eventId } = await seedEvent();
+		spySend();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runBatch("match-events", [eventId]);
+
+		const completed = logsOf(logSpy, "pipeline.stage1.completed");
+		expect(completed).toHaveLength(1);
+		expect(completed[0]?.count).toBe(1);
+	});
+});

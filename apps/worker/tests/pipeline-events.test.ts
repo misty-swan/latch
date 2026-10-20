@@ -22,6 +22,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { importJWK, SignJWT } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
+import { fixedClock, systemClock } from "../src/clock/clock";
 import { matchEvents } from "../src/db/schema";
 // ルート・emitMatchEventが受け取るEnv(src/env.ts・生成型Envの宣言部分型)
 import type { Env as WorkerEnv } from "../src/env";
@@ -434,8 +435,13 @@ describe("emitMatchEventの冪等性(docs/06 §2: UNIQUEが二重投入を許さ
 			intentId: draft.id,
 			version: 1,
 		} as const;
-		const first = await emitMatchEvent(testEnv, params);
-		const second = await emitMatchEvent(testEnv, params);
+		const first = await emitMatchEvent(testEnv, params, undefined, systemClock);
+		const second = await emitMatchEvent(
+			testEnv,
+			params,
+			undefined,
+			systemClock,
+		);
 		// 衝突時は既存イベントの再発行のため、戻り値は同一のevent_id
 		expect(second).toBe(first);
 		const rows = await db
@@ -455,5 +461,25 @@ describe("emitMatchEventの冪等性(docs/06 §2: UNIQUEが二重投入を許さ
 			(call) => (call[0] as MatchQueueMessage).event_id === first,
 		);
 		expect(calls).toHaveLength(2);
+	});
+});
+
+describe("emitMatchEventの時刻(docs/04 §4: Clock注入)", () => {
+	it("注入したfixedClockの時刻がcreated_atに入る", async () => {
+		const accessToken = await registerUser("emit-clock");
+		spySend();
+		const draft = await createDraft(accessToken);
+		const at = new Date("2026-10-19T12:00:00.000Z");
+		const eventId = await emitMatchEvent(
+			testEnv,
+			{ eventType: "intent_created", intentId: draft.id, version: 1 },
+			undefined,
+			fixedClock(at),
+		);
+		const [row] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		expect(row?.createdAt.getTime()).toBe(at.getTime());
 	});
 });

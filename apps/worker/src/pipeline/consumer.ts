@@ -19,6 +19,7 @@ import { createEmbedder } from "../llm/embedding";
 import { createLogger } from "../logging/logger";
 import { createVectorStore } from "../vectorstore";
 import type { VectorStore } from "../vectorstore/types";
+import { errorCodeOf } from "./errors";
 import { evaluateIntent } from "./evaluate";
 import { emitMatchEvent } from "./events";
 import { buildNormalizedText } from "./normalize";
@@ -30,16 +31,6 @@ export type IntentRow = typeof intents.$inferSelect;
 
 /** 第1段の本体の結果。failed=Embedding系の失敗(再試行なし・06 §5) */
 export type EmbeddingStageResult = "embedded" | "failed";
-
-/**
- * エラーメッセージ先頭のコード部(「CODE: 〜」形式・llm/embedding.tsの規約)を
- * 取り出す。コード形式でないメッセージはEMBEDDING_FAILEDに倒す
- */
-const errorCodeOf = (error: unknown): string => {
-	const raw = error instanceof Error ? error.message : String(error);
-	const code = raw.split(":")[0]?.trim() ?? "";
-	return /^[A-Z0-9_]+$/.test(code) ? code : "EMBEDDING_FAILED";
-};
 
 /** 実時間のsleep(反映確認のポーリング間隔用) */
 const sleep = (ms: number): Promise<void> =>
@@ -123,19 +114,26 @@ export const runEmbeddingStage = async (
 			.set({ embeddingModel: embedder.modelId, embeddedAt: clock.now() })
 			.where(eq(intents.id, intent.id));
 		// 第2段への再投入(同version・即時・docs/06 §2)
-		await emitMatchEvent(env, {
-			eventType: "embedding_completed",
-			intentId: intent.id,
-			version: intent.version,
-		});
+		await emitMatchEvent(
+			env,
+			{
+				eventType: "embedding_completed",
+				intentId: intent.id,
+				version: intent.version,
+			},
+			undefined,
+			clock,
+		);
+		// count=upsertしたベクトル数(1Intent=1ベクトル・06 §7の層別観測)
 		logger.info("pipeline.stage1.completed", {
 			intent_id: intent.id,
+			count: 1,
 			latency: clock.now().getTime() - startedAt,
 		});
 		return "embedded";
 	} catch (error) {
 		logger.warn("pipeline.stage1.failed", {
-			error_code: errorCodeOf(error),
+			error_code: errorCodeOf(error, "EMBEDDING_FAILED"),
 			intent_id: intent.id,
 		});
 		return "failed";
@@ -199,7 +197,19 @@ const consumeEvent = async (
 	// 起点イベントのpayloadへ記録する(docs/06 §7のイベント単位の計測)。
 	// evaluateIntentがnull(抑制・対象外)のときはskippedを載せてprocessedへ倒す
 	if (event.eventType === "embedding_completed") {
-		const result = await evaluateIntent(env, event.sourceIntentId, clock);
+		let result: Awaited<ReturnType<typeof evaluateIntent>>;
+		try {
+			result = await evaluateIntent(env, event.sourceIntentId, clock);
+		} catch (error) {
+			// 第2段の失敗は第1段のログと分けて記録し、起点イベントをfailedへ倒す
+			// (再試行なし・06 §5。Cronの未評価回収が拾う)
+			logger.warn("pipeline.stage2.failed", {
+				error_code: errorCodeOf(error),
+				intent_id: event.sourceIntentId,
+			});
+			await markFailed(env, event.id);
+			return;
+		}
 		await markProcessed(
 			env,
 			event.id,
@@ -279,7 +289,9 @@ const handleMainQueueBatch = async (
 		} catch (error) {
 			// 個別消費の失敗は再試行せずack(06 §5の設計)。intent_idはこの時点で
 			// 特定できないため記録しない(許可フィールドのみ・docs/08 §6)
-			logger.warn("pipeline.stage1.failed", { error_code: errorCodeOf(error) });
+			logger.warn("pipeline.stage1.failed", {
+				error_code: errorCodeOf(error, "EMBEDDING_FAILED"),
+			});
 		}
 	}
 };
@@ -329,6 +341,8 @@ export const handleQueueBatch = async (
 		await handleMainQueueBatch(env, batch, clock);
 	} catch (error) {
 		// 最終安全網: 例外を外へ出さずackする(失敗はメッセージごとの記録に努める)
-		logger.warn("pipeline.stage1.failed", { error_code: errorCodeOf(error) });
+		logger.warn("pipeline.stage1.failed", {
+			error_code: errorCodeOf(error, "EMBEDDING_FAILED"),
+		});
 	}
 };
