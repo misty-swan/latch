@@ -340,6 +340,7 @@ export const leave = async (
 	const loaded = await loadForMember(db, latchId, userId);
 	if (loaded === null) return fail("not_found");
 	if (loaded.latch.status !== "matched") return fail("invalid_status");
+	// 成立後の離脱はclosed通知を出さない(closedは不成立の総称・docs/05 §2.2)
 	const closed = await closeLatch(
 		db,
 		latchId,
@@ -347,6 +348,7 @@ export const leave = async (
 		null,
 		["matched"],
 		now,
+		{ notify: false },
 	);
 	return closed ? { ok: true, latchId } : fail("invalid_status");
 };

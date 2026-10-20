@@ -1,13 +1,15 @@
 /**
  * 提案クローズの共通処理(F4a設計 §4.2・docs/05 §3.3)。
  * 回答(defer/no)・回答期限切れ・排他・Intent削除・保留の期限切れが共有する。
- * LATCH行を読んだ状態を条件とする楽観的なUPDATEを1文目とし、後続の書き込みをすべて
- * 「そのLATCHが status=to かつ updated_at=now であること」で条件付けた1つのD1バッチ
- * (1トランザクション)で書く。並行した別のクローズ・回答に負けた側の後続は0行となる。
+ * 1文目で更新直前の状態を遷移元として記録し(INSERT … SELECT・status IN fromStatuses)、
+ * 2文目で「status IN fromStatuses」を条件とする楽観的なUPDATEを行い、後続の書き込みを
+ * すべて「そのLATCHが status=to かつ updated_at=now であること」で条件付けた1つのD1バッチ
+ * (1トランザクション)で書く。読んだ後に並行したyesで proposed→partial_accept へ進んでも
+ * fromStatusesに含まれれば閉じられる。並行した別のクローズに負けた側の後続は0行となる。
  */
 
 import type { LatchStatus } from "@latch/shared";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import {
 	latches,
@@ -25,7 +27,8 @@ export type CloseTo = "rejected" | "expired" | "cancelled";
  * - latch_status_events に(読んだ状態 → to)を記録する
  * - historyOutcome が非nullなら、このLATCHを指す proposal_history 行の outcome を更新する
  *   (同ペアの履歴が別のLATCHへ移っていれば触らない)
- * - 提示済み(proposed_atあり)なら参加者全員へ type=closed の通知を作る(docs/05 §3.3)
+ * - 提示済み(proposed_atあり)なら参加者全員へ type=closed の通知を作る(docs/05 §3.3)。
+ *   options.notify=false なら作らない(成立後の離脱 leave。closedは不成立の総称・docs/05 §2.2)
  */
 export const closeLatch = async (
 	db: DrizzleD1Database,
@@ -34,7 +37,9 @@ export const closeLatch = async (
 	historyOutcome: "rejected" | "deferred" | "expired" | null,
 	fromStatuses: LatchStatus[],
 	now: Date,
+	options: { notify?: boolean } = {},
 ): Promise<boolean> => {
+	const notify = options.notify ?? true;
 	const [row] = await db
 		.select({ status: latches.status, proposedAt: latches.proposedAt })
 		.from(latches)
@@ -42,7 +47,7 @@ export const closeLatch = async (
 	if (row === undefined || !fromStatuses.includes(row.status)) return false;
 
 	const members =
-		row.proposedAt !== null
+		notify && row.proposedAt !== null
 			? await db
 					.select({ userId: latchMembers.userId })
 					.from(latchMembers)
@@ -52,15 +57,19 @@ export const closeLatch = async (
 	const nowMs = now.getTime();
 	const closed = sql`EXISTS (SELECT 1 FROM latches WHERE id = ${latchId} AND status = ${to} AND updated_at = ${nowMs})`;
 
+	// 遷移元は更新直前の現在値から書く(respondYesと同じ方式)。同じトランザクション内で
+	// 直後のUPDATEと同じ条件を見るため、記録とUPDATEの成否は一致する
+	const insertEvent = db.insert(latchStatusEvents).select(
+		sql`SELECT ${newUlid()}, id, status, ${to}, ${nowMs} FROM latches
+				WHERE id = ${latchId} AND status IN (${sql.join(
+					fromStatuses.map((s) => sql`${s}`),
+					sql`, `,
+				)})`,
+	);
 	const update = db
 		.update(latches)
 		.set({ status: to, updatedAt: now })
-		.where(and(eq(latches.id, latchId), eq(latches.status, row.status)));
-	const insertEvent = db
-		.insert(latchStatusEvents)
-		.select(
-			sql`SELECT ${newUlid()}, ${latchId}, ${row.status}, ${to}, ${nowMs} WHERE ${closed}`,
-		);
+		.where(and(eq(latches.id, latchId), inArray(latches.status, fromStatuses)));
 	const historyStatements =
 		historyOutcome !== null
 			? [
@@ -81,8 +90,8 @@ export const closeLatch = async (
 	);
 
 	await db.batch([
-		update,
 		insertEvent,
+		update,
 		...historyStatements,
 		...notifyStatements,
 	]);

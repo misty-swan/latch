@@ -330,6 +330,20 @@ describe("respond(defer/no)", () => {
 		expect((await latchOf(latchId))?.status).toBe("rejected");
 	});
 
+	it("Aのyes(partial_acceptへ)の後にBのdeferが成功してrejectedになる", async () => {
+		const { latchId, ua, ub } = await setupPair("occasion");
+		expect(await respond(db, latchId, ua, "yes", NOW)).toEqual({
+			ok: true,
+			latchId,
+		});
+		expect((await latchOf(latchId))?.status).toBe("partial_accept");
+		expect(await respond(db, latchId, ub, "defer", NOW)).toEqual({
+			ok: true,
+			latchId,
+		});
+		expect((await latchOf(latchId))?.status).toBe("rejected");
+	});
+
 	it("期限経過後のdeferはdeadline_passedで回答行を残さない", async () => {
 		const { latchId, ua } = await setupPair("occasion", {
 			deadline: ago(MIN),
@@ -537,6 +551,16 @@ describe("leave", () => {
 			ok: false,
 			reason: "invalid_status",
 		});
+	});
+
+	it("leaveではclosed通知を作らない(closedは不成立の総称で成立後の離脱を含まない・05 §2.2)", async () => {
+		const { latchId, ua, ub } = await setupPair("connection");
+		await respond(db, latchId, ua, "yes", NOW);
+		await respond(db, latchId, ub, "yes", NOW);
+		const t2 = new Date(NOW.getTime() + MIN);
+		expect(await leave(db, latchId, ua, t2)).toEqual({ ok: true, latchId });
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		expect(await notificationsOf(latchId, "closed")).toHaveLength(0);
 	});
 });
 

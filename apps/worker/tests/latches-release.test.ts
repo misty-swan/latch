@@ -506,6 +506,58 @@ describe("expireHeld", () => {
 });
 
 describe("closeLatch", () => {
+	it("読み取りの後に状態がproposed→partial_acceptへ進んでも、fromStatusesに含まれれば閉じ、遷移元は更新直前の値で記録する", async () => {
+		const { latchId } = await setupPair(
+			"connection",
+			{},
+			{ status: "proposed" },
+		);
+		// 並行したyesを模す: closeLatchがLATCHを読んだ後・バッチを書く前に状態を進める
+		const racing = new Proxy(db, {
+			get(target, prop, receiver) {
+				if (prop === "batch") {
+					return async (statements: Parameters<typeof db.batch>[0]) => {
+						await db
+							.update(latches)
+							.set({ status: "partial_accept" })
+							.where(eq(latches.id, latchId));
+						return target.batch(statements);
+					};
+				}
+				return Reflect.get(target, prop, receiver);
+			},
+		});
+		expect(
+			await closeLatch(
+				racing,
+				latchId,
+				"rejected",
+				"deferred",
+				["proposed", "partial_accept"],
+				NOW,
+			),
+		).toBe(true);
+		expect((await latchOf(latchId))?.status).toBe("rejected");
+		const events = await eventsOf(latchId);
+		expect(events.map((e) => [e.fromStatus, e.toStatus])).toEqual([
+			["partial_accept", "rejected"],
+		]);
+	});
+
+	it("notify:falseなら提示済みでもclosed通知を作らない", async () => {
+		const { latchId } = await setupPair(
+			"connection",
+			{},
+			{ status: "matched" },
+		);
+		expect(
+			await closeLatch(db, latchId, "cancelled", null, ["matched"], NOW, {
+				notify: false,
+			}),
+		).toBe(true);
+		expect(await notificationsOf(latchId)).toHaveLength(0);
+	});
+
 	it("(d) 提示済み提案を閉じると参加者2人にclosed通知・履歴更新・状態遷移を記録する", async () => {
 		const { latchId, userIds } = await setupPair(
 			"connection",
