@@ -13,8 +13,9 @@ import { fixedClock } from "../src/clock/clock";
 import { intents, matchCandidates, users } from "../src/db/schema";
 import type { Env as WorkerEnv } from "../src/env";
 import { JEV_LOW_MARKER } from "../src/llm/stub/jev";
-import { JEV_AXES } from "../src/llm/types";
+import { JEV_AXES, type JevFn, type JevInput } from "../src/llm/types";
 import { type L4Candidate, runLayer4 } from "../src/pipeline/layer4";
+import { buildNormalizedText } from "../src/pipeline/normalize";
 
 const testEnv = env as unknown as WorkerEnv;
 const db = drizzle(testEnv.DB);
@@ -165,5 +166,28 @@ describe("runLayer4", () => {
 		}
 		expect(axes?.would_a_accept_b).toBe(0.3);
 		expect(axes?.would_b_accept_a).toBe(0.3);
+	});
+
+	it("JevInputのnormalizedA/Bは行の向き(intent_a=小さいid側)で渡される", async () => {
+		const c = await seedPair(false, {
+			small: "小さいid側",
+			large: "大きいid側",
+		});
+		const seen: JevInput[] = [];
+		const fake: JevFn = async (input) => {
+			seen.push(input);
+			return {
+				ok: true,
+				axes: Object.fromEntries(JEV_AXES.map((a) => [a, 0.9])) as Record<
+					(typeof JEV_AXES)[number],
+					number
+				>,
+			};
+		};
+		await runLayer4(testEnv, clock, [c], { primary: fake, fallback: fake });
+		expect(seen).toHaveLength(1);
+		// originは大きいid側(intent_b)。A=other(小さいid側)・B=origin
+		expect(seen[0]?.normalizedA).toBe(buildNormalizedText(c.other));
+		expect(seen[0]?.normalizedB).toBe(buildNormalizedText(c.origin));
 	});
 });

@@ -12,7 +12,7 @@ import { type intents, matchCandidates } from "../db/schema";
 import type { Env } from "../env";
 import { type JevRunResult, type JevTarget, runJev } from "../jev/runner";
 import { createLlm } from "../llm/mode";
-import type { JevAxes } from "../llm/types";
+import type { JevAxes, JevFn } from "../llm/types";
 import { buildNormalizedText } from "./normalize";
 
 type IntentRow = typeof intents.$inferSelect;
@@ -36,6 +36,11 @@ export const runLayer4 = async (
 	env: Env,
 	clock: Clock,
 	candidates: L4Candidate[],
+	// 試験で入力の向きを記録できるよう差し替え可能にする(既定は設定どおりのJev)
+	jev: { primary: JevFn; fallback: JevFn } = createLlm(
+		env as unknown as Parameters<typeof createLlm>[0],
+		clock,
+	).jev,
 ): Promise<L4Result> => {
 	const db = drizzle(env.DB);
 	const axesByRow = new Map<string, JevAxes>();
@@ -95,8 +100,7 @@ export const runLayer4 = async (
 
 	const run = await runJev(
 		{
-			jev: createLlm(env as unknown as Parameters<typeof createLlm>[0], clock)
-				.jev,
+			jev,
 			db,
 			kv: env.PIPELINE_KV,
 			clock,
