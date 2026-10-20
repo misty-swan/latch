@@ -22,6 +22,7 @@ import {
 	users,
 } from "../src/db/schema";
 import type { Env as WorkerEnv } from "../src/env";
+import { proposeNextGroup } from "../src/latches/next-group";
 import { historyBlockedPairs, proposeSet } from "../src/latches/propose";
 import { leave, respond } from "../src/latches/respond";
 import type { IntentRow } from "../src/pipeline/consumer";
@@ -790,5 +791,89 @@ describe("成立後の離脱(F4b設計 §3.4・オーナー裁定3)", () => {
 			(v) => v !== null,
 		).length;
 		expect(leftCount).toBe(1);
+	});
+});
+
+describe("次集合の提案(F4b設計 §3.5)", () => {
+	/** trioのIntentを{x,y,z}の順(id昇順に依らない)で返す */
+	const intentsOfTrio = async (latchId: string) => {
+		const l = await latchOf(latchId);
+		const rows: IntentRow[] = [];
+		for (const id of l?.intentIds ?? []) {
+			const [r] = await db.select().from(intents).where(eq(intents.id, id));
+			rows.push(r);
+		}
+		return rows;
+	};
+	const nextLatchWith = async (members: IntentRow[], exceptId: string) =>
+		(await latchesWithAny(members)).filter((l) => l.id !== exceptId);
+
+	it("Cのdeferで{A,B,C}が閉じると、評価済みの{A,B,D}が提案される", async () => {
+		const { latchId, z } = await setupTrio("connection");
+		const [a, b, c] = await intentsOfTrio(latchId);
+		const [d] = await insertMembers(1, "connection");
+		const abd = [a, b, d];
+		const gid = await insertGroupCandidate(abd, 0.9);
+		expect(await respond(db, latchId, c.userId, "defer", NOW)).toEqual({
+			ok: true,
+			latchId,
+		});
+		expect(z).toBe(c.userId);
+		const next = await nextLatchWith(abd, latchId);
+		expect(next.length).toBe(1);
+		expect(next[0].status).toBe("proposed");
+		expect(next[0].intentIds.sort()).toEqual(abd.map((m) => m.id).sort());
+		expect((await groupCandidateOf(gid))?.status).toBe("proposed");
+	});
+
+	it("次集合のメンバーが更新済み(version不一致)なら提案しない", async () => {
+		const { latchId } = await setupTrio("connection");
+		const [a, b, c] = await intentsOfTrio(latchId);
+		const [d] = await insertMembers(1, "connection");
+		const gid = await insertGroupCandidate([a, b, d], 0.9);
+		await db.update(intents).set({ version: 2 }).where(eq(intents.id, d.id));
+		await respond(db, latchId, c.userId, "defer", NOW);
+		expect((await nextLatchWith([a, b, d], latchId)).length).toBe(0);
+		expect((await groupCandidateOf(gid))?.status).toBe("candidate");
+	});
+
+	it("閾値ちょうど(0.60)の集合は提案しない", async () => {
+		const { latchId } = await setupTrio("connection");
+		const [a, b, c] = await intentsOfTrio(latchId);
+		const [d] = await insertMembers(1, "connection");
+		await insertGroupCandidate([a, b, d], 0.6);
+		await respond(db, latchId, c.userId, "defer", NOW);
+		expect((await nextLatchWith([a, b, d], latchId)).length).toBe(0);
+	});
+
+	it("1対1(2件)のクローズ相当の呼び出しでは何もしない", async () => {
+		const { latchId } = await setupTrio("connection");
+		const [a, b] = await intentsOfTrio(latchId);
+		const [d] = await insertMembers(1, "connection");
+		await insertGroupCandidate([a, b, d], 0.9);
+		expect(await proposeNextGroup(db, [a.id, b.id], NOW)).toBeNull();
+		expect((await nextLatchWith([a, b, d], latchId)).length).toBe(0);
+	});
+
+	it("回答期限切れの走査で閉じた場合も次集合が提案される", async () => {
+		vi.spyOn(testEnv.MATCH_QUEUE, "send").mockResolvedValue({
+			metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+		});
+		const { latchId, x, y } = await setupTrio("occasion", {
+			status: "partial_accept",
+			deadline: ago(MIN),
+		});
+		const [a, b, c] = await intentsOfTrio(latchId);
+		await insertYes(latchId, a.userId);
+		await insertYes(latchId, b.userId);
+		expect([x, y]).toContain(a.userId);
+		const [d] = await insertMembers(1, "occasion");
+		await insertGroupCandidate([a, b, d], 0.9);
+		await runScheduledPipeline(testEnv, fixedClock(NOW));
+		expect((await latchOf(latchId))?.status).toBe("expired");
+		const next = await nextLatchWith([a, b, d], latchId);
+		expect(next.length).toBe(1);
+		expect(next[0].status).toBe("proposed");
+		expect(c.id).toBeDefined();
 	});
 });

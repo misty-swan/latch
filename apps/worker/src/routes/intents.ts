@@ -62,6 +62,7 @@ import { newUlid } from "../ids";
 import { MS_PER_DAY } from "../intents/expiry";
 import { validateIntentForActive } from "../intents/validation";
 import { closeLatch } from "../latches/close";
+import { proposeNextGroupAfterClose } from "../latches/next-group";
 import { releaseHeld } from "../latches/release";
 import { createLlm } from "../llm/mode";
 import { createLogger } from "../logging/logger";
@@ -294,6 +295,7 @@ const cancelOpenLatchesOf = async (
 			),
 		);
 	const affectedUserIds = new Set<string>();
+	const closedLatchIds: string[] = [];
 	for (const l of openLatches) {
 		// 削除・条件変更はシステムの都合の閉じ方のため履歴を消費しない(オーナー裁定 2026-10-20)
 		const closed = await closeLatch(
@@ -305,6 +307,7 @@ const cancelOpenLatchesOf = async (
 			now,
 		);
 		if (!closed) continue;
+		closedLatchIds.push(l.id);
 		const members = await db
 			.select({ userId: latchMembers.userId })
 			.from(latchMembers)
@@ -315,6 +318,10 @@ const cancelOpenLatchesOf = async (
 	affectedUserIds.delete(actorUserId);
 	if (affectedUserIds.size > 0) {
 		await releaseHeld(db, now, [...affectedUserIds]);
+	}
+	// 閉じたグループ提案ごとに、評価済みの次の集合を提案する(F4b設計 §3.5)
+	for (const id of closedLatchIds) {
+		await proposeNextGroupAfterClose(db, id, now);
 	}
 };
 

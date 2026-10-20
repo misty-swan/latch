@@ -19,6 +19,7 @@ import {
 } from "../db/schema";
 import { newUlid } from "../ids";
 import { closeLatch } from "./close";
+import { proposeNextGroupAfterClose } from "./next-group";
 import { releaseHeld } from "./release";
 
 export type RespondFailure =
@@ -261,6 +262,8 @@ const respondClose = async (
 			},
 		});
 	await releaseHeld(db, now, await membersOf(db, latchId));
+	// グループなら評価済みの次の集合を提案する(F4b設計 §3.5)
+	await proposeNextGroupAfterClose(db, latchId, now);
 	return { ok: true, latchId };
 };
 
@@ -502,4 +505,5 @@ const onMatched = async (
 		}
 	}
 	await releaseHeld(db, now, [...related]);
+	await proposeNextGroupAfterClose(db, latchId, now);
 };

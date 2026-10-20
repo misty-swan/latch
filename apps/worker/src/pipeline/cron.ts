@@ -48,6 +48,7 @@ import {
 import type { Env } from "../env";
 import { MS_PER_DAY } from "../intents/expiry";
 import { closeLatch } from "../latches/close";
+import { proposeNextGroupAfterClose } from "../latches/next-group";
 import { expireHeld, releaseHeld } from "../latches/release";
 import { createLogger } from "../logging/logger";
 import { createVectorStore } from "../vectorstore";
@@ -612,7 +613,9 @@ const runResponseDeadlineSweep = async (
 						isNull(latchResponses.retractedAt),
 					),
 				);
-			// 参加者の保留の解放は直後の保留走査(runHeldSweep)が全体で拾う
+			// 参加者の保留の解放は直後の保留走査(runHeldSweep)が全体で拾う。
+			// グループなら評価済みの次の集合を提案する(F4b設計 §3.5・失敗は内部でログへ)
+			await proposeNextGroupAfterClose(db, id, now);
 			expired += 1;
 		} catch (error) {
 			logger.warn("cron.item.failed", {
