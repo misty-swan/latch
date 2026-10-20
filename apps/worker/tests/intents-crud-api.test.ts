@@ -15,7 +15,15 @@ import { importJWK, SignJWT } from "jose";
 import { ulid } from "ulid";
 import { describe, expect, it } from "vitest";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
-import { intents, matchEvents, users } from "../src/db/schema";
+import {
+	intents,
+	latches,
+	latchMembers,
+	matchEvents,
+	notifications,
+	proposalHistory,
+	users,
+} from "../src/db/schema";
 import { MS_PER_DAY } from "../src/intents/expiry";
 import { updateWithOptimisticLock } from "../src/routes/intents";
 import privateJwkText from "./fixtures/test-idp-private.jwk?raw";
@@ -908,5 +916,164 @@ describe("DELETE /v1/intents/{id}(削除・docs/05 §3.1・§3.2)", () => {
 		expect(res.status).toBe(401);
 		const body = (await res.json()) as ErrorResponse;
 		expect(body.error.code).toBe("UNAUTHORIZED");
+	});
+});
+
+describe("DELETE /v1/intents/{id}: 進行中の提案の取り消し(docs/01 §8・docs/05 §2.5)", () => {
+	/** 相手ユーザーとそのactiveなつながりIntentを直接INSERTする */
+	const insertPeer = async (): Promise<{
+		userId: string;
+		intentId: string;
+	}> => {
+		const userId = ulid();
+		const now = new Date();
+		await db.insert(users).values({
+			id: userId,
+			authProvider: "google",
+			authSubject: `del-peer-${userId}`,
+			actorType: "individual",
+			displayName: "相手",
+			bio: "",
+			birthDate: "1990-01-01",
+			status: "active",
+			createdAt: now,
+			updatedAt: now,
+		});
+		const intentId = ulid();
+		await db.insert(intents).values({
+			id: intentId,
+			userId,
+			form: "connection",
+			topic: "相手の主題",
+			rawText: "相手の生テキスト",
+			participantsMin: 2,
+			participantsMax: 3,
+			participantsIncludesOwner: true,
+			hardConstraints: [],
+			softConstraints: [],
+			negativeConstraints: [],
+			visibility: "hidden_until_match",
+			notificationLevel: "proposals_only",
+			alcoholInvolved: false,
+			status: "active",
+			version: 1,
+			expiresAt: new Date(Date.now() + 30 * MS_PER_DAY),
+			createdAt: now,
+			updatedAt: now,
+		});
+		return { userId, intentId };
+	};
+
+	/** 2者のLATCH・members・proposal_historyを直接INSERTする */
+	const insertLatchOf = async (
+		mine: { userId: string; intentId: string },
+		peer: { userId: string; intentId: string },
+		status: "candidate" | "proposed" | "matched",
+	): Promise<string> => {
+		const id = ulid();
+		const now = new Date();
+		await db.insert(latches).values({
+			id,
+			form: "connection",
+			intentIds: [mine.intentId, peer.intentId],
+			proposal: {
+				form: "connection",
+				topic: "主題",
+				time_window: null,
+				region_name: null,
+				participants: { min: 2, max: 3 },
+				budget: null,
+			},
+			score: 0.9,
+			status,
+			responseDeadline: new Date(Date.now() + 24 * 60 * 60 * 1000),
+			expiresAt: new Date(Date.now() + 30 * MS_PER_DAY),
+			lastMessageAt: now,
+			completedAt: null,
+			proposedAt: status === "candidate" ? null : now,
+			createdAt: now,
+			updatedAt: now,
+		});
+		await db.insert(latchMembers).values([
+			{ latchId: id, userId: mine.userId },
+			{ latchId: id, userId: peer.userId },
+		]);
+		const [low, high] =
+			mine.userId < peer.userId
+				? [mine.userId, peer.userId]
+				: [peer.userId, mine.userId];
+		await db.insert(proposalHistory).values({
+			id: ulid(),
+			userLow: low,
+			userHigh: high,
+			latchId: id,
+			outcome: status === "matched" ? "matched" : "proposed",
+			createdAt: now,
+			updatedAt: now,
+		});
+		return id;
+	};
+
+	const setup = async (label: string) => {
+		const accessToken = await registerUser(label);
+		const created = await createActiveConnection(accessToken, `${label}の主題`);
+		const [row] = await db
+			.select({ userId: intents.userId })
+			.from(intents)
+			.where(eq(intents.id, created.id));
+		const mine = { userId: row?.userId ?? "", intentId: created.id };
+		return { accessToken, mine, peer: await insertPeer() };
+	};
+
+	const latchOf = async (id: string) => {
+		const [row] = await db.select().from(latches).where(eq(latches.id, id));
+		return row;
+	};
+
+	it("proposedのLATCHはcancelledになり、参加者全員にclosed通知・historyはexpired", async () => {
+		const { accessToken, mine, peer } = await setup("del-proposed");
+		const latchId = await insertLatchOf(mine, peer, "proposed");
+		const res = await deleteReq(`/v1/intents/${mine.intentId}`, accessToken);
+		expect(res.status).toBe(204);
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		const notes = await db
+			.select()
+			.from(notifications)
+			.where(eq(notifications.latchId, latchId));
+		expect(notes.map((n) => n.userId).sort()).toEqual(
+			[mine.userId, peer.userId].sort(),
+		);
+		expect(notes.every((n) => n.type === "closed")).toBe(true);
+		const [hist] = await db
+			.select()
+			.from(proposalHistory)
+			.where(eq(proposalHistory.latchId, latchId));
+		expect(hist?.outcome).toBe("expired");
+	});
+
+	it("matchedのLATCHは変化しない", async () => {
+		const { accessToken, mine, peer } = await setup("del-matched");
+		const latchId = await insertLatchOf(mine, peer, "matched");
+		const res = await deleteReq(`/v1/intents/${mine.intentId}`, accessToken);
+		expect(res.status).toBe(204);
+		expect((await latchOf(latchId))?.status).toBe("matched");
+		const notes = await db
+			.select()
+			.from(notifications)
+			.where(eq(notifications.latchId, latchId));
+		expect(notes).toHaveLength(0);
+	});
+
+	it("保留(candidate)のLATCHもcancelledになり、通知は作られない", async () => {
+		const { accessToken, mine, peer } = await setup("del-candidate");
+		const latchId = await insertLatchOf(mine, peer, "candidate");
+		const res = await deleteReq(`/v1/intents/${mine.intentId}`, accessToken);
+		expect(res.status).toBe(204);
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		const notes = await db
+			.select()
+			.from(notifications)
+			.where(eq(notifications.latchId, latchId));
+		expect(notes).toHaveLength(0);
 	});
 });

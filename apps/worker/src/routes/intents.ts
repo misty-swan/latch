@@ -42,7 +42,7 @@ import {
 	parseResponseSchema,
 	patchIntentRequestSchema,
 } from "@latch/shared";
-import { and, count, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -51,6 +51,8 @@ import { systemClock } from "../clock/clock";
 import {
 	groupCandidates,
 	intents,
+	latches,
+	latchMembers,
 	matchCandidates,
 	matchEvents,
 } from "../db/schema";
@@ -59,6 +61,8 @@ import { type ErrorResult, errorJson } from "../http/errors";
 import { newUlid } from "../ids";
 import { MS_PER_DAY } from "../intents/expiry";
 import { validateIntentForActive } from "../intents/validation";
+import { closeLatch } from "../latches/close";
+import { releaseHeld } from "../latches/release";
 import { createLlm } from "../llm/mode";
 import { createLogger } from "../logging/logger";
 import { emitMatchEvent } from "../pipeline/events";
@@ -933,6 +937,40 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 			"削除に失敗しました。時間を置いて再度お試しください",
 		);
 		return c.json(r.body, r.status);
+	}
+	// このIntentを含む進行中の提案を取り消す(docs/01 §8の不成立経路「参加Intentが削除された」)。
+	// matchedは成立済みのため変更しない(docs/05 §2.5)。閉じるのは候補・イベント行の削除より前
+	const now = systemClock.now();
+	const openLatches = await db
+		.select({ id: latches.id })
+		.from(latches)
+		.where(
+			and(
+				inArray(latches.status, ["candidate", "proposed", "partial_accept"]),
+				sql`EXISTS (SELECT 1 FROM json_each(${latches.intentIds}) WHERE json_each.value = ${target.id})`,
+			),
+		);
+	const affectedUserIds = new Set<string>();
+	for (const l of openLatches) {
+		const closed = await closeLatch(
+			db,
+			l.id,
+			"cancelled",
+			"expired",
+			["candidate", "proposed", "partial_accept"],
+			now,
+		);
+		if (!closed) continue;
+		const members = await db
+			.select({ userId: latchMembers.userId })
+			.from(latchMembers)
+			.where(eq(latchMembers.latchId, l.id));
+		for (const m of members) affectedUserIds.add(m.userId);
+	}
+	// 削除者以外の参加者は、解放された枠で保留の提案が進められるようにする
+	affectedUserIds.delete(sub);
+	if (affectedUserIds.size > 0) {
+		await releaseHeld(db, now, [...affectedUserIds]);
 	}
 	// 子(候補・イベント投入記録)を先に削除してから本体を削除する(docs/05 §2.5)。
 	// 1対1候補はintent_a/bのどちらかに含む行・グループ候補はintent_idsに含む行
