@@ -271,3 +271,27 @@ export const intentDtoSchema = z.object({
 	updated_at: isoDateTimeSchema,
 });
 export type IntentDTO = z.infer<typeof intentDtoSchema>;
+
+/**
+ * LATCH(提案)の中身。latches.proposalのJSON(F4a設計 §3.6)。
+ * 一致度(LATCH Score)は含めない(UIに表示しない確定裁定)
+ */
+export const latchProposalSchema = z.object({
+	form: intentFormSchema,
+	topic: z.string().nullable(),
+	time_window: z
+		.object({ start: isoDateTimeSchema, end: isoDateTimeSchema })
+		.nullable(),
+	region_name: z.string().nullable(),
+	participants: z.object({
+		min: z.number().int().min(PARTICIPANTS_MIN),
+		max: z.number().int().max(PARTICIPANTS_MAX),
+	}),
+	budget: z
+		.object({
+			min: z.number().int().min(0).max(BUDGET_MAX),
+			max: z.number().int().min(0).max(BUDGET_MAX),
+		})
+		.nullable(),
+});
+export type LatchProposal = z.infer<typeof latchProposalSchema>;
