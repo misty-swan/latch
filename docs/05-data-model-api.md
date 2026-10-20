@@ -1,9 +1,9 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.9
+- 文書バージョン: v0.10
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.9更新: 2026-10-20)
+- 作成日: 2026-10-17(v0.10更新: 2026-10-20)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
@@ -12,7 +12,8 @@
 - v0.7の変更点: プロトタイプREADME §7のオーナー裁定(2026-10-19)に伴い、退会後の表示名を終了の原因を問わず「つながっていた相手」に統一(01 §10の規定どおり・§2.5)。D-B-03(proposal表示項目)を解消し§4に決定記録を追加。前提文書欄の版数を更新
 - v0.8の変更点: 前提文書欄の版数同期(F2'実装に伴う04改版への追従)。内容の変更はない
 - v0.9の変更点: F3実装に伴い§2.2のintentsへdelayed_reeval_at列(つながりIntentの1回きり遅延再評価の実行済みマーカー)を追記し、§2.3へVectorizeのローカル代替(LATCH_ENV=localはインメモリ実装・取得系getByIdsの用途)を追記。§2.5へIntent削除時はベクトル削除を先に行い失敗時は500で中断する実行順序を追記。§3.3へdev専用観測API(GET /v1/dev/match-events・match-candidates)の応答形状を追記。前提文書欄の版数を更新
-- 前提文書: 01 要件定義書 v0.10 / 02 スコープ・受け入れ条件合意書 v0.4 / 04 アーキテクチャ設計書 v0.10
+- v0.10の変更点: F4a(1対1の提案〜成立)実装に伴い§2.2へlatches.proposed_at・proposal_history.updated_at(見送り時刻の基準)の列と、match_candidatesのupsertが既存行のstatusを上書きしない規定・機会LATCH成立時の参加Intentの更新範囲・geofeaturesのgrid_key書式と逆引き規則を追記し、§2.3へKVバインディングPIPELINE_KVのキーを、§2.4へ提案化・回答期限・通知上限の索引を追記。§3.2へGET /v1/latches/{id}・POST /v1/latches/{id}/defer-reasonを追加し、§3.3へLatchDTO(成立前はproposal・membersのキー自体を出さない表示範囲)・一覧のtype別の状態・回答系の理由コード・dev専用API(backdate・LATCH・提案履歴の観測)の確定形状を追記。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.10 / 02 スコープ・受け入れ条件合意書 v0.4 / 04 アーキテクチャ設計書 v0.11
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -145,6 +146,8 @@ UNIQUE(intent_a_id, intent_b_id, intent_a_version, intent_b_version)
 created_at / updated_at
 ```
 
+評価ごとの書き込みはUNIQUE組でのupsert(ON CONFLICT)とし、衝突時はretrieval_score・cheap_judge_score・updated_atのみ更新して**statusは上書きしない**(新規行だけがcandidateになり、提案済み(proposed)・closedの既存行は状態を保つ・F4a実装確定)。
+
 **group_candidates**(3人以上・Pool最大15・30日定期削除): `intent_ids json(3..4) / aggregate_score / prev_aggregate_score / status / created_at`。UNIQUE(intent_ids正規化文字列, 各version)。
 
 **proposal_history**(同一ユーザーペアへの再提案恒久排除・01 §8)
@@ -157,10 +160,11 @@ outcome:     proposed | matched | rejected | expired | deferred
 # 恒久排除の判定は outcome が matched または rejected の行の存在のみ(01 §8裁定)。
 # deferred(見送り)・expired の行は機会Intentの条件付き再提案の参照に使う
 created_at
+updated_at:  datetime   # outcome更新の時刻。見送り後の抑制期間の基準(06 §4)
 UNIQUE(user_low, user_high)
 ```
 
-Layer 1はoutcomeがmatchedまたはrejectedの行の存在で除外する(deferred・expiredの行は機会Intentの条件付き再提案の参照に使う・01 §8)。
+Layer 1はoutcomeがmatchedまたはrejectedの行の存在で除外する(deferred・expiredの行は機会Intentの条件付き再提案の参照に使う・01 §8)。提案化の直列化(本表の確保を1文目に置く1バッチ)は06 §3に規定する。
 
 **latches**
 
@@ -175,6 +179,7 @@ status:             candidate | proposed | partial_accept | matched |
                     # candidate=閾値超過済みだが未提示(通知上限での保留を含む)。
                     # §2.2のMatchCandidateとは別物
 response_deadline:  datetime
+proposed_at:        datetime | null  # 提示(proposed化)した時刻。保留中(candidate)はnull。不成立の通知(closed)は提示済みの提案に限る
 expires_at:         datetime      # 参加Intent期限の最小値
 last_message_at:    datetime      # 非正規化。メッセージ書き込み時に更新(90日判定の索引)
 completed_at:       datetime | null  # 機会=対象時刻経過 / つながり=最終メッセージ(0件ならmatched時刻)から90日経過
@@ -185,7 +190,7 @@ created_at / updated_at
 
 **latch_members**: `latch_id / user_id — PK(latch_id, user_id)`(latchesの参加者副表。「自分の提案・成立」の一覧取得はこの表経由)。
 
-**latch_status_events**: `id / latch_id / from_status / to_status / created_at`(MLR集計の観測点)。
+**latch_status_events**: `id / latch_id / from_status(null可=生成時) / to_status / created_at — INDEX(latch_id)`(MLR集計の観測点。成立後の表示範囲の判定で「matched経由のcancelled」を見分ける根拠にも使う・§3.3)。
 
 **messages**(チャットの正。DOは配信のみ)
 
@@ -227,13 +232,15 @@ created_at / updated_at
 
 **usage_counters**(レート制限・Jev予算の3層保護の実体): `scope(intent_daily|intent_hourly|jev_intent|jev_user|jev_global_daily|jev_global_monthly) / key(user_id|intent_id|'-') / period(日付or時間のバケット文字列) / count — PK(scope, key, period)`。加算は `UPDATE … SET count=count+1 … RETURNING` の原子的1文で行い、Queues consumerはバッチ単位でまとめて加算する(並行消費での取りこぼし防止)。periodが90日より古い行はCronで削除する(API単位のスロットルはWorkers Rate Limitingバインディング(key=user_id)が担い、本表には置かない)。
 
-**geofeatures**: `id / name / municipality / type(city|station) / lat / lng / grid_key(約1km=0.01度グリッドのキー・INDEX)`(ソースはISJ+駅データ。取り込みと変換の規定は04 §4)。
+**geofeatures**: `id / name / municipality / type(city|station) / lat / lng / grid_key(約1km=0.01度グリッドのキー・INDEX)`(ソースはISJ+駅データ。取り込みと変換の規定は04 §4)。grid_keyの書式は `${Math.floor(lat*100)}_${Math.floor(lng*100)}`(F4a実装確定)。逆引きは座標の属するセルの中心を基準点とし、そのセルと周囲を合わせた3×3セルの行からハバーシン距離の最近傍の地名を採る(同距離はid昇順・該当なしは地域名なし)。
+
+**機会LATCH成立時の参加Intent(F4a実装確定)。** 機会LATCHが成立すると、参加Intentはstatus=matchedとupdated_atのみを更新する(versionは上げない・Vectorize metadataは更新しない)。matchedのIntentはLayer 1がD1の現行statusで除外するため、metadataの同期を要しない(§2.3の二重化)。
 
 ### 2.3 Vectorize・KV・R2
 
-**Vectorizeインデックス**(1本): vector id = intent ULID。metadata = `{form, status, category, user_id}`(インデックス作成時にmetadata indexとしてform・status・categoryを宣言する。07 §1)。検索時のfilterで form一致・status=active を最適化として適用し(01 §12)、取り出し後は**D1の現行status・blocks・提案履歴をコードで再検証する**(metadataの同期遅延に依存しない二重化)。Intentの遷移(pause/resume/matched/expired)ごとにmetadataのstatusを更新し、失敗はCronバックフィルで回収する。照合時にD1行が存在しないベクトルはfail-closeで除外する。次元=1024・距離=cosine(07 v0.1で確定)。削除: Intent削除・期限切れ+7日でベクトル削除(§2.6)。**ローカル代替(F3実装確定)。** Vectorizeにはローカルシミュレータが存在しないため、LATCH_ENV=local(単体・統合試験・wrangler dev・E2E)では同一インタフェースのインメモリ実装(コサイン距離・metadata filter込み・04 §4のVectorStore抽象)へ置き換える。staging/prodはVectorize実装を使う。取得系(getByIds)はupsert反映確認・metadata同期・Cronの整合点検に使う(06 §2)。
+**Vectorizeインデックス**(1本): vector id = intent ULID。metadata = `{form, status, category, user_id}`(インデックス作成時にmetadata indexとしてform・status・categoryを宣言する。07 §1)。検索時のfilterで form一致・status=active を最適化として適用し(01 §12)、取り出し後は**D1の現行status・blocks・提案履歴をコードで再検証する**(metadataの同期遅延に依存しない二重化)。Intentの遷移(pause/resume/expired)ごとにmetadataのstatusを更新し、失敗はCronバックフィルで回収する(機会LATCH成立によるmatchedはmetadataを更新しない・§2.2)。照合時にD1行が存在しないベクトルはfail-closeで除外する。次元=1024・距離=cosine(07 v0.1で確定)。削除: Intent削除・期限切れ+7日でベクトル削除(§2.6)。**ローカル代替(F3実装確定)。** Vectorizeにはローカルシミュレータが存在しないため、LATCH_ENV=local(単体・統合試験・wrangler dev・E2E)では同一インタフェースのインメモリ実装(コサイン距離・metadata filter込み・04 §4のVectorStore抽象)へ置き換える。staging/prodはVectorize実装を使う。取得系(getByIds)はupsert反映確認・metadata同期・Cronの整合点検に使う(06 §2)。
 
-**KV**: `revocation:{jti}` = 1(TTL=JWT残り寿命)。失効はJWT残寿命(最大1時間)以内の効力とし、権限が関わる操作(チャット送信・回答・退会)はD1のusers.statusとblocksを必ず再検証して補完する。WebSocket接続チケットはKVに置かず、**joseで署名した短期トークン(exp=60秒・user_id/latch_idクレーム)** を使う(結果整合の伝播遅延を回避。§3.4)。回転猶予: `rfg:{旧リフレッシュトークンハッシュ}` = 現行リフレッシュトークン(TTL 120秒・取得後に削除で使い切り。窓外の再提示は再利用検出として族をrevoked。04 §4)。猶予窓内の旧トークン再提示でKVエントリが見えない場合は結果整合の競合の可能性があるため族は失効させず401のみ(窓外のみ再利用検出として族revoked)。KVは結果整合のため猶予エントリの並行取得は理論上可能であり、猶予の「1回に限り」はベストエフォートとする
+**KV**: `revocation:{jti}` = 1(TTL=JWT残り寿命)。失効はJWT残寿命(最大1時間)以内の効力とし、権限が関わる操作(チャット送信・回答・退会)はD1のusers.statusとblocksを必ず再検証して補完する。WebSocket接続チケットはKVに置かず、**joseで署名した短期トークン(exp=60秒・user_id/latch_idクレーム)** を使う(結果整合の伝播遅延を回避。§3.4)。回転猶予: `rfg:{旧リフレッシュトークンハッシュ}` = 現行リフレッシュトークン(TTL 120秒・取得後に削除で使い切り。窓外の再提示は再利用検出として族をrevoked。04 §4)。猶予窓内の旧トークン再提示でKVエントリが見えない場合は結果整合の競合の可能性があるため族は失効させず401のみ(窓外のみ再利用検出として族revoked)。KVは結果整合のため猶予エントリの並行取得は理論上可能であり、猶予の「1回に限り」はベストエフォートとする。**パイプライン用KV(バインディングPIPELINE_KV・F4a実装確定)**: `jev:breaker` = Jevのcircuit breakerの状態(JSON・06 §5)。`jev:alert:{scope}:{period}` = 予算アラートの送信済み印(scope=jev_global_daily|jev_global_monthly・同一periodで1回・TTLはperiodの寿命より長く取る・06 §6)
 
 **R2**: バケット1つ(`icons`)。キー=`{user ULID}/{ULID}`。受け付けはPNG/JPEG/WebP・1MBまで。Workersで受けて検証し保存(外部サービス送信なし)。URLは同一オリジンで配信(04 Assets経由ではなくWorkerレスポンスでストリーム)。
 
@@ -246,8 +253,10 @@ candidates:   UNIQUE組(前述)+ INDEX(intent_a_id), (intent_b_id)
 latches:      (user_id...)は user_ids のJSONでなく参照テーブルを避け、
               latch_members(latch_id, user_id)を副表として持つ — INDEX(user_id, latch_id)
 messages:     (latch_id, id)
-notifications:(user_id, read_at, id)
+notifications:(user_id, read_at, id) / (user_id, type, created_at) ← 通知上限(1日6件)の判定
 proposal_history: PK(user_low, user_high)
+latches:      (status, response_deadline) ← 回答期限切れ走査 / (status, proposed_at)
+latch_status_events: (latch_id)
 ```
 
 latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表である(latches本体はintent_idsのみ保持)。
@@ -323,7 +332,9 @@ DELETE /v1/intents/{id}
 POST   /v1/intents/{id}/pause / resume
 
 GET    /v1/latches?type=proposals|matched   # 提案一覧/成立一覧(自分が参加するもの)
+GET    /v1/latches/{id}                     # 単一取得(参加しない・存在しない・保留中は一律404)
 POST   /v1/latches/{id}/response            # {response: yes|no|defer, defer_reason?}
+POST   /v1/latches/{id}/defer-reason        # {reason: no_capacity|schedule_mismatch|just_not_now|other}(見送った本人が1回だけ)
 POST   /v1/latches/{id}/response/retract    # 回答取り消し(回答期限内・未成立に限る)
 POST   /v1/latches/{id}/leave               # 参加取り消し(成立後・チャット読取専用化。01 §10)
 POST   /v1/latches/{id}/feedback            # attendance / connection_quality
@@ -369,13 +380,19 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 
 **POST /v1/intents/{id}/pause・resume** — 200 IntentDTO(version+1)。pauseはactiveのみ実行可(他は400 invalid_status)・status=paused・期限は不変。resumeはpausedのみ実行可(他は400 invalid_status)・期限切れ(expires_at<=now)は400(理由コードexpired)・status=active・期限は据え置き(再計算しない)。参加中active数の上限5件は作成・draft→active化・resumeの3経路で検証し、超過は422 ACTIVE_INTENT_LIMIT(§3.1)
 
-**GET /v1/latches(提案)** — `{id, form, proposal:{…表示要素(成立前の条件サマリは含まない)・必要人数}, score, status, response_deadline, my_response|null, participants_count}`。scoreは応答に含むがUIでは表示しない(01 §10の裁定)。
+**LatchDTO(LATCH系API共通の応答形状・F4a実装確定)** — `{id, form, status, response_deadline, participants_count, my_response: yes|no|defer|null, score}`。scoreは応答に含むがUIでは表示しない(01 §10の裁定)。**成立後(matched、およびmatched経由のcancelled)に限り** `proposal:{form, topic, time_window, region_name, participants, budget}` と `members:[{user_id, display_name, bio, has_icon}]`(自分を除く参加者)を含める。成立前はproposal・membersの**キー自体を出さない**(空値でも出さない・visibility単値化・01 §21)。matched経由のcancelledはlatch_status_eventsにto_status=matchedの記録があることで判定する。保留中(candidate)のLATCHは一覧にも単一取得にも出さない(単一取得は404)。
 
-**POST /v1/latches/{id}/response** — 状態遷移後のlatch。全員YESで matched + チャット解放対象となり、双方の詳細情報(表示名・アイコン・プロフィール)が以降のGETに含まれる(01 §8)。
+**GET /v1/latches** — 200 `{items: LatchDTO[], next_cursor: string|null}`。自分が参加するもののみ・id降順。type=proposalsはstatusがproposed・partial_accept、type=matchedはmatchedを返す(typeの欠落・不明な値は400)。limit・cursorはIntent一覧と同一の規則(§3.1)。**GET /v1/latches/{id}** — 200 LatchDTO。参加しない・存在しない・保留中は一律404。
+
+**POST /v1/latches/{id}/response** — 200 状態遷移後のLatchDTO。全員YESで matched + チャット解放対象となり、双方の詳細情報(表示名・アイコン・プロフィール)が以降のGETに含まれる(01 §8)。回答系(response・response/retract・leave・defer-reason)の失敗は、参加しない・存在しないは一律404、それ以外は400 VALIDATION_FAILEDのdetails.reasonsに理由コードを返す: invalid_status(その状態では実行できない) / deadline_passed(回答期限経過) / already_responded(回答済み・見送り理由の保存済み) / not_deferred(defer-reasonで本人の有効な回答がdeferでない)。
+
+**POST /v1/latches/{id}/defer-reason** — 200 LatchDTO。見送った(defer)本人だけが1回だけ保存できる(latch_responses.defer_reason)。理由の値はno_capacity / schedule_mismatch / just_not_now / otherの4種(他の値・余分なキーは400)。
 
 **回答と取り消しの状態遷移。** defer=[今回は見送る]は提案を即時にrejectedで閉じる(proposal_historyのoutcomeはdeferred)。no=API契約経由の明示の拒否(同rejected・outcome=rejectedで恒久排除)。retract(回答取り消し)は回答期限内・未成立のみ可とし、partial_accept→proposedへ復帰する(双方YES成立後は不可。離脱はleaveを使う)。leave(参加取り消し)はmatchedのLATCHをcancelledとし、チャットを双方読み取り専用にする(02 D-08)。グループで必要人数の下限を割った場合もLATCH全体をcancelledとする。
 
 **dev専用観測API(F3実装確定・テスト専用)** — GET /v1/dev/match-events・GET /v1/dev/match-candidates。worker E2Eがゲートの合格証拠(match_eventsの計測payload・match_candidatesの生成記録)を観測するためのdev専用API。クエリはintent_id(必須・ULID形式外は400)・limit=1..50既定20・cursor(§3.1と同一の不透明cursor)。応答は`{items, next_cursor}`(id降順)で、itemsはmatch_events行=id / event_type / source_intent_id / version / status / payload / created_at / processed_at・match_candidates行=id / intent_a_id / intent_b_id / intent_a_version / intent_b_version / form / retrieval_score / cheap_judge_score / status / created_at / updated_at(テーブル列の範囲のみ・jev_result等の内部列は含めない)。起点Intentとの一致条件はmatch_events=source_intent_id・match_candidates=intent_a_idかintent_b_idのいずれか。所有者に限定しない(候補は2ユーザーのIntentで構成されるため・観測の実行は認証済みユーザーが行う)。存在隠しはPOST /v1/dev/idp-token(04 §4)と同一条件(prod・テスト鍵2変数のいずれか未設定は認証・クエリ検証より先に一律404・理由は区別しない)。
+
+**dev専用API(F4a実装確定・テスト専用)** — 存在隠しは上記と同一条件。(1) GET /v1/dev/match-candidatesの行にjev_result・latch_scoreを追加する(#15の証拠)。(2) GET /v1/dev/latches?intent_id= — intent_idsに指定Intentを含むLATCHをid降順で返す(`{items, next_cursor}`・itemsはid / form / status / intent_ids / response_deadline / proposed_at / score)。(3) GET /v1/dev/proposal-history?user_id= — user_lowかuser_highが指定ユーザーの履歴行をid降順で返す(itemsはid / user_low / user_high / latch_id / outcome / created_at / updated_at)。(2)(3)のlimit・cursorは観測APIと同一の規則で、参加者・所有者に限定しない。(4) POST /v1/dev/latches/{id}/backdate `{response_deadline?, history_updated_at?, intents_last_evaluated_at?}` — E2Eが時計を操作せずに期限経過と再提案の条件を作るための書き換え口(10 §3)。それぞれlatches.response_deadline・そのLATCHのproposal_history行(latch_id一致)のupdated_at・参加Intent全員のlast_evaluated_atを指定時刻へ書き換える。存在しないLATCHは404。
 
 ### 3.4 WebSocket(リアルタイムチャット)
 

@@ -491,3 +491,33 @@
 - [ ] **Step 2: 版数の整合を確認** — Run: `rg -n "v0\.[0-9]+" docs/00-document-roadmap.md` と各文書の冒頭・前提文書欄を突き合わせ、食い違いが0件
 - [ ] **Step 3: 全検証** — Run: `pnpm lint && pnpm typecheck && pnpm test` → 緑
 - [ ] **Step 4: コミット** — `F4a: 提案〜成立の実装確定を04〜07・10・12へ反映し現在の状態を更新`
+
+---
+
+## F4a完了記録(2026-10-20・Task 1〜19完了)
+
+- 実装コミット: caac879〜本計画のTask 19のコミット(事前点検の裁定反映・Task 1〜18の実装と修正・Task 19の文書反映)
+- ゲートとE2Eの対応(`apps/worker/e2e/latches.spec.ts`・stub Jev=0.9・期限経過はdev専用backdateで作る・10 §3):
+
+| ゲート(02 §4) | worker E2E |
+|---|---|
+| #14 | `#14 1イベントのJev実行回数が8回以下`(起点イベントpayloadのjev_calls ≤ 8) |
+| #15 | `#15 双方向の判定値が記録される`(match_candidates.jev_resultのwould_a_accept_b・would_b_accept_a) |
+| #17(API部分)・#18 | `#17/#18 yes・deferの回答と双方YESの成立`(yes→partial_accept→matched・defer→rejected・API直叩きのno→rejected) |
+| #20 | `#20 成立後のみ詳細を解放`(成立前はproposal・membersのキー無し・成立後にあり) |
+| #19 | `#19 回答期限切れ(両形式)`(backdate→Cron→expired) |
+| #23 | `#23 機会の排他`(A-Bの成立でA-Cがcancelled) |
+| #12 | `#12(a) 成立・no後は再提案されない`・`#12(b) 見送り後の機会Intentは条件変化で再提案される` |
+
+- worker E2E 32件全緑(auth 9・intents 6・pipeline 9・latches 8。F3以前の既存specを含む)。#17のUI 2択はF4c・#24はF4bで証明する
+- 文書反映: 04 v0.11・05〜07 v0.10・10 v0.10・12 v0.10(F4の3分割とParser/Jevのreal接続の移動の決定記録)・08 v0.10・09 v0.9・11 v0.10(前提文書欄の同期のみ)・00 v0.10(§1版数表)・AGENTS.md(現在の状態)
+
+### staging初接続時チェック(F10前・本工程で追加した項目)
+
+- D1バッチ内の `PRAGMA defer_foreign_keys = ON`(提案化の1バッチ先頭・06 §3)が実D1で効くこと。効かない場合はproposal_history.latch_idの外部キー検査で提案化が常に失敗するため、staging初回の提案化で提案が生成されることを確認する
+- F3計画の同節の項目(Vectorize getByIdsのvalues返却・VectorFloatArrayの透過)も引き続き確認する
+
+### 次の工程
+
+- F4b(グループLATCH・Pool最大15・集合選択・1対1最低4回保証の配分・#24)→ F4c(提案〜成立の画面・`prototype/`基準・#17のUI 2択)。Parser/Jevのreal接続と精度ゲートはF9前の独立工程(12 §2の決定記録)
+- 未解決の検討事項: Intentの意味フィールド(topic・constraints等)の更新で30分再評価抑制(intents.last_evaluated_at)を解除するか。現状は解除しない(E2Eの#12(b)はdev専用backdateのintents_last_evaluated_atで回避している)。扱いは未決

@@ -92,18 +92,18 @@ F3の`evaluateIntent`(L2→L1→L3→match_candidates保存)の後段に、同�
 
 ### 3.1 Layer 5
 
-- 提案の直前に、そのペアの最新のD1値で H を再検証する: 双方active・ブロック・提案履歴(matched/rejected)・飲酒年齢・自己ペア・form一致。F3の`fetchL1Data`/`layer1Judge`を再利用する。不合格は H=0
+- 提案の直前に、そのペアの最新のD1値で H を再検証する: 双方active・ブロック・提案履歴(matched/rejected)・飲酒年齢・自己ペア・form一致。F3の`fetchL1Data`/`layer1Judge`を再利用する。match_candidates.latch_scoreはJev値(H=1とした値)で保存し、不合格は「提案しない」で表す(スコアを0で上書きしない・docs/06 §3)
 - `L = H × min(would_a_accept_b, would_b_accept_a) × C`(C=1・01 §13)。a/bはmatch_candidatesの正規化順(a.id < b.id)。Jev入力も同じ順で渡す
 - **L > 0.60** で提案化の対象(0.60ちょうどは対象外)。match_candidates.latch_scoreへ保存する(閾値未満も保存する)
 - 同一処理内で同一ユーザーペアの候補が複数閾値を超えたら、L最大の1件のみ(同点はmatch_candidatesのid昇順)。複数ペアはL降順に処理する
 
 ### 3.2 直列化(proposal_historyの確保を完了条件とする)
 
-1. **履歴の確保**: `proposal_history` は UNIQUE(user_low, user_high) の1ペア1行。新規は INSERT(outcome=proposed, latch_id=新LATCH id)。既存行は「再提案可の条件」を満たす場合にだけ UPDATE(outcome=proposed, latch_id=新id, updated_at=now)。条件はSQLのWHEREで表し、1文で原子的に判定する
+1. **履歴の確保**: `proposal_history` は UNIQUE(user_low, user_high) の1ペア1行。新規は INSERT(outcome=proposed, latch_id=新LATCH id)。既存行は「再提案可の条件」を満たす場合にだけ UPDATE(outcome=proposed, latch_id=新id, updated_at=now)。条件(抑制期間・スコア変化・Intent更新)は読み出した値でコードが判定し、UPDATEは `outcome IN (deferred, expired) AND updated_at=読み出し値` の楽観照合で並行更新を退ける。新規INSERTは `ON CONFLICT DO NOTHING`
 2. **後続の書き込み**: latches・latch_members・latch_status_events・match_candidates.status=proposed・notifications を1つのD1バッチで書く。各文は「proposal_historyに latch_id=新id の行が存在すること」を条件とする(`INSERT … SELECT … WHERE EXISTS` 形式)。確保に失敗した場合は後続が0行となり何も残らない
 3. 履歴の確保に失敗する場合(進行中の提案がある・恒久排除・再提案条件の不成立)は提案しない
 
-**再提案可の条件(機会Intentのみ・01 §8)**: 既存行のoutcomeが deferred または expired、かつ双方のIntentが機会Intent、かつ `now ≥ updated_at + min(24時間, (対象時刻 − updated_at)/2)`、かつ(スコア変化(prev_latch_scoreとの差が0でない)または どちらかのIntentのversionが前回提案時より大きい)。つながりIntentは既存行があれば一切再提案しない。
+**再提案可の条件(機会Intentのみ・01 §8)**: 既存行のoutcomeが deferred または expired、かつ双方のIntentが機会Intent、かつ `now ≥ updated_at + min(24時間, (対象時刻 − updated_at)/2)`、かつ(スコア変化(prev_latch_scoreとの差が0でない)または どちらかのIntentのupdated_atが前回LATCHのcreated_atより後(updated_atはversionと同時に進む))。つながりIntentは既存行があれば一切再提案しない。
 
 ### 3.3 提示か保留か(通知上限・01 §10)
 
