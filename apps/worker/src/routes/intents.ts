@@ -277,14 +277,17 @@ const intentMeaningChanged = (
  * (proposal_historyは消費しない=release・提示済みなら参加者へclosed通知)、操作者以外の参加者の保留を
  * 解放する。matchedは成立済みのため変更しない。Intent削除(docs/05 §2.5)と、active更新での
  * 意味フィールドの変更・期限の短縮(docs/01 §8の不成立経路「Hard Constraintが変化した」・
- * docs/05 §3.2)が共有する
+ * docs/05 §3.2)が共有する。
+ * 閉じたLATCHのidを返す。次集合の提案(F4b設計 §3.5)は呼び出し側が行う: 削除ではIntent行と
+ * そのグループ候補を消した後に呼ぶ(消す前に呼ぶと、削除中のIntentを含む集合が版の照合と
+ * 再検証を通って提案され得る)
  */
 const cancelOpenLatchesOf = async (
 	db: DrizzleD1Database,
 	intentId: string,
 	actorUserId: string,
 	now: Date,
-): Promise<void> => {
+): Promise<string[]> => {
 	const openLatches = await db
 		.select({ id: latches.id })
 		.from(latches)
@@ -319,7 +322,15 @@ const cancelOpenLatchesOf = async (
 	if (affectedUserIds.size > 0) {
 		await releaseHeld(db, now, [...affectedUserIds]);
 	}
-	// 閉じたグループ提案ごとに、評価済みの次の集合を提案する(F4b設計 §3.5)
+	return closedLatchIds;
+};
+
+/** 閉じたグループ提案ごとに、評価済みの次の集合を提案する(F4b設計 §3.5) */
+const proposeNextGroupsAfterCancel = async (
+	db: DrizzleD1Database,
+	closedLatchIds: string[],
+	now: Date,
+): Promise<void> => {
 	for (const id of closedLatchIds) {
 		await proposeNextGroupAfterClose(db, id, now);
 	}
@@ -920,7 +931,14 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 				result.row.expiresAt !== null &&
 				result.row.expiresAt.getTime() < row.expiresAt.getTime()))
 	) {
-		await cancelOpenLatchesOf(db, result.row.id, sub, now);
+		// 版は更新済みのため、旧版を含む評価済みの集合は次集合の版照合で除かれる
+		const closedLatchIds = await cancelOpenLatchesOf(
+			db,
+			result.row.id,
+			sub,
+			now,
+		);
+		await proposeNextGroupsAfterCancel(db, closedLatchIds, now);
 	}
 	// 意味フィールドの更新では30分の再評価抑制を解除する(オーナー裁定 2026-10-20・docs/06 §3)。
 	// 抑制は同じ内容の繰り返し評価を防ぐためのもので、内容が変われば理由がなくなる。費用は
@@ -1021,7 +1039,13 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	}
 	// このIntentを含む進行中の提案を取り消す(docs/01 §8の不成立経路「参加Intentが削除された」)。
 	// matchedは成立済みのため変更しない(docs/05 §2.5)。閉じるのは候補・イベント行の削除より前
-	await cancelOpenLatchesOf(db, target.id, sub, systemClock.now());
+	const deleteNow = systemClock.now();
+	const closedLatchIds = await cancelOpenLatchesOf(
+		db,
+		target.id,
+		sub,
+		deleteNow,
+	);
 	// 子(候補・イベント投入記録)を先に削除してから本体を削除する(docs/05 §2.5)。
 	// 1対1候補はintent_a/bのどちらかに含む行・グループ候補はintent_idsに含む行
 	await db
@@ -1043,13 +1067,15 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 		.delete(intents)
 		.where(and(eq(intents.id, target.id), eq(intents.userId, sub)))
 		.returning();
+	// 次集合の提案はIntent行とそのグループ候補を消した後に行う(削除中のIntentを含む集合を
+	// 提案しない・F4b設計 §3.5)。消えた行は版の照合・再検証(recheckSet)で除かれる
+	await proposeNextGroupsAfterCancel(db, closedLatchIds, deleteNow);
 	if (deleted === undefined) {
 		// 所有確認後の並行削除。消えていれば同じ404(冪等な結果)。
 		// ベクトルは先行して削除済みだが、行も無いため孤立にはならない
 		const r = notFound();
 		return c.json(r.body, r.status);
 	}
-	// TODO(F4): このIntentが参加する提案のcancelled連鎖
 	logger.info("intents.deleted", { intent_id: deleted.id });
 	return c.body(null, 204);
 });

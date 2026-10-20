@@ -9,13 +9,14 @@
 
 import { env, SELF } from "cloudflare:test";
 import { type IntentDTO, OCCASION_DEFAULT_TTL_HOURS } from "@latch/shared";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { importJWK, SignJWT } from "jose";
 import { ulid } from "ulid";
 import { describe, expect, it } from "vitest";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
 import {
+	groupCandidates,
 	intents,
 	latches,
 	latchMembers,
@@ -1148,6 +1149,119 @@ describe("DELETE・PATCH /v1/intents/{id}: 進行中の提案の取り消し(doc
 			.from(intents)
 			.where(eq(intents.id, mine.intentId));
 		expect(row?.lastEvaluatedAt?.getTime()).toBe(evaluatedAt.getTime());
+	});
+
+	it("グループ提案{A,B,C}の進行中にAが削除すると、Aを含む評価済み集合は提案されず、Aを含まない集合は提案され得る(F4b設計 §3.5)", async () => {
+		const { accessToken, mine, peer: b } = await setup("del-group-next");
+		const c = await insertPeer();
+		const d = await insertPeer();
+		// 3人集合に収まる人数範囲へ揃える(版は変えない)
+		const all = [mine, b, c, d];
+		await db
+			.update(intents)
+			.set({ participantsMax: 4 })
+			.where(
+				inArray(
+					intents.id,
+					all.map((m) => m.intentId),
+				),
+			);
+		const now = new Date();
+		const latchId = ulid();
+		const trio = [mine, b, c];
+		await db.insert(latches).values({
+			id: latchId,
+			form: "connection",
+			intentIds: trio.map((m) => m.intentId).sort(),
+			proposal: {
+				form: "connection",
+				topic: "主題",
+				time_window: null,
+				region_name: null,
+				participants: { min: 3, max: 4 },
+				budget: null,
+			},
+			score: 0.9,
+			status: "proposed",
+			responseDeadline: new Date(Date.now() + 24 * 60 * 60 * 1000),
+			expiresAt: new Date(Date.now() + 30 * MS_PER_DAY),
+			lastMessageAt: now,
+			completedAt: null,
+			proposedAt: now,
+			createdAt: now,
+			updatedAt: now,
+		});
+		await db
+			.insert(latchMembers)
+			.values(trio.map((m) => ({ latchId, userId: m.userId })));
+		for (const [p, q] of [
+			[mine, b],
+			[mine, c],
+			[b, c],
+		] as const) {
+			const [low, high] =
+				p.userId < q.userId ? [p.userId, q.userId] : [q.userId, p.userId];
+			await db.insert(proposalHistory).values({
+				id: ulid(),
+				userLow: low,
+				userHigh: high,
+				latchId,
+				outcome: "proposed",
+				createdAt: now,
+				updatedAt: now,
+			});
+		}
+		/** 評価済みのグループ候補を配置する(dedup_keyは現行versionで作る) */
+		const insertCandidate = async (
+			members: { intentId: string }[],
+			score: number,
+		) => {
+			const rows = await db
+				.select({ id: intents.id, version: intents.version })
+				.from(intents)
+				.where(
+					inArray(
+						intents.id,
+						members.map((m) => m.intentId),
+					),
+				);
+			const sorted = rows.sort((p, q) => (p.id < q.id ? -1 : 1));
+			await db.insert(groupCandidates).values({
+				id: ulid(),
+				intentIds: sorted.map((r) => r.id),
+				dedupKey: sorted.map((r) => `${r.id}@${r.version}`).join(","),
+				aggregateScore: score,
+				prevAggregateScore: null,
+				status: "candidate",
+				createdAt: now,
+			});
+		};
+		// Aを含む集合を上位に置く(修正前はこちらが提案されていた)
+		await insertCandidate([mine, b, d], 0.95);
+		await insertCandidate([b, c, d], 0.8);
+
+		const res = await deleteReq(`/v1/intents/${mine.intentId}`, accessToken);
+		expect(res.status).toBe(204);
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		const rest = (await db.select().from(latches).all()).filter(
+			(l) =>
+				l.id !== latchId &&
+				l.intentIds.some((id) => all.some((m) => m.intentId === id)),
+		);
+		// 削除したIntentを含むLATCHは作られない
+		expect(rest.some((l) => l.intentIds.includes(mine.intentId))).toBe(false);
+		// Aを含まない評価済み集合{B,C,D}は提案される
+		expect(rest).toHaveLength(1);
+		expect(rest[0]?.status).toBe("proposed");
+		expect([...(rest[0]?.intentIds ?? [])].sort()).toEqual(
+			[b, c, d].map((m) => m.intentId).sort(),
+		);
+		// 削除した本人には新しい提案の通知が来ない
+		const mineProposals = await db
+			.select()
+			.from(notifications)
+			.where(eq(notifications.userId, mine.userId));
+		expect(mineProposals.every((n) => n.type !== "proposal")).toBe(true);
 	});
 
 	it("保留(candidate)のLATCHもcancelledになり、通知は作られない", async () => {
