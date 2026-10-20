@@ -53,7 +53,7 @@ F3の`evaluateIntent`(L2→L1→L3→match_candidates保存)の後段に、同�
 ### 2.2 stub(07 §2(b)の拡張許容の範囲)
 
 - 既定: 7軸すべて0.9
-- 入力の正規化テキストの先頭が試験用の目印のとき: `[jev:0.3]` → 7軸すべて0.3、`[jev:timeout]` → `{ok:false, kind:"timeout"}`(フォールバック・circuit breakerの試験用)
+- 入力の正規化テキストの先頭が試験用の目印のとき: `__jev_low__`(F3で導入済みの既存目印)→ 7軸すべて0.3、`__jev_timeout__` → `{ok:false, kind:"timeout"}`(フォールバック・circuit breakerの試験用)。正規化テキストはtopicから始まる(normalize.ts)
 - 目印はテスト用seedのtopic先頭に置く。決定的(同一入力→同一出力)を保つ
 
 ### 2.3 実行器(`src/jev/runner.ts`)
