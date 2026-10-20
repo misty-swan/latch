@@ -158,3 +158,83 @@ export const dedupKeyOf = (members: IntentRow[]): string =>
 		.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 		.map((m) => `${m.id}@${m.version}`)
 		.join(",");
+
+/** Jev配分の入力 */
+export interface AllocationInput {
+	/** 1対1の対象(人数条件・履歴除外済み・Layer 3降順)。keyはintentPairKey */
+	oneOnOne: string[];
+	/** enumerateSetsの順の集合 */
+	sets: GroupSet[];
+	/** jev_resultが既にあるペア */
+	known: Set<string>;
+}
+
+/** Jev配分の計画 */
+export interface AllocationPlan {
+	/** runLayer4へ渡す1対1のキー(known分は全件+未判定の選ばれた分。L3順。集合と重なる未判定ペアも含む) */
+	oneOnOneKeys: string[];
+	/** 枠に収まらなかった1対1の未判定件数(jev_heldのcapへ加算) */
+	oneOnOneCapped: number;
+	/** グループ用に新たにJevへ渡すキー(oneOnOneKeysと重複しない) */
+	groupKeys: string[];
+	/** 全ペアが既知または予定済みの集合(順序はsetsのまま) */
+	plannedSets: GroupSet[];
+	/** 未判定ペアが枠に収まらず予定に入らなかった集合の数 */
+	heldSets: number;
+}
+
+const setPairKeys = (set: GroupSet): string[] => {
+	const keys: string[] = [];
+	for (let i = 0; i < set.members.length; i++) {
+		for (let j = i + 1; j < set.members.length; j++) {
+			keys.push(intentPairKey(set.members[i].id, set.members[j].id));
+		}
+	}
+	return keys;
+};
+
+/**
+ * 1イベントのJev呼び出し(JEV_CALLS_PER_EVENT)を1対1とグループで分ける
+ * (F4b設計 §2.5)。1対1の未判定には最低JEV_ONE_ON_ONE_MINを保証し、残りを
+ * 集合の未判定ペアへ回す。集合のペアが1対1の対象と重なる場合は1対1側
+ * (oneOnOneKeys)に含め、枠は1回だけ数える
+ */
+export const planJevAllocation = (input: AllocationInput): AllocationPlan => {
+	const { oneOnOne, sets, known } = input;
+	const total = LATCH.JEV_CALLS_PER_EVENT;
+	const need1 = oneOnOne.filter((k) => !known.has(k));
+	const need1Set = new Set(need1);
+	const groupCap = total - Math.min(LATCH.JEV_ONE_ON_ONE_MIN, need1.length);
+
+	const scheduled = new Set<string>();
+	const plannedSets: GroupSet[] = [];
+	let heldSets = 0;
+	for (const set of sets) {
+		const missing = setPairKeys(set).filter(
+			(k) => !known.has(k) && !scheduled.has(k),
+		);
+		if (scheduled.size + missing.length <= groupCap) {
+			for (const k of missing) {
+				scheduled.add(k);
+			}
+			plannedSets.push(set);
+		} else {
+			heldSets += 1;
+		}
+	}
+
+	const groupKeys = [...scheduled].filter((k) => !need1Set.has(k));
+	const rest1 = need1.filter((k) => !scheduled.has(k));
+	const slots1 = Math.min(rest1.length, total - scheduled.size);
+	const chosen = new Set(rest1.slice(0, slots1));
+	const oneOnOneKeys = oneOnOne.filter(
+		(k) => known.has(k) || chosen.has(k) || scheduled.has(k),
+	);
+	return {
+		oneOnOneKeys,
+		oneOnOneCapped: rest1.length - slots1,
+		groupKeys,
+		plannedSets,
+		heldSets,
+	};
+};

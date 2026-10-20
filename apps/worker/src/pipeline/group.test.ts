@@ -1,3 +1,4 @@
+import { LATCH } from "@latch/shared";
 import { describe, expect, it } from "vitest";
 import type { IntentRow } from "./consumer";
 import {
@@ -5,8 +6,10 @@ import {
 	cosineSimilarity,
 	dedupKeyOf,
 	enumerateSets,
+	type GroupSet,
 	intentPairKey,
 	type PoolEntry,
+	planJevAllocation,
 	rankByAggregate,
 	selectPool,
 	sizeFits,
@@ -191,5 +194,92 @@ describe("rankByAggregate", () => {
 describe("dedupKeyOf", () => {
 	it("id昇順のid@version", () => {
 		expect(dedupKeyOf([row("B", 3, 4, 2), row("A", 3, 4, 5)])).toBe("A@5,B@2");
+	});
+});
+
+describe("planJevAllocation", () => {
+	const ones = (n: number, p = "o") =>
+		Array.from({ length: n }, (_, i) => `${p}${i}:z${i}`);
+	const setOf = (ids: string[]): GroupSet => ({
+		members: ids.map((i) => row(i)),
+		key: ids.join(","),
+		cheapAggregate: 0.9,
+	});
+	const none = new Set<string>();
+
+	it("集合なし・未判定10件は8件まで・capped 2", () => {
+		const oo = ones(10);
+		const r = planJevAllocation({ oneOnOne: oo, sets: [], known: none });
+		expect(r.oneOnOneKeys).toEqual(oo.slice(0, LATCH.JEV_CALLS_PER_EVENT));
+		expect(r.oneOnOneCapped).toBe(2);
+		expect(r.groupKeys).toEqual([]);
+	});
+
+	it("1対1の未判定10件・3人集合1件は1対1が5件・groupKeys 3件・capped 5", () => {
+		const r = planJevAllocation({
+			oneOnOne: ones(10),
+			sets: [setOf(["A", "B", "C"])],
+			known: none,
+		});
+		expect(r.oneOnOneKeys).toHaveLength(5);
+		expect(r.groupKeys).toHaveLength(3);
+		expect(r.oneOnOneCapped).toBe(5);
+		expect(r.plannedSets).toHaveLength(1);
+	});
+
+	it("1対1の未判定2件・4人集合は合計8", () => {
+		const r = planJevAllocation({
+			oneOnOne: ones(2),
+			sets: [setOf(["A", "B", "C", "D"])],
+			known: none,
+		});
+		expect(r.oneOnOneKeys).toHaveLength(2);
+		expect(r.groupKeys).toHaveLength(6);
+		expect(r.oneOnOneCapped).toBe(0);
+	});
+
+	it("1対1の未判定6件ではグループ枠4のため4人集合は保留、3人集合は入る", () => {
+		const four = setOf(["A", "B", "C", "D"]);
+		const three = setOf(["E", "F", "G"]);
+		const r = planJevAllocation({
+			oneOnOne: ones(6),
+			sets: [four, three],
+			known: none,
+		});
+		expect(r.heldSets).toBe(1);
+		expect(r.plannedSets).toEqual([three]);
+		expect(r.oneOnOneKeys).toHaveLength(5);
+		expect(r.groupKeys).toHaveLength(3);
+		expect(r.oneOnOneCapped).toBe(1);
+	});
+
+	it("集合のペアが1対1の対象と重なればoneOnOneKeysのみに入り1回だけ数える", () => {
+		const oo = ["A:B", ...ones(9)];
+		const r = planJevAllocation({
+			oneOnOne: oo,
+			sets: [setOf(["A", "B", "C"])],
+			known: none,
+		});
+		expect(r.oneOnOneKeys).toContain("A:B");
+		expect(r.groupKeys).not.toContain("A:B");
+		expect(r.groupKeys.sort()).toEqual(["A:C", "B:C"]);
+		expect(new Set([...r.oneOnOneKeys, ...r.groupKeys]).size).toBe(
+			r.oneOnOneKeys.length + r.groupKeys.length,
+		);
+		expect(r.oneOnOneKeys.length + r.groupKeys.length).toBeLessThanOrEqual(
+			LATCH.JEV_CALLS_PER_EVENT,
+		);
+		expect(r.oneOnOneCapped).toBe(4);
+	});
+
+	it("全ペアknownの集合は枠を使わず、knownの1対1は全件入る", () => {
+		const set = setOf(["A", "B", "C"]);
+		const oo = ones(10);
+		const known = new Set([...oo.slice(0, 6), "A:B", "A:C", "B:C"]);
+		const r = planJevAllocation({ oneOnOne: oo, sets: [set], known });
+		expect(r.plannedSets).toEqual([set]);
+		expect(r.groupKeys).toEqual([]);
+		expect(r.oneOnOneKeys).toEqual(oo.slice(0, 6 + 4));
+		expect(r.oneOnOneCapped).toBe(0);
 	});
 });
