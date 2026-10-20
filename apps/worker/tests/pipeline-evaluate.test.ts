@@ -220,6 +220,7 @@ const NO_GROUP = {
 	groupOverThreshold: 0,
 	groupProposed: 0,
 	groupHeldProposals: 0,
+	groupFailed: 0,
 } as const;
 
 /** NO_GROUPのpayload表記(consumer.tsのキー名・F4b設計 §5) */
@@ -232,6 +233,7 @@ const NO_GROUP_PAYLOAD = {
 	group_over_threshold: 0,
 	group_proposed: 0,
 	group_held_proposals: 0,
+	group_failed: 0,
 } as const;
 
 /** vi.waitUntilのタイムアウト(waitUntil内のINSERT完了待ち・CIの遅延を吸収) */
@@ -645,6 +647,7 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			groupOverThreshold: 1,
 			groupProposed: 0,
 			groupHeldProposals: 0,
+			groupFailed: 0,
 		});
 		expect(await candidatesInvolving(origin.id)).toHaveLength(2);
 	});
@@ -1073,9 +1076,10 @@ describe("計測(Analytics Engine・docs/06 §7)", () => {
 		// (fixedClockのため処理時間は0・retrievalCount=2は自id含む取得件数)
 		expect(point.blobs[0]).toBe("stage2");
 		// 末尾にF4bの項目(l4_skipped_participants・group_pool・group_sets・group_jev_calls・
-		// group_held_sets・group_over_threshold・group_proposed・group_held_proposals)が続く
+		// group_held_sets・group_over_threshold・group_proposed・group_held_proposals・
+		// group_failed)が続く
 		expect(point.doubles).toEqual([
-			2, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			2, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		]);
 
 		// PIPELINE_AXが未バインドの環境(単体試験等)でも評価自体は完走する

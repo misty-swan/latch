@@ -244,6 +244,7 @@ const consumeEvent = async (
 						group_over_threshold: result.groupOverThreshold,
 						group_proposed: result.groupProposed,
 						group_held_proposals: result.groupHeldProposals,
+						group_failed: result.groupFailed,
 					},
 		);
 		return;

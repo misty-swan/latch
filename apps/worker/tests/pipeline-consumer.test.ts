@@ -460,6 +460,7 @@ describe("ログの分離と計測(docs/06 §7・docs/08 §6)", () => {
 			"group_over_threshold",
 			"group_proposed",
 			"group_held_proposals",
+			"group_failed",
 		]);
 		// 相手が居ないためグループの項目はすべて0
 		expect(payload).toMatchObject({
@@ -471,6 +472,7 @@ describe("ログの分離と計測(docs/06 §7・docs/08 §6)", () => {
 			group_over_threshold: 0,
 			group_proposed: 0,
 			group_held_proposals: 0,
+			group_failed: 0,
 		});
 	});
 });

@@ -90,6 +90,8 @@ export interface Stage2Result {
 	groupProposed: number;
 	/** 通知上限で保留した集合の数(0または1) */
 	groupHeldProposals: number;
+	/** グループ部分(準備・仕上げ)で例外が起きたら1(F4b設計 §5・1対1の結果は返す) */
+	groupFailed: 0 | 1;
 }
 
 /** evaluateIntentの差し替え口(試験用)。jevはLayer 4へそのまま渡す */
@@ -297,6 +299,7 @@ export const evaluateIntent = async (
 
 	// グループの準備とJev配分(F4b設計 §2.2〜§2.4)。失敗しても1対1だけで続ける(§5)
 	let prep: GroupPrep | null = null;
+	let groupFailed: 0 | 1 = 0;
 	try {
 		prep = await prepareGroups(
 			env,
@@ -316,6 +319,7 @@ export const evaluateIntent = async (
 		}
 	} catch (error) {
 		// 準備の途中で失敗した集合は扱わない(prepはnullのまま・1対1だけで配分する)
+		groupFailed = 1;
 		logger.warn("pipeline.group.failed", {
 			intent_id: intentId,
 			error_code: errorCodeOf(error),
@@ -437,6 +441,7 @@ export const evaluateIntent = async (
 		try {
 			group = await finishGroups(db, prep, plan.plannedSets, l4.axesByRow, now);
 		} catch (error) {
+			groupFailed = 1;
 			logger.warn("pipeline.group.failed", {
 				intent_id: intentId,
 				error_code: errorCodeOf(error),
@@ -472,6 +477,7 @@ export const evaluateIntent = async (
 		groupOverThreshold: group?.overThreshold ?? 0,
 		groupProposed: group?.proposed ?? 0,
 		groupHeldProposals: group?.held ?? 0,
+		groupFailed,
 	};
 	// 計測(Analytics Engine+ログ・docs/06 §7)。Cron呼び出しはこの計測のみを受け、
 	// イベントpayloadへの反映は呼び出し側(consumer.ts)が行う

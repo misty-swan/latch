@@ -97,8 +97,8 @@ export const recheckHard = async (
 /**
  * 集合のHard Constraintの再検証(F4b設計 §2.5)。全メンバーをD1から読み直し、
  * 全員active・全ペアがLayer 1に合格・人数nが全員の区間内なら最新の行(id昇順)を
- * 返す。1人でも不在・active以外・不合格ならnull(Jev実行〜提案化の間のpause・
- * 削除を拾う・Review Focus 5)
+ * 返す。1人でも不在・active以外・versionの変化(Jev結果が古い内容に基づく)・
+ * 不合格ならnull(Jev実行〜提案化の間のpause・削除・更新を拾う・Review Focus 5)
  */
 export const recheckSet = async (
 	db: DrizzleD1Database,
@@ -106,8 +106,14 @@ export const recheckSet = async (
 	now: Date,
 ): Promise<IntentRow[] | null> => {
 	const ids = members.map((m) => m.id);
+	const versionById = new Map(members.map((m) => [m.id, m.version]));
 	const fresh = await db.select().from(intents).where(inArray(intents.id, ids));
-	if (fresh.length !== ids.length || fresh.some((m) => m.status !== "active")) {
+	if (
+		fresh.length !== ids.length ||
+		fresh.some(
+			(m) => m.status !== "active" || versionById.get(m.id) !== m.version,
+		)
+	) {
 		return null;
 	}
 	const sorted = fresh.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

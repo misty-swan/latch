@@ -472,6 +472,7 @@ describe("evaluateIntentへのグループ統合(F4b設計 §2.4〜§2.5・§5)"
 			group_over_threshold: 1,
 			group_proposed: 1,
 			group_held_proposals: 0,
+			group_failed: 0,
 			proposed: 0,
 		});
 		expect(payload.jev_calls as number).toBeLessThanOrEqual(8);
@@ -602,6 +603,7 @@ describe("evaluateIntentへのグループ統合(F4b設計 §2.4〜§2.5・§5)"
 		expect(result).not.toBeNull();
 		expect(result?.proposed).toBe(2);
 		expect(result?.groupProposed).toBe(0);
+		expect(result?.groupFailed).toBe(1);
 		const warned = logSpy.mock.calls
 			.map((call) => JSON.parse(String(call[0])) as Record<string, unknown>)
 			.filter((line) => line.event === "pipeline.group.failed");
@@ -613,5 +615,77 @@ describe("evaluateIntentへのグループ統合(F4b設計 §2.4〜§2.5・§5)"
 				error_code: "VECTOR_DOWN",
 			},
 		]);
+	});
+
+	it("Jev実行後に集合の1人のversionが変わると、その集合は提案せず次の集合へ進む", async () => {
+		const origin = await named("O");
+		const others = [await named("X"), await named("Y"), await named("Z")];
+		// 最初に並ぶ集合は他の3人のうち最小idの人を必ず含む(同点はkey昇順)
+		const sorted = [...others].sort((p, q) => (p.id < q.id ? -1 : 1));
+		const bumped = sorted[0];
+		const bumpingJev: JevFn = async (input) => {
+			await db
+				.update(intents)
+				.set({ version: bumped.version + 1 })
+				.where(eq(intents.id, bumped.id));
+			return stubJev(input);
+		};
+		const result = await evaluateIntent(testEnv, origin.id, fixedClock(NOW), {
+			jev: { primary: bumpingJev, fallback: bumpingJev },
+		});
+		expect(result?.groupOverThreshold).toBe(4);
+		expect(result?.groupProposed).toBe(1);
+		const found = await latchesAmong([origin, ...others]);
+		expect(found).toHaveLength(1);
+		expect(await membersOf(found[0].id)).toEqual(
+			[origin.userId, sorted[1].userId, sorted[2].userId].sort(),
+		);
+	});
+
+	it("finishGroupsが例外でも1対1の提案とlast_evaluated_atは残り、payloadにgroup_failed=1", async () => {
+		const both = { participantsMin: 2, participantsMax: 3 };
+		const origin = await named("O", both);
+		const x = await named("X", both);
+		const y = await named("Y", both);
+		// group_candidatesへの書き込みだけを失敗させる(集合の仕上げ=finishGroupsの例外)
+		await testEnv.DB.exec(
+			"CREATE TRIGGER fail_group_candidates BEFORE INSERT ON group_candidates BEGIN SELECT RAISE(ABORT, 'GROUP_DOWN'); END;",
+		);
+		const logSpy = vi.spyOn(console, "log");
+		try {
+			const payload = await consumeCompleted(origin.id);
+			expect(payload).toMatchObject({
+				proposed: 2,
+				group_sets: 1,
+				group_proposed: 0,
+				group_failed: 1,
+			});
+		} finally {
+			await testEnv.DB.exec("DROP TRIGGER fail_group_candidates;");
+		}
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, origin.id));
+		expect(row?.lastEvaluatedAt?.getTime()).toBe(NOW.getTime());
+		expect(
+			await db
+				.select()
+				.from(groupCandidates)
+				.where(eq(groupCandidates.dedupKey, dedupKeyOf([origin, x, y]))),
+		).toHaveLength(0);
+		const warned = logSpy.mock.calls
+			.map((call) => JSON.parse(String(call[0])) as Record<string, unknown>)
+			.filter((line) => line.event === "pipeline.group.failed");
+		expect(warned).toHaveLength(1);
+		// 許可リストのフィールド(intent_id・error_code)のみ
+		expect(Object.keys(warned[0]).sort()).toEqual([
+			"error_code",
+			"event",
+			"intent_id",
+			"level",
+		]);
+		expect(warned[0].intent_id).toBe(origin.id);
+		expect(typeof warned[0].error_code).toBe("string");
 	});
 });
