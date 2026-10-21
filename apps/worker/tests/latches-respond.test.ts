@@ -240,6 +240,20 @@ describe("respond(yes)", () => {
 		]);
 	});
 
+	it("双方yesで成立した時点のlast_message_atは成立時刻になる(docs/05 §2.2)", async () => {
+		const { latchId, ua, ub } = await setupPair("connection");
+		const t1 = new Date(NOW.getTime() - MIN);
+		await respond(db, latchId, ua, "yes", t1);
+		const afterPartial = await latchOf(latchId);
+		expect(afterPartial?.status).toBe("partial_accept");
+		expect(afterPartial?.lastMessageAt.getTime()).toBe(ago(HOUR).getTime());
+
+		await respond(db, latchId, ub, "yes", NOW);
+		const afterMatched = await latchOf(latchId);
+		expect(afterMatched?.status).toBe("matched");
+		expect(afterMatched?.lastMessageAt.getTime()).toBe(NOW.getTime());
+	});
+
 	it("(b) A・Bのyesを同時に送ってもmatchedになり、matchedへの遷移記録は1件・通知は2件", async () => {
 		const { latchId, ua, ub } = await setupPair("connection");
 

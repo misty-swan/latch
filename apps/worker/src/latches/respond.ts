@@ -172,9 +172,14 @@ const respondYes = async (
 		sql`SELECT ${newUlid()}, id, status, ${next}, ${nowMs} FROM latches
 				WHERE id = ${latchId} AND status != ${next} AND ${open} AND ${recorded}`,
 	);
+	// 成立時はlast_message_atを成立時刻へ置き直す(メッセージ0件のときの90日判定の起点・docs/05 §2.2)
 	const update = db
 		.update(latches)
-		.set({ status: sql`${next}`, updatedAt: now })
+		.set({
+			status: sql`${next}`,
+			lastMessageAt: sql`CASE WHEN ${next} = 'matched' THEN ${nowMs} ELSE last_message_at END`,
+			updatedAt: now,
+		})
 		.where(
 			and(
 				eq(latches.id, latchId),
