@@ -8,7 +8,8 @@
 		"build": "vite build",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
-		"test:e2e": "playwright test"
+		"test:e2e": "playwright test",
+		"icons": "node scripts/make-icons.mjs"
 	},
 	"dependencies": {
 		"@hookform/resolvers": "5.9.2",
@@ -24,6 +25,7 @@
 	},
 	"devDependencies": {
 		"@playwright/test": "1.64.1",
+		"@resvg/resvg-js": "2.6.2",
 		"@testing-library/react": "16.3.3",
 		"@types/react": "19.3.0",
 		"@types/react-dom": "19.3.0",
