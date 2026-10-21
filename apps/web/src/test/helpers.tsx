@@ -7,11 +7,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
-/** 試験用のQueryClient。再試行なし(即エラー扱い)で・キャッシュは試験ごとに独立 */
+/**
+ * 試験用のQueryClient。再試行なし(即エラー扱い)で・キャッシュは試験ごとに独立。
+ * 変更はアプリと同じくnetworkMode "always"(オフラインでも止めずに失敗させる)
+ */
 export const createTestQueryClient = (): QueryClient =>
 	new QueryClient({
 		defaultOptions: {
 			queries: { retry: false, gcTime: 0, staleTime: 0 },
+			mutations: { networkMode: "always" },
 		},
 	});
 

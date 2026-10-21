@@ -1,13 +1,20 @@
-import { QueryClient } from "@tanstack/react-query";
+import {
+	MutationObserver,
+	onlineManager,
+	QueryClient,
+} from "@tanstack/react-query";
 import {
 	persistQueryClientRestore,
 	persistQueryClientSave,
+	persistQueryClientSubscribe,
 } from "@tanstack/react-query-persist-client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../auth/session";
 import {
 	clearOfflineCache,
+	createAppQueryClient,
 	createOfflinePersister,
+	createPersistOptions,
 	OFFLINE_CACHE_KEY,
 	OFFLINE_MAX_AGE_MS,
 	type OfflineStore,
@@ -235,5 +242,103 @@ describe("利用者が変わったときの後始末", () => {
 
 		expect(client.getQueryCache().getAll()).toEqual([]);
 		expect(store.data.size).toBe(0);
+	});
+});
+
+describe("createAppQueryClient・createPersistOptions", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		onlineManager.setOnline(true);
+	});
+
+	/** 保存の書き出し(非同期)が終わるのを待つ */
+	const flush = async (): Promise<void> => {
+		for (let i = 0; i < 5; i += 1) await Promise.resolve();
+	};
+
+	const storedKeys = (store: ReturnType<typeof memoryStore>): unknown[] =>
+		(
+			store.data.get(OFFLINE_CACHE_KEY) as {
+				client: { clientState: { queries: { queryKey: unknown[] }[] } };
+			}
+		).client.clientState.queries.map((query) => query.queryKey);
+
+	it("画面に出ていない4つのキーも5分で捨てず、端末の保存から消えない", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		const store = memoryStore();
+		const client = createAppQueryClient();
+		const stop = persistQueryClientSubscribe({
+			queryClient: client,
+			...createPersistOptions(createOfflinePersister(() => "U1", store)),
+		});
+		for (const key of PERSISTED_QUERY_KEYS) {
+			client.setQueryData(key, { items: [] });
+		}
+		client.setQueryData(["latches", "L1"], { id: "L1" });
+		await flush();
+
+		// 既定のgcTime(5分)を十分に過ぎても、4つのキーは残り・対象外のキーだけ捨てられる
+		vi.advanceTimersByTime(60 * 60_000);
+		await flush();
+		stop();
+
+		for (const key of PERSISTED_QUERY_KEYS) {
+			expect(client.getQueryData(key)).toEqual({ items: [] });
+		}
+		expect(client.getQueryData(["latches", "L1"])).toBeUndefined();
+		expect(storedKeys(store)).toEqual(PERSISTED_QUERY_KEYS);
+	});
+
+	it("4つのキーのgcTimeは保存期間(7日)", () => {
+		const client = createAppQueryClient();
+		for (const key of PERSISTED_QUERY_KEYS) {
+			expect(client.getQueryDefaults(key).gcTime).toBe(OFFLINE_MAX_AGE_MS);
+		}
+	});
+
+	it("オフラインでも変更は止まらずに失敗し、回復しても送り直さない", async () => {
+		const client = createAppQueryClient();
+		client.mount();
+		onlineManager.setOnline(false);
+		const mutationFn = vi.fn(() =>
+			Promise.reject(new TypeError("Failed to fetch")),
+		);
+		const observer = new MutationObserver(client, { mutationFn });
+
+		await expect(observer.mutate()).rejects.toBeInstanceOf(TypeError);
+		expect(observer.getCurrentResult().isError).toBe(true);
+		expect(observer.getCurrentResult().isPaused).toBe(false);
+
+		onlineManager.setOnline(true);
+		await flush();
+		client.unmount();
+
+		expect(mutationFn).toHaveBeenCalledTimes(1);
+	});
+
+	it("止まった変更があっても端末には保存しない(4つのキーだけ)", async () => {
+		const store = memoryStore();
+		const client = createAppQueryClient();
+		client.setQueryData(["intents"], { items: [] });
+		onlineManager.setOnline(false);
+		// 明示的にnetworkMode "online"にした変更はオフラインで止まる
+		void new MutationObserver(client, {
+			mutationFn: async (_body: { topic: string }) => undefined,
+			networkMode: "online",
+		})
+			.mutate({ topic: "本文" })
+			.catch(() => undefined);
+		expect(client.getMutationCache().getAll()[0]?.state.isPaused).toBe(true);
+
+		await persistQueryClientSave({
+			queryClient: client,
+			...createPersistOptions(createOfflinePersister(() => "U1", store)),
+		});
+
+		const stored = store.data.get(OFFLINE_CACHE_KEY) as {
+			client: { clientState: { mutations: unknown[] } };
+		};
+		expect(stored.client.clientState.mutations).toEqual([]);
+		expect(storedKeys(store)).toEqual([["intents"]]);
 	});
 });

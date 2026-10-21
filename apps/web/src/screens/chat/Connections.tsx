@@ -4,6 +4,7 @@
  */
 
 import type { LatchDTO } from "@latch/shared";
+import { useIsRestoring } from "@tanstack/react-query";
 import { Fragment } from "react";
 import { Link } from "react-router";
 import {
@@ -140,6 +141,8 @@ export function Connections() {
 		isFetchingNextPage,
 	} = useConnectionsQuery();
 	const online = useOnline();
+	// 端末の保存を読み戻している間は、オフラインでも読み込めなかった表示にしない
+	const restoring = useIsRestoring();
 	const offline = !online || (isRefetchError && isOfflineError(error));
 	const now = new Date();
 
@@ -150,7 +153,7 @@ export function Connections() {
 				<ConnectionsTopbar />
 				<div className="screen__body pad" style={{ paddingTop: 6 }}>
 					<h1 className="t-display">つながり</h1>
-					{isError || !online ? (
+					{isError || (!online && !restoring) ? (
 						<>
 							{!online && <OfflineBanner />}
 							<p className="t-caption" style={{ marginTop: 8 }}>

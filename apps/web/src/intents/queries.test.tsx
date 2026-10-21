@@ -4,7 +4,11 @@
  * 状態表示名の対照がdocs/01 §10どおりであることを確かめる(fetchはモック)
  */
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+	QueryClient,
+	QueryClientProvider,
+	useQuery,
+} from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -105,7 +109,30 @@ describe("意思の変更hooks", () => {
 		expect(url).toBe("/v1/intents/I1/pause");
 		expect(init.method).toBe("POST");
 		expect(client.getQueryData(intentQueryKey("I1"))).toEqual({ id: "I1" });
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: ["intents"] });
+		expect(invalidate).toHaveBeenCalledWith({
+			queryKey: ["intents"],
+			exact: true,
+		});
+	});
+
+	it("変更の成功では置いたばかりの個別キャッシュを取り直さない", async () => {
+		const { fetchMock, wrapper } = setup();
+		// 個別の取得を購読している状態(詳細画面を開いている)を作る
+		const single = vi.fn(async () => ({ id: "I1", status: "active" }));
+		const { result } = renderHook(
+			() => {
+				useQuery({ queryKey: intentQueryKey("I1"), queryFn: single });
+				return usePauseIntent("I1");
+			},
+			{ wrapper },
+		);
+		await waitFor(() => expect(single).toHaveBeenCalledTimes(1));
+		await act(async () => {
+			await result.current.mutateAsync();
+		});
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(single).toHaveBeenCalledTimes(1);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("useResumeIntentはPOST /intents/I1/resumeを呼ぶ", async () => {
@@ -142,6 +169,25 @@ describe("意思の変更hooks", () => {
 		await waitFor(() =>
 			expect(client.getQueryData(intentQueryKey("I1"))).toBeUndefined(),
 		);
-		expect(invalidate).toHaveBeenCalledWith({ queryKey: ["intents"] });
+		expect(invalidate).toHaveBeenCalledWith({
+			queryKey: ["intents"],
+			exact: true,
+		});
+	});
+
+	it("useDeleteIntentは成功で一覧のキャッシュから取り下げた行を外す", async () => {
+		const { client, wrapper } = setup(204);
+		client.setQueryData(["intents"], {
+			items: [{ id: "I1" }, { id: "I2" }],
+			next_cursor: null,
+		});
+		const { result } = renderHook(() => useDeleteIntent("I1"), { wrapper });
+		await act(async () => {
+			await result.current.mutateAsync();
+		});
+		expect(client.getQueryData(["intents"])).toEqual({
+			items: [{ id: "I2" }],
+			next_cursor: null,
+		});
 	});
 });

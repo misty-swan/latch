@@ -111,16 +111,31 @@ describe("startReconnect", () => {
 			authSession.onClear(() => void clearOfflineCache(client, store)),
 		);
 		const target = new EventTarget();
-		cleanups.push(startReconnect(client, target));
+		const goWelcome = vi.fn();
+		cleanups.push(startReconnect(client, target, goWelcome));
 		fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }));
 
 		await fireOnline(target);
 
+		expect(goWelcome).toHaveBeenCalledTimes(1);
 		expect(authSession.offline).toBe(false);
 		expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
 		expect(data.size).toBe(0);
 		expect(client.getQueryCache().getAll()).toEqual([]);
 		expect(invalidate).not.toHaveBeenCalled();
+	});
+
+	it("通信の失敗でオフライン中のままならようこそ画面へ移らない", async () => {
+		await goOffline();
+		const target = new EventTarget();
+		const goWelcome = vi.fn();
+		cleanups.push(startReconnect(new QueryClient(), target, goWelcome));
+		fetchMock.mockRejectedValueOnce(new TypeError("network down"));
+
+		await fireOnline(target);
+
+		expect(authSession.offline).toBe(true);
+		expect(goWelcome).not.toHaveBeenCalled();
 	});
 
 	it("解除後はonlineイベントに反応しない", async () => {

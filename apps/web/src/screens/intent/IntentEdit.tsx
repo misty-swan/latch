@@ -29,6 +29,7 @@ import {
 	validateConfirmValues,
 } from "../../intents/submit";
 import { isOfflineError, OFFLINE_MESSAGES } from "../../offline/errors";
+import { useOnline } from "../../offline/online";
 import { intentPath } from "../../routes/paths";
 import { ScreenGrain } from "../shared";
 import { daysUntil } from "./IntentDetail";
@@ -277,16 +278,18 @@ export function IntentEdit() {
 	const { id = "" } = useParams();
 	const navigate = useNavigate();
 	const { data, isError, refetch } = useIntentQuery(id);
+	const online = useOnline();
 	const [notice, setNotice] = useState<string | null>(null);
 	/** 取り直したあとに値を作り直すための印(保存成功の再描画では作り直さない) */
 	const [generation, setGeneration] = useState(0);
 	const inactive = data !== undefined && data.status !== "active";
 	useEffect(() => {
-		// 直せるのはactiveだけ。それ以外・見つからない意思は詳細へ戻す
-		if (inactive || (isError && data === undefined)) {
+		// 直せるのはactiveだけ。それ以外・見つからない意思・オフラインで取得できない意思は詳細へ戻す
+		// (詳細はオフラインなら読み込めなかった表示と帯を出す)
+		if (inactive || ((isError || !online) && data === undefined)) {
 			navigate(intentPath(id), { replace: true });
 		}
-	}, [inactive, isError, data, id, navigate]);
+	}, [inactive, isError, online, data, id, navigate]);
 	if (data === undefined || inactive) {
 		return (
 			<div className="screen confirm">

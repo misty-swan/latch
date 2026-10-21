@@ -5,9 +5,13 @@
  * - 保存先はIndexedDB(idb-keyval)。保存値は{ userId, client }で、利用者IDが現在と異なる保存は
  *   読まずに消す(別の利用者の内容を見せない)。利用者IDが無いときは保存しない
  * - IndexedDBが使えない端末(例外)では保存せず、例外を外へ出さない(表示は通常の取得に任せる)
+ * - 保存はキャッシュ全体の書き出しなので、4つのキーは保存期間のあいだメモリからも捨てない
+ *   (既定の5分で捨てると、捨てた後の書き出しで端末の保存からも消える)
+ * - 変更(mutation)は保存しない。オフラインでも一時停止させずにその場で失敗させる
+ *   (止めた変更が接続の回復で黙って送られるのを防ぎ、オフラインの案内を出すため)
  */
 
-import { hashKey, type Query, type QueryClient } from "@tanstack/react-query";
+import { hashKey, type Query, QueryClient } from "@tanstack/react-query";
 import type {
 	PersistedClient,
 	Persister,
@@ -120,6 +124,32 @@ export const createOfflinePersister = (
 	},
 	removeClient: async () => {
 		await quietly(() => store.del(OFFLINE_CACHE_KEY));
+	},
+});
+
+/**
+ * アプリのQueryClientを作る。
+ * - 変更はnetworkMode "always"(オフラインでも送ろうとし、通信の失敗としてonErrorへ届く)
+ * - 保存する4つのキーはgcTimeを保存期間にそろえる(復元しただけで画面に出ていない間も捨てない)。
+ *   既定の設定は前方一致なので["intents", id]にも及ぶが、メモリ上に残るだけで保存はされない
+ */
+export const createAppQueryClient = (): QueryClient => {
+	const client = new QueryClient({
+		defaultOptions: { mutations: { networkMode: "always" } },
+	});
+	for (const queryKey of PERSISTED_QUERY_KEYS) {
+		client.setQueryDefaults(queryKey, { gcTime: OFFLINE_MAX_AGE_MS });
+	}
+	return client;
+};
+
+/** PersistQueryClientProviderへ渡す設定(4つのキーの成功した結果だけ・変更は保存しない) */
+export const createPersistOptions = (persister: Persister) => ({
+	persister,
+	maxAge: OFFLINE_MAX_AGE_MS,
+	dehydrateOptions: {
+		shouldDehydrateQuery: shouldPersistQuery,
+		shouldDehydrateMutation: () => false,
 	},
 });
 

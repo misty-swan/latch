@@ -192,7 +192,34 @@ test("Service Workerの制御下では、オフラインでも保存済みの一
 	await expect(page.getByText(OFFLINE_BANNER)).toBeVisible();
 	await context.setOffline(false);
 	await expect(page.getByText(OFFLINE_BANNER)).toHaveCount(0);
-	await expect(page.locator(".intent", { hasText: words })).toBeVisible();
+	const card = page.locator(".intent", { hasText: words });
+	await expect(card).toBeVisible();
+
+	// 意思の詳細を開いたままオフラインになり、一時停止を押すと案内が出る。
+	// オンラインに戻っても、押した操作が後から送られることはない(activeのまま)
+	await card.click();
+	await expect(page).toHaveURL(/\/intents\/[^/]+$/);
+	const pauseButton = page.getByRole("button", { name: "一時停止する" });
+	await expect(pauseButton).toBeEnabled();
+	let pauseResponses = 0;
+	page.on("response", (res) => {
+		if (new URL(res.url()).pathname.endsWith("/pause")) pauseResponses += 1;
+	});
+	await context.setOffline(true);
+	await pauseButton.click();
+	await expect(
+		page.getByText("オフラインのため、いまは操作できません。"),
+	).toBeVisible();
+	await expect(pauseButton).toBeEnabled();
+	await context.setOffline(false);
+	await page.reload();
+	await expect(
+		page.locator(".status", { hasText: "預けている" }),
+	).toBeVisible();
+	await expect(page.locator(".status", { hasText: "一時停止中" })).toHaveCount(
+		0,
+	);
+	expect(pauseResponses).toBe(0);
 	await context.close();
 });
 

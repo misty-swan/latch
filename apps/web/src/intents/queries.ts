@@ -50,14 +50,17 @@ export const useIntentQuery = (id: string) => {
 	});
 };
 
-/** 応答を個別キャッシュへ置き・一覧を無効化する */
+/**
+ * 応答を個別キャッシュへ置き・一覧だけを無効化する。
+ * 前方一致だと置いたばかりの個別キャッシュまで取り直すので、一覧のキーに完全一致で絞る
+ */
 const applyIntent = (
 	client: QueryClient,
 	id: string,
 	data: IntentDTO,
 ): void => {
 	client.setQueryData(intentQueryKey(id), data);
-	void client.invalidateQueries({ queryKey: INTENTS_QUERY_KEY });
+	void client.invalidateQueries({ queryKey: INTENTS_QUERY_KEY, exact: true });
 };
 
 const intentAction = (id: string, action: "pause" | "resume") =>
@@ -106,7 +109,16 @@ export const useDeleteIntent = (id: string) => {
 			}),
 		onSuccess: () => {
 			client.removeQueries({ queryKey: intentQueryKey(id) });
-			void client.invalidateQueries({ queryKey: INTENTS_QUERY_KEY });
+			// 一覧の取り直しが失敗しても取り下げた行が残らないよう、先に一覧から外しておく
+			client.setQueryData<IntentListResponse>(INTENTS_QUERY_KEY, (list) =>
+				list === undefined
+					? list
+					: { ...list, items: list.items.filter((item) => item.id !== id) },
+			);
+			void client.invalidateQueries({
+				queryKey: INTENTS_QUERY_KEY,
+				exact: true,
+			});
 		},
 	});
 };

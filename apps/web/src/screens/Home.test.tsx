@@ -6,7 +6,11 @@
  */
 
 import type { IntentDTO, LatchDTO } from "@latch/shared";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+	IsRestoringProvider,
+	QueryClient,
+	QueryClientProvider,
+} from "@tanstack/react-query";
 import {
 	act,
 	cleanup,
@@ -568,6 +572,24 @@ describe("Home(オフラインの帯)", () => {
 		act(() => setOnline(true));
 		expect(await screen.findByText(connectionIntent.raw_text)).toBeTruthy();
 		expect(screen.queryByText(BANNER)).toBeNull();
+	});
+
+	it("オフラインでも端末の保存を読み戻している間は、読み込めなかった表示を出さない", async () => {
+		setOnline(false);
+		const router = createMemoryRouter(appRoutes, {
+			initialEntries: [PATHS.home],
+		});
+		render(
+			<QueryClientProvider client={new QueryClient()}>
+				<IsRestoringProvider value={true}>
+					<RouterProvider router={router} />
+				</IsRestoringProvider>
+			</QueryClientProvider>,
+		);
+		expect(
+			await screen.findByRole("heading", { name: "預けている" }),
+		).toBeTruthy();
+		expect(screen.queryByText("一覧を読み込めませんでした。")).toBeNull();
 	});
 
 	it("オンラインなら帯を出さない", async () => {

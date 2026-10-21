@@ -36,6 +36,8 @@ import {
 	jstDayIndex,
 } from "../../latches/format";
 import { isOfflineError, OFFLINE_MESSAGES } from "../../offline/errors";
+import { OfflineBanner } from "../../offline/OfflineBanner";
+import { useOnline } from "../../offline/online";
 import { intentEditPath, PATHS } from "../../routes/paths";
 import { GlyphPaths } from "../Home";
 import { RouteToast, useRouteToast } from "../RouteToast";
@@ -151,12 +153,19 @@ function NotFound() {
 	);
 }
 
-function LoadFailed({ onRetry }: { onRetry(): void }) {
+function LoadFailed({
+	offline,
+	onRetry,
+}: {
+	offline: boolean;
+	onRetry(): void;
+}) {
 	return (
 		<div className="screen intent-detail">
 			<ScreenGrain />
 			<Topbar />
 			<div className="screen__body pad" style={{ paddingTop: 6 }}>
+				{offline && <OfflineBanner />}
 				<p className="t-caption" style={{ marginTop: 8 }}>
 					読み込めませんでした。
 				</p>
@@ -594,12 +603,18 @@ function Detail({ intent, now }: { intent: IntentDTO; now: Date }) {
 export function IntentDetail() {
 	const { id = "" } = useParams();
 	const { data, isPending, isError, error, refetch } = useIntentQuery(id);
+	const online = useOnline();
 	if (isError && !data) {
 		return error instanceof ApiError && error.code === "NOT_FOUND" ? (
 			<NotFound />
 		) : (
-			<LoadFailed onRetry={() => void refetch()} />
+			<LoadFailed offline={!online} onRetry={() => void refetch()} />
 		);
+	}
+	// 単一の取得は端末に保存しないので、オフラインで開くと取得が止まったままになる。
+	// 空の画面にせず、読み込めなかった表示と帯を出す
+	if (!online && !data) {
+		return <LoadFailed offline onRetry={() => void refetch()} />;
 	}
 	if (isPending || !data) {
 		return (

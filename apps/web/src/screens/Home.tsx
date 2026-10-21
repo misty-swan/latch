@@ -11,6 +11,7 @@
  */
 
 import type { IntentDTO, IntentStatus, LatchDTO } from "@latch/shared";
+import { useIsRestoring } from "@tanstack/react-query";
 import type { CSSProperties } from "react";
 import { Link } from "react-router";
 import { INTENT_STATUS_LABELS, useIntentsQuery } from "../intents/queries";
@@ -330,6 +331,7 @@ export function Home() {
 	const toast = useRouteToast();
 	const { data, isPending, isRefetchError, error, refetch } = useIntentsQuery();
 	const online = useOnline();
+	const restoring = useIsRestoring();
 	// オフライン中・または再取得が通信失敗で、保存済みの一覧を見せているとき
 	const offline = !online || (isRefetchError && isOfflineError(error));
 	const pushDenied = usePushStatus().data === "denied";
@@ -344,8 +346,9 @@ export function Home() {
 	// 相対表示(預けてN日・開始まで など)の基準時刻
 	const now = new Date();
 
-	// オフラインで保存済みの一覧が無いときは、取得が止まったままなので読み込めなかった表示にする
-	if (isPending && online) {
+	// オフラインで保存済みの一覧が無いときは、取得が止まったままなので読み込めなかった表示にする。
+	// ただし端末の保存を読み戻している間は、読み戻しを待って取得中の表示にする
+	if (isPending && (online || restoring)) {
 		return (
 			<div className="screen home">
 				<ScreenGrain />

@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../../auth/session";
 import { appRoutes } from "../../router";
 import { createTestQueryClient } from "../../test/helpers";
+import { restoreOnline, setOnline } from "../../test/offline";
 
 const DAY = 24 * 3_600_000;
 const ID = "01J00000000000000000000001";
@@ -57,6 +58,8 @@ const fetchMock = vi.fn(
 	async (input: RequestInit | RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
 		const method = init?.method ?? "GET";
+		// オフラインの端末ではfetchが通信の失敗(TypeError)になる
+		if (!navigator.onLine) throw new TypeError("Failed to fetch");
 		if (url === "/v1/users/me") return json({ id: "me" });
 		if (url === PATH && method === "PATCH") return patchResponse();
 		if (url === PATH) return json(intent);
@@ -107,6 +110,8 @@ beforeEach(() => {
 });
 afterEach(() => {
 	cleanup();
+	setOnline(true);
+	restoreOnline();
 	vi.unstubAllGlobals();
 	authSession.clear();
 });
@@ -257,5 +262,17 @@ describe("IntentEdit", () => {
 		});
 		expect(router.state.historyAction).toBe("REPLACE");
 		expect(screen.queryByText("内容を直す", { selector: "h1" })).toBeNull();
+	});
+
+	it("オフラインで開いて意思を取得できないときは詳細へ戻し、読み込めなかった表示と帯を出す", async () => {
+		setOnline(false);
+		const router = open();
+		await waitFor(() => {
+			expect(router.state.location.pathname).toBe(`/intents/${ID}`);
+		});
+		expect(await screen.findByText("読み込めませんでした。")).toBeTruthy();
+		expect(
+			screen.getByText("オフラインです。最後に確かめた内容を表示しています。"),
+		).toBeTruthy();
 	});
 });

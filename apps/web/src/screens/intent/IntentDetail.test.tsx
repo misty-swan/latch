@@ -4,8 +4,9 @@
  */
 
 import type { IntentDTO, LatchDTO } from "@latch/shared";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { type QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+	act,
 	cleanup,
 	fireEvent,
 	render,
@@ -16,8 +17,10 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../../auth/session";
 import { readPendingCompose } from "../../intents/composeState";
+import { createAppQueryClient } from "../../offline/persister";
 import { appRoutes } from "../../router";
 import { createTestQueryClient } from "../../test/helpers";
+import { restoreOnline, setOnline } from "../../test/offline";
 import { countMatches } from "./IntentDetail";
 
 const DAY = 24 * 3_600_000;
@@ -78,6 +81,8 @@ const fetchMock = vi.fn(
 		const url = String(input);
 		const method = init?.method ?? "GET";
 		const path = `/v1/intents/${ID}`;
+		// オフラインの端末ではfetchが通信の失敗(TypeError)になる
+		if (!navigator.onLine) throw new TypeError("Failed to fetch");
 		if (url === "/v1/users/me") return json({ id: "me" });
 		if (url === `${path}/pause` && method === "POST") return pauseResponse();
 		if (url === `${path}/resume` && method === "POST") {
@@ -106,12 +111,12 @@ const callsTo = (method: string, url: string) =>
 		([u, i]) => String(u) === url && (i?.method ?? "GET") === method,
 	);
 
-const open = () => {
+const open = (client: QueryClient = createTestQueryClient()) => {
 	const router = createMemoryRouter(appRoutes, {
 		initialEntries: [`/intents/${ID}`],
 	});
 	render(
-		<QueryClientProvider client={createTestQueryClient()}>
+		<QueryClientProvider client={client}>
 			<RouterProvider router={router} />
 		</QueryClientProvider>,
 	);
@@ -137,6 +142,8 @@ beforeEach(() => {
 });
 afterEach(() => {
 	cleanup();
+	setOnline(true);
+	restoreOnline();
 	vi.unstubAllGlobals();
 	authSession.clear();
 });
@@ -362,5 +369,53 @@ describe("IntentDetail 操作", () => {
 		fireEvent.click(screen.getByRole("button", { name: "やめる" }));
 		expect(screen.queryByRole("dialog")).toBeNull();
 		expect(callsTo("DELETE", `/v1/intents/${ID}`)).toHaveLength(0);
+	});
+});
+
+describe("IntentDetail オフライン", () => {
+	/** アプリと同じQueryClient(取得の再試行だけ外す) */
+	const appClient = (): QueryClient => {
+		const client = createAppQueryClient();
+		client.setDefaultOptions({
+			...client.getDefaultOptions(),
+			queries: { retry: false },
+		});
+		return client;
+	};
+
+	it("開いた後にオフラインになって一時停止を押すと案内を出し・回復しても送り直さない", async () => {
+		open(appClient());
+		const button = await screen.findByRole("button", { name: /一時停止する/ });
+		act(() => setOnline(false));
+
+		fireEvent.click(button);
+
+		expect(
+			await screen.findByText("オフラインのため、いまは操作できません。"),
+		).toBeTruthy();
+		// 止まったままにならず、もう一度押せる
+		expect((button as HTMLButtonElement).disabled).toBe(false);
+		const attempts = callsTo("POST", `/v1/intents/${ID}/pause`).length;
+		expect(attempts).toBe(1);
+
+		act(() => setOnline(true));
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		expect(callsTo("POST", `/v1/intents/${ID}/pause`)).toHaveLength(attempts);
+		expect(intent.status).toBe("active");
+		expect(screen.queryByText("一時停止しました。")).toBeNull();
+	});
+
+	it("オフラインで開いて単一の取得が無いときは読み込めなかった表示と帯を出す", async () => {
+		setOnline(false);
+		open(appClient());
+
+		expect(await screen.findByText("読み込めませんでした。")).toBeTruthy();
+		expect(
+			screen.getByText("オフラインです。最後に確かめた内容を表示しています。"),
+		).toBeTruthy();
+		expect(
+			screen.getByRole("button", { name: "もう一度読み込む" }),
+		).toBeTruthy();
 	});
 });
