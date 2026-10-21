@@ -1,5 +1,6 @@
 /**
- * 提案〜成立のE2E(APIレベル・docs/02 §4の#12・#14・#15・#17〜#20・#23・F4aのゲート)。
+ * 提案〜成立のE2E(APIレベル・docs/02 §4の#12・#14・#15・#17〜#20・#23・F4aのゲートと
+ * #21・F5のゲート)。
  * Intent APIで実データを投入し、パイプライン(Layer 2 Candidate Retrieval→Layer 1→
  * Layer 3→Layer 4 Jev→Layer 5→提案化)の結果をdev観測API(GET /v1/dev/latches・
  * match-candidates・match-events・proposal-history)と/v1/latchesで読む。
@@ -701,4 +702,55 @@ test("#12(b) 見送り後の機会Intentは条件変化で再提案される", a
 	expect(history?.latch_id).toBe(again.id);
 	expect(history?.outcome).toBe("proposed");
 	await deletePair(request, pair);
+});
+
+/** GET /v1/intents/{id}のstatus(所有者として取得・200を保証) */
+const intentStatusOf = async (
+	request: APIRequestContext,
+	user: RegisteredUser,
+	intentId: string,
+): Promise<string> => {
+	const res = await request.get(`/v1/intents/${intentId}`, {
+		headers: authHeaders(user.access_token),
+	});
+	expect(res.status(), `GET /v1/intents/${intentId}`).toBe(200);
+	return ((await res.json()) as { status: string }).status;
+};
+
+test("#21 つながりIntentの成立後のactive復帰と再候補化", async ({
+	request,
+}) => {
+	const topic = "週末に一緒に将棋を指せる仲間を探しています";
+	const pair = await proposePair(request, "復帰", (user) =>
+		createConnection(request, user, topic, site(13)),
+	);
+	await respond(request, pair.a.access_token, pair.latch.id, "yes");
+	expect(
+		(await respond(request, pair.b.access_token, pair.latch.id, "yes")).status,
+	).toBe("matched");
+	// 合格証拠(#21): 成立後もAのつながりIntentはactive(複数成立・docs/01 §8)
+	expect(await intentStatusOf(request, pair.a, pair.x.id)).toBe("active");
+
+	// 第三者Cが意味的に近いつながりIntentを登録する
+	const c = await registerUser(request, "E2E復帰C");
+	const z = await createConnection(request, c, topic, site(13));
+	await waitForEvaluation(request, c.access_token, z.id, 1);
+	// 合格証拠(#21): AのIntentとCのIntentの新しい提案が記録される
+	const ac = await waitForLatch(
+		request,
+		pair.a.access_token,
+		pair.x.id,
+		isPairOf(pair.x, z),
+	);
+	expect(ac.status).toBe("proposed");
+	expect(ac.id).not.toBe(pair.latch.id);
+	expect(await intentStatusOf(request, pair.a, pair.x.id)).toBe("active");
+	// 成立済みのA–Bは恒久排除のまま(提案履歴はmatched)
+	const ab = (await historyOf(request, pair.a)).find(
+		(h) => h.latch_id === pair.latch.id,
+	);
+	expect(ab?.outcome).toBe("matched");
+
+	await deletePair(request, pair);
+	await deleteIntent(request, c, z.id);
 });
