@@ -1,9 +1,9 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.15
+- 文書バージョン: v0.16
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.15更新: 2026-10-21)
+- 作成日: 2026-10-17(v0.16更新: 2026-10-21)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
@@ -18,7 +18,8 @@
 - v0.13の変更点: F4b(グループLATCH)実装に伴い§2.2のlatch_membersへleft_at(成立後の離脱時刻・マイグレーション0004と戻す手順)を、group_candidatesへdedup_keyと保存・状態の規則(全ペアのjev_resultが揃った集合だけを保存・衝突時はaggregate_scoreのみ更新・提案でproposed・prev_aggregate_score)を、proposal_historyの「履歴を消費しない閉じ方」へグループ提案のペア別の記録規則(オーナー裁定 2026-10-20・01冒頭の決定記録)を追記。§3.3へ成立後の離脱(本人だけを外して継続・下限割れで全体cancelled・離脱者は非参加扱い・成功応答・二重の離脱の冪等)と、members・participants_countは離脱していない参加者だけを数える旨を追記。前提文書欄の版数を更新
 - v0.14の変更点: F4c(提案〜成立の画面)に伴い§3.3のLatchDTOへmy_intent_id(自分側の参加Intent・全状態で含む・削除済みならnull)とmatched_at(成立時刻・成立を経ていなければnull)を追記
 - v0.15の変更点: F5(つながりの性質)実装とオーナー裁定(2026-10-21・01冒頭の決定記録)に伴い、§2.2のlatchesのlast_message_at(成立時に成立時刻を入れる)・completed_at(機会は対象時刻から3時間)、§2.6のcompleted判定(機会LATCHを追加)、§3.3のGET /v1/latches?type=matched(completedを含む)とLatchDTOの成立後の開示範囲(completedを含む)を改めた。前提文書欄の版数を更新
-- 前提文書: 01 要件定義書 v0.13 / 02 スコープ・受け入れ条件合意書 v0.7 / 04 アーキテクチャ設計書 v0.15
+- v0.16の変更点: F6a(チャットのバックエンド)実装とオーナー裁定(2026-10-21・01冒頭の決定記録: 続いているLATCHを表示から消すと本人はそのLATCHから抜けたものとして扱う)に伴い、§2.2のlatch_membersへhidden_at(表示削除の時刻)と下限割れの取り消しでも離脱者のleft_atを記録する旨を、messagesへclient_id(再送の重複防止・UNIQUE(latch_id, user_id, client_id))と保存の条件を、両者のマイグレーション0005と戻す手順を追記。§3.1へUPGRADE_REQUIRED=426を、§3.2へWebSocket接続のルートを、§3.3へチャットのAPI(ws-ticket・履歴・送信・既読)とMessageDTO・LatchDTOのlast_message / unread_count・成立一覧のmatched経由のcancelled・DELETE /v1/latches/{id}の挙動・hidden_atの本人の扱い・離脱の取り消し時のleft_atを追記。§3.4をF6aの実装確定(チケットの検証はWorkerのルート・1回限りはDO・`retract`フレームを`closed`へ改める・フレームのclient_id・errorのcode・配信前の参加者確認)に改めた。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.14 / 02 スコープ・受け入れ条件合意書 v0.8 / 04 アーキテクチャ設計書 v0.16
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -204,14 +205,14 @@ status:             candidate | proposed | partial_accept | matched |
 response_deadline:  datetime
 proposed_at:        datetime | null  # 提示(proposed化)した時刻。保留中(candidate)はnull。不成立の通知(closed)は提示済みの提案に限る
 expires_at:         datetime      # 参加Intent期限の最小値
-last_message_at:    datetime      # 非正規化。成立時に成立時刻を入れ、メッセージ書き込み時に更新(90日判定の索引・F5実装確定)
+last_message_at:    datetime      # 非正規化。成立時に成立時刻を入れ、メッセージ書き込み時に更新(90日判定の索引・F5実装確定。更新はメッセージの保存と同じバッチでmatchedに限る・F6a実装確定)
 completed_at:       datetime | null  # 機会=対象時刻(proposal.time_window.start)から3時間経過 / つながり=最終メッセージ(0件ならmatched時刻)から90日経過
 created_at / updated_at
 ```
 
 **latch_responses**: `id / latch_id / user_id / response(yes|no|defer) / defer_reason(json|null) / responded_at / retracted_at(null|時刻) — UNIQUE(latch_id, user_id)`。
 
-**latch_members**: `latch_id / user_id / left_at(datetime | null) — PK(latch_id, user_id)`(latchesの参加者副表。「自分の提案・成立」の一覧取得はこの表経由)。left_atは成立後の離脱(leave)の時刻で、グループLATCHが離脱者を残して続くときに記録する(F4b実装確定・マイグレーション0004と戻す手順(migrations_rollback/0004)を対で持つ・12 §4)。成立前の判定(回答のyes数と参加人数の比較・通知・保留の解放・提示の上限判定)は離脱がmatched後にしか起きないため従来どおり全行を数え、成立後の表示・離脱の判定ではleft_atがnullの行だけを参加者として数える(§3.3)。
+**latch_members**: `latch_id / user_id / left_at(datetime | null) / hidden_at(datetime | null) — PK(latch_id, user_id)`(latchesの参加者副表。「自分の提案・成立」の一覧取得はこの表経由)。left_atは成立後の離脱(leave)の時刻で、グループLATCHが離脱者を残して続くときに記録する(F4b実装確定・マイグレーション0004と戻す手順(migrations_rollback/0004)を対で持つ・12 §4)。離脱で残りが下限を割りLATCH全体をcancelledにしたとき(1対1は常にこれ)も、取り消しを確定させた本人のleft_atを記録する(残った参加者のmembers・participants_countから離脱者が外れる・F6a実装確定)。hidden_atは本人がLATCHを表示から消した(DELETE /v1/latches/{id}・02 D-08)時刻で、left_atと同じく本人からは当該LATCHを非参加と同じに扱う根拠になる。他の参加者のmembers・participants_countの数え方はleft_atだけで決め、hidden_atは影響しない(§3.3・オーナー裁定 2026-10-21・01冒頭の決定記録・F6a実装確定・マイグレーション0005と戻す手順(migrations_rollback/0005)を対で持つ)。成立前の判定(回答のyes数と参加人数の比較・通知・保留の解放・提示の上限判定)は離脱がmatched後にしか起きないため従来どおり全行を数え、成立後の表示・離脱の判定ではleft_atがnullの行だけを参加者として数える(§3.3)。
 
 **latch_status_events**: `id / latch_id / from_status(null可=生成時) / to_status / created_at — INDEX(latch_id)`(MLR集計の観測点。成立後の表示範囲の判定で「matched経由のcancelled」を見分ける根拠にも使う・§3.3)。
 
@@ -221,12 +222,16 @@ created_at / updated_at
 id:         ULID(PK)
 latch_id:   FK latches
 user_id:    FK users
-body:       string(1..2000)
+body:       string(1..2000)   # 前後の空白を除いて1〜2,000字。保存も除いた形(F6a実装確定)
+client_id:  string(1..64) | null  # 送信者が付ける再送の重複防止キー([A-Za-z0-9_-])。APIでは必須・既存行のため列はnull可(F6a実装確定)
 created_at
 INDEX(latch_id, id)
+UNIQUE(latch_id, user_id, client_id)   # 同じclient_idの再送は既存行を返す(SQLiteの一意索引はnullを重複とみなさない)
 ```
 
-**chat_reads**: `latch_id / user_id / last_read_message_id — PK(latch_id, user_id)`(未読表示・つながり品質の開始判定に使用)。
+保存はLATCHがmatchedかつ送り手のleft_at・hidden_atがnullであることを条件にしたINSERT文1つで行い(事前の読み出しだけで決めない)、挿入が起きたときだけ同じバッチでlatches.last_message_atを進める。終了・離脱と送信が並行しても条件はD1の直列化で評価されるため、終了後のメッセージは保存されない。client_idと上記の一意索引は、latch_members.hidden_atとともにマイグレーション0005で追加し、戻す手順(migrations_rollback/0005)を対で持つ(12 §4・11 §3。戻すと表示削除の印と再送の重複防止が失われ、表示から消したLATCHが一覧に再び現れる)。
+
+**chat_reads**: `latch_id / user_id / last_read_message_id — PK(latch_id, user_id)`(未読表示・つながり品質の開始判定に使用)。既読は前にだけ進め、UPSERTで既存値との大きい方(ULIDの文字列比較)を残す(F6a実装確定)。
 
 **latch_feedback**: `id / latch_id / user_id / kind(attendance|connection_quality) / value(json) / created_at — UNIQUE(latch_id, user_id, kind)`(01 §14の正解データ申告。集計は02 #35の対象)。
 
@@ -275,7 +280,7 @@ intents:      (user_id, status) / (status, form, category) /
 candidates:   UNIQUE組(前述)+ INDEX(intent_a_id), (intent_b_id)
 latches:      (user_id...)は user_ids のJSONでなく参照テーブルを避け、
               latch_members(latch_id, user_id)を副表として持つ — INDEX(user_id, latch_id)
-messages:     (latch_id, id)
+messages:     (latch_id, id)・UNIQUE(latch_id, user_id, client_id)
 notifications:(user_id, read_at, id) / (user_id, type, created_at) ← 通知上限(1日6件)の判定
 proposal_history: PK(user_low, user_high)
 latches:      (status, response_deadline) ← 回答期限切れ走査 / (status, proposed_at)
@@ -324,7 +329,7 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 { "error": { "code": "UNDER_AGE", "message": "解説文(日本語)", "details": {} } }
 ```
 
-- 主要エラーcodeとHTTPステータスの対応: UNAUTHORIZED/TOKEN_EXPIRED=401・FORBIDDEN=403・NOT_FOUND=404・VALIDATION_FAILED/FORM_MISMATCH=400・RATE_LIMITED=429・ACTIVE_INTENT_LIMIT/UNDER_AGE/ALCOHOL_RESTRICTED/PARSE_FAILED=422・EMBEDDING_PENDING=409・INTERNAL=500。本人が所属しないlatch・他人のIntentへのアクセスは、存在を推測させないため一律NOT_FOUNDを返す(FORBIDDENは自己リソースへの操作権限の欠如に限る)
+- 主要エラーcodeとHTTPステータスの対応: UNAUTHORIZED/TOKEN_EXPIRED=401・FORBIDDEN=403・NOT_FOUND=404・VALIDATION_FAILED/FORM_MISMATCH=400・RATE_LIMITED=429・ACTIVE_INTENT_LIMIT/UNDER_AGE/ALCOHOL_RESTRICTED/PARSE_FAILED=422・EMBEDDING_PENDING=409・UPGRADE_REQUIRED=426(WebSocket接続のルートへのUpgradeでない要求・F6a実装確定)・INTERNAL=500。本人が所属しないlatch・他人のIntentへのアクセスは、存在を推測させないため一律NOT_FOUNDを返す(FORBIDDENは自己リソースへの操作権限の欠如に限る)
 - ページネーション: 一覧系は `?cursor=<不透明>&limit=1..50(既定20)`。応答は `{items: [...], next_cursor: string|null}`
 - レート制限: 1ユーザーあたり60req/分(04 §5)。429には `Retry-After`(固定60秒)を付す
 
@@ -362,7 +367,7 @@ POST   /v1/latches/{id}/defer-reason        # {reason: no_capacity|schedule_mism
 POST   /v1/latches/{id}/response/retract    # 回答取り消し(回答期限内・未成立に限る)
 POST   /v1/latches/{id}/leave               # 参加取り消し(成立後・チャット読取専用化。01 §10)
 POST   /v1/latches/{id}/feedback            # attendance / connection_quality
-DELETE /v1/latches/{id}                     # 自分の側の表示削除(02 D-08)
+DELETE /v1/latches/{id}                     # 自分の側の表示削除(02 D-08・続いているLATCHは本人の離脱を伴う・§3.3)
 DELETE /v1/users/me                          # 退会(IdP再認証のうえ§2.5の削除処理を実行)
 
 GET    /v1/users/{user_id}/icon              # アイコン取得(未認証・推測困難キー・Cache-Control: private, max-age=3600)
@@ -370,8 +375,9 @@ GET    /v1/users/{user_id}/icon              # アイコン取得(未認証・�
 GET    /v1/latches/{id}/messages?before=    # 履歴(50件/頁・昇順返却)
 POST   /v1/latches/{id}/messages            # REST送信も可(WS不通時の代替)
 POST   /v1/latches/{id}/read                # {last_read_message_id}
+GET    /v1/latches/{id}/ws?ticket=          # WebSocket接続(Authorizationヘッダを使わずチケットで認証・§3.4)
 
-POST   /v1/ws-ticket                       # {scope:"chat", latch_id} → {ticket, expires_in:60}
+POST   /v1/ws-ticket                       # {scope:"chat", latch_id} → {ticket, expires_in:60}(matchedのみ発行)
 
 POST   /v1/sessions                        # セッション開始計測
 POST   /v1/users/{user_id}/block  / blocks(GET/DELETE)
@@ -406,13 +412,25 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 
 **LatchDTO(LATCH系API共通の応答形状・F4a実装確定)** — `{id, form, status, response_deadline, participants_count, my_response: yes|no|defer|null, score, my_intent_id, matched_at}`。my_intent_idはlatches.intent_idsのうちintents.user_idが呼び出し本人のIntentのID(全状態で含む。Intent削除済みで見つからなければnull)、matched_atは成立時刻(latch_status_eventsのto_status=matchedのcreated_atをISO 8601で返す。成立前など成立を経ていなければnull、matched経由のcancelled・completedは成立時刻を返す)。scoreは応答に含むがUIでは表示しない(01 §10の裁定)。**成立後(matched・completed、およびmatched経由のcancelled)に限り** `proposal:{form, topic, time_window, region_name, participants, budget}` と `members:[{user_id, display_name, bio, has_icon}]`(自分と離脱者を除く参加者)を含める。participants_countは離脱していない参加者(latch_members.left_atがnull)の数とする(成立前は全員が該当する・F4b実装確定)。成立前はproposal・membersの**キー自体を出さない**(空値でも出さない・visibility単値化・01 §21)。matched経由のcancelledはlatch_status_eventsにto_status=matchedの記録があることで判定する。保留中(candidate)のLATCHは一覧にも単一取得にも出さない(単一取得は404)。
 
-**GET /v1/latches** — 200 `{items: LatchDTO[], next_cursor: string|null}`。自分が参加するもののみ・id降順。type=proposalsはstatusがproposed・partial_accept、type=matchedはmatched・completedを返す(completed後も閲覧できる・02 D-08・F5実装確定。typeの欠落・不明な値は400)。limit・cursorはIntent一覧と同一の規則(§3.1)。**GET /v1/latches/{id}** — 200 LatchDTO。参加しない・存在しない・保留中は一律404。
+**LatchDTOのチャットの要約(F6a実装確定)。** 成立後(matched・completed・matched経由のcancelled)に限り `last_message: {body, created_at, user_id} | null`(最新メッセージ・0件ならnull)と `unread_count`(本人以外が送り、本人のchat_reads.last_read_message_idより新しいメッセージの数。既読の記録が無ければ本人以外の全件)を加える。成立前はproposal・membersと同じくキー自体を出さない。
+
+**GET /v1/latches** — 200 `{items: LatchDTO[], next_cursor: string|null}`。自分が参加するもののみ・id降順。type=proposalsはstatusがproposed・partial_accept、type=matchedはmatched・completedと、matched経由のcancelled(相手の離脱・表示削除で終わったもの。残された側に「このつながりは終了しました」の履歴を残すため・F6a実装確定)を返す(completed後も閲覧できる・02 D-08・F5実装確定。typeの欠落・不明な値は400)。離脱・表示削除をした本人には出ない(left_at・hidden_atによる)。limit・cursorはIntent一覧と同一の規則(§3.1)。**GET /v1/latches/{id}** — 200 LatchDTO。参加しない・存在しない・保留中は一律404。
 
 **POST /v1/latches/{id}/response** — 200 状態遷移後のLatchDTO。全員YESで matched + チャット解放対象となり、双方の詳細情報(表示名・アイコン・プロフィール)が以降のGETに含まれる(01 §8)。回答系(response・response/retract・leave・defer-reason)の失敗は、参加しない・存在しないは一律404、それ以外は400 VALIDATION_FAILEDのdetails.reasonsに理由コードを返す: invalid_status(その状態では実行できない) / deadline_passed(回答期限経過) / already_responded(回答済み・見送り理由の保存済み) / not_deferred(defer-reasonで本人の有効な回答がdeferでない)。
 
 **POST /v1/latches/{id}/defer-reason** — 200 LatchDTO。見送った(defer)本人だけが1回だけ保存できる(latch_responses.defer_reason)。理由の値はno_capacity / schedule_mismatch / just_not_now / otherの4種(他の値・余分なキーは400)。
 
-**回答と取り消しの状態遷移。** defer=[今回は見送る]は提案を即時にrejectedで閉じる(proposal_historyのoutcomeはdeferred)。no=API契約経由の明示の拒否(同rejected・outcome=rejectedで恒久排除)。retract(回答取り消し)は回答期限内・未成立のみ可とし、partial_accept→proposedへ復帰する(双方YES成立後は不可。離脱はleaveを使う)。leave(参加取り消し)はmatchedのLATCHに対してのみ実行できる。離脱後の残りの参加者数(本人以外でleft_atがnullの数)が提案内容の人数の下限(proposal.participants.min)以上なら本人のleft_atだけを記録してmatchedのまま続け、下限を割るならLATCH全体をcancelledとしてチャットを読み取り専用にする(1対1は常に後者・02 D-08。オーナー裁定 2026-10-20・01冒頭の決定記録・F4b実装確定)。判定と記録は1文の条件付きUPDATEで行い、並行した離脱でも下限未満の人数でmatchedのまま残らない。leaveではclosed通知を作らない(closedは不成立の総称・§2.2)。離脱者の提案履歴と機会Intentはmatchedのまま変えない(§2.2)。離脱した本人からは当該LATCHを非参加と同じに扱う(一覧から除外・単一取得と各操作は一律404)。ただし離脱に成功したPOST /leaveの応答は、本人を参加者として扱った操作後のLatchDTO(status=matched・participants_countは残りの人数・membersは本人と離脱者を除く)を返す。同じ本人の二重の離脱(二重送信・再試行)は冪等な成功とし、LATCHを取り消さない。
+**回答と取り消しの状態遷移。** defer=[今回は見送る]は提案を即時にrejectedで閉じる(proposal_historyのoutcomeはdeferred)。no=API契約経由の明示の拒否(同rejected・outcome=rejectedで恒久排除)。retract(回答取り消し)は回答期限内・未成立のみ可とし、partial_accept→proposedへ復帰する(双方YES成立後は不可。離脱はleaveを使う)。leave(参加取り消し)はmatchedのLATCHに対してのみ実行できる。離脱後の残りの参加者数(本人以外でleft_atがnullの数)が提案内容の人数の下限(proposal.participants.min)以上なら本人のleft_atだけを記録してmatchedのまま続け、下限を割るならLATCH全体をcancelledとしてチャットを読み取り専用にする(1対1は常に後者・02 D-08。オーナー裁定 2026-10-20・01冒頭の決定記録・F4b実装確定)。判定と記録は1文の条件付きUPDATEで行い、並行した離脱でも下限未満の人数でmatchedのまま残らない。leaveではclosed通知を作らない(closedは不成立の総称・§2.2)。離脱者の提案履歴と機会Intentはmatchedのまま変えない(§2.2)。離脱した本人からは当該LATCHを非参加と同じに扱う(一覧から除外・単一取得と各操作は一律404)。ただし離脱に成功したPOST /leaveの応答は、本人を参加者として扱った操作後のLatchDTO(status=matched・participants_countは残りの人数・membersは本人と離脱者を除く)を返す。同じ本人の二重の離脱(二重送信・再試行)は冪等な成功とし、LATCHを取り消さない。下限割れでLATCH全体をcancelledにしたときも本人のleft_atを記録し(F6a実装確定)、以降は本人から非参加と同じに扱う。残った参加者のmembers・participants_countからも離脱者は外れる(1対1の残された側はmembers=[]・participants_count=1)。離脱の成功後は、チャットの接続へ`closed`を知らせる(LATCHがcancelledになったときは全員・本人だけが抜けたときは本人の接続。§3.4)。
+
+**DELETE /v1/latches/{id}(表示から消す・オーナー裁定 2026-10-21・01冒頭の決定記録・F6a実装確定)** — 成功は204(本文なし)。matchedは上記のleaveを実行し、成功したら本人のlatch_members.hidden_atを記録する(1対1は全体cancelled・グループは本人だけが抜け、下限割れで全体cancelled)。leaveが並行した状態変化(completed等)で実行できなかったときは状態を読み直し、閉じた成立後のLATCHなら表示から隠すだけを行う。completed・matched経由のcancelledはhidden_atの記録だけで、left_at・人数・相手の側の表示は変えない。それ以外の状態(成立前・成立せず閉じたもの)は400 invalid_status、参加しない・存在しない・保留中・離脱済みは一律404。本人のhidden_atが既にある場合は204(再試行の冪等)。matchedの削除の成功後はleaveと同じ宛先へ`closed`を知らせ、表示から隠すだけのときは知らせない。hidden_atを持つ本人には、一覧・単一取得・回答系(response・response/retract・leave・defer-reason)・チャットの各APIで当該LATCHを非参加と同じに扱う(一律404。例外はこのDELETEの再試行の204のみ)。
+
+**チャットのAPI(F6a実装確定)。** 失敗の写像はLATCH系と同じで、参加しない・存在しない・保留中・本人がleft_atかhidden_atを持つは一律404、それ以外は400 VALIDATION_FAILEDのdetails.reasonsに理由コードを返す: invalid_status(成立前・成立せず閉じたLATCH) / read_only(completed・matched経由のcancelledへの送信・チケット) / invalid_message(本文が前後の空白を除いて空か2,000字超) / unknown_message(既読の記録で当該LATCHのメッセージでないID)。履歴と既読はmatched・completed・matched経由のcancelledで使え(completed等は読み取り専用)、送信とチケットはmatchedに限る。要求の形はzodスキーマで定め、余分なキーは400とする。
+
+- **MessageDTO** — `{id, user_id, body, created_at, client_id}`。client_idは本人の送信にだけ値を入れ、他の参加者の送信はnull
+- **POST /v1/ws-ticket** — `{scope:"chat", latch_id}` → 200 `{ticket, expires_in:60}`(§3.4)
+- **GET /v1/latches/{id}/messages?before=<message_id>** — 200 `{items: MessageDTO[], next_before: string|null}`。beforeより前(省略時は最新)の50件をID昇順で返す。さらに古い行があればnext_beforeに返した中で最古のID、無ければnull。beforeがULID形式外は400
+- **POST /v1/latches/{id}/messages** — `{body, client_id}`(client_idは1〜64字の`[A-Za-z0-9_-]`)→ 201 MessageDTO。保存と配信はWebSocketと同じくDOが直列に行う(§3.4)。同じclient_idの再送は保存済みの行を返す(201)
+- **POST /v1/latches/{id}/read** — `{last_read_message_id}` → 204。既読は前にだけ進め、古いIDは何もせず204(§2.2)
 
 **dev専用観測API(F3実装確定・テスト専用)** — GET /v1/dev/match-events・GET /v1/dev/match-candidates。worker E2Eがゲートの合格証拠(match_eventsの計測payload・match_candidatesの生成記録)を観測するためのdev専用API。クエリはintent_id(必須・ULID形式外は400)・limit=1..50既定20・cursor(§3.1と同一の不透明cursor)。応答は`{items, next_cursor}`(id降順)で、itemsはmatch_events行=id / event_type / source_intent_id / version / status / payload / created_at / processed_at・match_candidates行=id / intent_a_id / intent_b_id / intent_a_version / intent_b_version / form / retrieval_score / cheap_judge_score / status / created_at / updated_at(テーブル列の範囲のみ・jev_result等の内部列は含めない)。起点Intentとの一致条件はmatch_events=source_intent_id・match_candidates=intent_a_idかintent_b_idのいずれか。所有者に限定しない(候補は2ユーザーのIntentで構成されるため・観測の実行は認証済みユーザーが行う)。存在隠しはPOST /v1/dev/idp-token(04 §4)と同一条件(prod・テスト鍵2変数のいずれか未設定は認証・クエリ検証より先に一律404・理由は区別しない)。
 
@@ -423,16 +441,31 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 ```text
 接続: GET wss://…/v1/latches/{latch_id}/ws?ticket=<署名チケット>
       (ブラウザWSはAuthorizationヘッダを送れないため、POST /v1/ws-ticketで
-       60秒・jose署名のチケットを先に取得する。DOが署名検証のうえD1で
-       参加者であることを再検証する。厳密な一回限り性が必要な場合はDO内の
-       使用済みセットで管理する)
-サーバ→クライアント: {"type":"message","id","user_id","body","created_at"}
-                      {"type":"retract","message_id}(参加取り消し時の読取専用化)
-                      {"type":"error","code"}
-クライアント→サーバ: {"type":"message","body"}
-正はD1: DOは受信→D1保存→両者へ配信 の順で扱い、DO再起動でも履歴は不変(04 §4)
+       60秒・jose署名のチケットを先に取得する。Workerのルートが署名・期限・
+       用途・latch_idの一致を検証し、D1で本人が参加者でありmatchedであることを
+       再検証する。1回限りはDOが使用済みのjtiを記録して担う)
+      チケット不正・期限切れ・使用済み・latch_id不一致・参加の再検証の失敗 → 401
+      (理由を区別しない) / Upgrade: websocket でない要求 → 426 UPGRADE_REQUIRED
+クライアント→サーバ: {"type":"message","body","client_id"}
+サーバ→クライアント: {"type":"message","id","user_id","body","created_at","client_id"}
+                      (client_idは送信者の接続にだけ値を入れ、他の接続はnull)
+                      {"type":"closed"}(読み取り専用になった・直後に接続を閉じる)
+                      {"type":"error","code","client_id"}
+                      code = read_only | invalid_message | internal
+ping → pong: DOの自動応答(DOを起こさない)
+正はD1: DOは受信→D1保存→配信 の順で扱い、DO再起動でも履歴は不変(04 §4)
 オフライン参加者: アプリ内通知(notifications)+Web Push(01 §10)
 ```
+
+**WebSocketの規定(F6a実装確定)。**
+
+- チケットはjoseのHS256・JWT_SECRETで署名し、クレームは`sub`(user_id)・`latch_id`・`jti`(ULID)・`exp`(発行から60秒)・`typ:"ws_ticket"`とする。アクセストークンの検証はtypを持つトークンを拒否し、チケットの検証はtypの一致を必須とする(用途の取り違えを防ぐ)。KVは使わない(§2.3)。DOは使用済みのjtiを自分のストレージに期限付きで記録し、既に記録済みなら401で接続しない。期限切れのjtiは記録のたびに掃除する
+- 送信はWebSocketでもREST(§3.3)でもDOの1か所で直列に処理する。メッセージIDはDO内で単調増加のULIDを採番し、IDの順=保存の順=配信の順になる。保存の条件は§2.2のmessagesのとおり
+- 配信の前に、DOはD1で現在の参加者(left_at・hidden_atがnull)を照会し、その集合に含まれる接続にだけ`message`を配信する。含まれない接続には`closed`を送って閉じる(離脱・表示削除の知らせが届かなかった場合の補い)
+- 同じclient_idの再送は保存済みの行を返し、同じidで再配信することがある(画面はidで重複を除く)
+- 不正なJSON・未知のtype・本文の不正は`error(invalid_message)`(client_idが読めなければnull)。completed等で保存できなければ`error(read_only)`、D1の失敗は`error(internal)`を送信者だけに返す。送信者が参加者でなくなっていた(接続中に本人が抜けた等)ときは`closed`を送って閉じる
+- 離脱(POST /leave)・表示削除(DELETE)の成功後、ルートはDOへ`closed`を知らせる。LATCHがcancelledになったときは全員の接続へ、本人だけが抜けたときは本人の接続だけへ`closed`を送ってから閉じる。知らせは最善努力(失敗はログに記録して続行)で、正しい状態はD1にあり送信は必ず保存の条件で止まる。毎分Cronのcompleted判定(06 §2の(d))はDOへ知らせず、その後の送信は`read_only`で止まる
+- ログは許可リスト方式(04 §4)で、本文・client_id・チケットは出さない
 
 ## 4. 未決事項(本書ローカル)
 

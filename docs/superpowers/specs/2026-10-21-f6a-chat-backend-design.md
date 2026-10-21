@@ -93,7 +93,7 @@ DOはLATCHごとに1つ(`CHAT_DO.idFromName(latch_id)`)。ルートからDOへ�
 - completed・matched経由のcancelled: hidden_atの記録だけ(left_at・人数・相手の表示は変えない)
 - 上記以外の状態は400 invalid_status・非参加は404
 - 成功は204。本人のhidden_atが既にある場合も204(再試行の冪等)
-- hidden_atを持つ本人には、一覧(`GET /v1/latches`)・単一取得・チャットの各APIで当該LATCHを出さない(left_atと同じ非参加の扱い)。他の参加者のmembers・participants_countの数え方はleft_atだけで決め、hidden_atは影響しない
+- hidden_atを持つ本人には、一覧(`GET /v1/latches`)・単一取得・回答系(response・response/retract・leave・defer-reason)・チャットの各APIで当該LATCHを出さない(left_atと同じ非参加の扱い・一律404。例外はDELETEの再試行の204のみ)。他の参加者のmembers・participants_countの数え方はleft_atだけで決め、hidden_atは影響しない
 - 成功後、ルートは§2.4の通知を行う
 
 ### 2.4 つないでいる人への`closed`の知らせ
@@ -173,7 +173,7 @@ ping → pong: DOの自動応答(setWebSocketAutoResponse)
 ## 5. 他の機能との関係
 
 - LatchDTOの`members`は従来どおりleft_atで決める。終了したつながりの相手の表示名(「つながっていた相手」)は画面の責務(F6b)
-- `leave`の既存の挙動(冪等・下限割れでcancelled・次集合の提案)は変えない。DELETEはその上に載る
+- `leave`の既存の挙動(冪等・下限割れでcancelled・次集合の提案)は変えない。DELETEはその上に載る。ただし実装中の裁定により、下限割れでLATCH全体をcancelledにしたとき(1対1は常にこれ)も取り消しを確定させた本人のleft_atを記録する(成立一覧にmatched経由のcancelledを含めたため、離脱した本人を非参加と同じに扱うのに要る。残った参加者のmembers・participants_countから離脱者は外れ、1対1はmembers=[]・participants_count=1。docs/05 §3.3)
 - Cron (d)は送信で進む`last_message_at`を起点に90日判定を行う(F5のまま)
 
 ## 6. 試験
