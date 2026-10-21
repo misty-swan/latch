@@ -1,9 +1,9 @@
 # LATCH アーキテクチャ設計書
 
-- 文書バージョン: v0.18
+- 文書バージョン: v0.19
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.18更新: 2026-10-21)
+- 作成日: 2026-10-17(v0.19更新: 2026-10-21)
 - v0.2の変更点: §3を全面改訂し、スタックを「バックエンド・フロントエンドの構成部品」(DBアクセス・マイグレーション・入力検証・プッシュ実装・フォーム等)まで確定した。D-A-06(Biome)を解消し、D-A-07(スタイリング=03で確定)を新設した
 - v0.3の変更点: 07(LLM利用仕様書)の策定に伴いD-A-01(Embedding)を解消した(Workers AI bge-m3・1024次元・cosine)。R2(ユーザーアイコン)をスタックへ追加した
 - v0.4の変更点: 本書が単体で完結するよう記述を整理した(変更の経緯はgit履歴を参照)
@@ -21,7 +21,8 @@
 - v0.16の変更点: F6a(チャットのバックエンド)実装に伴い、§4のチャットへWebSocket接続チケットの検証位置(Workerのルートで署名・期限・用途・LATCHの一致と参加の再検証・DOで1回限りの使用済み記録)と、送信をDOの1か所で直列に処理する構成・配信前の参加者確認・`closed`の知らせの実装確定を追記した。同段落の通知の表記を用語の統一(アプリ内通知)に揃えた。前提文書欄の版数を更新
 - v0.17の変更点: 前提文書欄の版数同期(F6b(チャットの画面)の完了とオーナー裁定3件(2026-10-21・01冒頭の決定記録)に伴う01・02改版への追従)。内容の変更はない
 - v0.18の変更点: F7a(安全のAPI)の実装確定に伴い、§4の認証・セッションのKV失効リストの反映対象からブロックを外し、ブロックはトークンを失効させず進行中の提案の取り消しと続いているLATCHからの本人の離脱で即時に効かせる旨(05 §2.2・§3.3)に改めた。前提文書欄の版数を更新(F7aの完了とオーナー裁定(2026-10-21・01冒頭の決定記録・12 §2の決定記録)に伴う01・02改版への追従)
-- 前提文書: 01 要件定義書 v0.16 / 02 スコープ・受け入れ条件合意書 v0.10
+- v0.19の変更点: F7b(通知のAPI)の実装確定に伴い、§4のWeb Pushへ送信の構成(書き込みの直後に同じWorker内でwaitUntilにより送り、送れていない行を毎分Cronで回収する・2026-10-21オーナー裁定)・送信の判断(mutedはWeb Pushだけを止める・01冒頭の決定記録)・送り手の差し替え口(LATCH_PUSH_MODE=stub/real)・VAPID鍵の設定と起動ガードを追記し、§4のCronへPushの回収走査と(c)の期限切れのアプリ内通知を、§3.1の表と§3.4へ実装状況を、§7の通知5秒以内へ構成の確定を加えた。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.17 / 02 スコープ・受け入れ条件合意書 v0.11
 - 本書の位置づけ: 01第19節の技術スタック選定を確定させる文書。UIの正本は`prototype/`(03は不作成)。スタイリング手法(D-A-07)はバニラCSS(グローバル)に確定済み(§3.2・決定記録(2026-10-19))
 
 **決定記録(2026-10-17・プロダクトオーナー)**
@@ -89,7 +90,7 @@
 | DBアクセス | Drizzle ORM(D1ドライバ) | D1公式対応(2026-10-17確認)。型安全なクエリビルダ |
 | マイグレーション | drizzle-kit(スキーマ差分からSQL生成)+ `wrangler d1 migrations apply`(適用) | 生成SQLをリポジトリ管理。適用は明示実行のみ |
 | 認証 | jose(JWT署名/検証・createRemoteJWKSet) | §4の認証設計に対応 |
-| Web Push送信 | 自前実装(VAPID署名=jose/WebCrypto・aes128gcm暗号化=WebCrypto・送信=fetch) | web-push公式ライブラリは参考実装とする(§3.4)。F7で実機検証 |
+| Web Push送信 | 自前実装(VAPID署名=jose/WebCrypto・aes128gcm暗号化=WebCrypto・送信=fetch) | web-push公式ライブラリは参考実装とする(§3.4)。F7bで実装済み(§4)。実機検証はF7c・F8 |
 | WebSocketチャット | Durable Objects(Hibernation API)を直接使用 | 追加ライブラリなし。 WorkersネイティブのAPIで足りる |
 | キュー/定時処理 | Queues(consumer)+ Cron Triggers | Workersネイティブ。DLQで失敗隔離(01 §16) |
 | ベクトル検索 | Vectorize | metadata filter(form・status・category)=Layer 2の絞り込み |
@@ -135,7 +136,7 @@
 
 **DBアクセス — Drizzle ORM(D1ドライバ)を採用、生SQL・Kysely・Prisma不採用。** DrizzleはD1公式ドキュメントに接続方法が掲載され(2026-10-17確認)、型安全なクエリビルダとスキーマからのマイグレーション生成(drizzle-kit)を備える。生SQLは型の保証が弱く、PrismaはWorkers上で動くもののクエリエンジン分がヘビーである。注意点として、drizzle-kitの新版(RC)で `wrangler d1 migrations apply` との非互換が報告されているため、**安定版にバージョン固定**して使う(§1のバージョン規律)。
 
-**Web Push送信 — 自前実装を採用、web-pushライブラリ直接利用は不採用(loop1裁定)。** VAPID署名はjose(WebCrypto)で、メッセージ暗号化(aes128gcm・RFC8291)はWebCryptoで行い、送信はfetchで直接行う。定番ライブラリ(web-push)は通知送信にNodeのHTTPクライアントを使いWorkers上の動作が保証されないため、参考実装(署名生成の検証用)と位置づける。実装と実機検証(iOS/Android/デスクトップ各ブラウザ)はF7(12)に明示的に計上する。
+**Web Push送信 — 自前実装を採用、web-pushライブラリ直接利用は不採用(loop1裁定)。** VAPID署名はjose(WebCrypto)で、メッセージ暗号化(aes128gcm・RFC8291)はWebCryptoで行い、送信はfetchで直接行う。定番ライブラリ(web-push)は通知送信にNodeのHTTPクライアントを使いWorkers上の動作が保証されないため、参考実装(署名生成の検証用)と位置づける。実装と実機検証(iOS/Android/デスクトップ各ブラウザ)はF7(12)に明示的に計上する。実装はF7b(通知のAPI)で済み(暗号化はRFC 8291の試験ベクトル・VAPID署名はjoseでの検証で単体試験)、実機ブラウザでの受信確認はF7c・F8(02 #32)で行う。
 
 **WebSocketチャット — リアルタイム(Durable Objects+WebSocket)を採用(2026-10-17オーナー選定)、ポーリング不採用。** 成立後の対話そのものが主目的のつながりIntentでは、表示の即時性が体験の中心になる。DOのHibernation APIで接続維持のコストを抑え、メッセージの正はD1に置くことでDOの障害・再起動でも履歴を失わない構造とする(詳細は§4)。追加ライブラリは使わない(WorkersネイティブのWebSocket APIで足りる)。
 
@@ -157,13 +158,13 @@
 
 **VectorStore抽象と観測束縛(F3実装確定)。** Vectorizeにはローカルシミュレータが存在しないため、VectorStoreインタフェース(upsert/query/getByIds/deleteByIds)の背後に2実装を置く。LATCH_ENV=local(単体・統合試験・wrangler dev・E2E)はコサイン距離・metadata filter込みのインメモリ実装、staging/prodはenv.VECTORS(Vectorize)のラップ実装であり、選択はLATCH_ENVで行う(05 §2.3)。パイプラインの計測はAnalytics EngineバインディングPIPELINE_AX(dataset=latch_metrics)へ層通過のdata pointをイベント単位で書く(06 §7・バインド未設定の環境では送信を省略)。DLQを見る最小のconsumer(match_eventsへのdead反映・警報)は第1段の消費と同一Workerに実装済みである。**パイプラインKV(F4a実装確定)。** 失効リスト用のKV(REVOCATION_KV)とは別にKVバインディングPIPELINE_KVを置き、Jevのcircuit breakerの状態(06 §5)と予算アラートの送信済み印(同一periodで1回・06 §6)を保持する(キーは05 §2.3)。Workers KVは同一キーへの書き込みが1秒に1回までのため、circuit breakerの状態の書き込みは1波(並列呼び出しの1回分)の結果をまとめて最大1回とし、状態が変わらないとき(成功のみで失敗数が既に0等)は書かない。KVの読み書きの失敗は評価を止めない(読めなければ閉とみなし、書けなければログjev.breaker.kv_failedを出して続行する。安全装置としての近似・06 §5)。
 
-**Cron(毎分)。** 記号と内容は06 §2に揃える。(a)機会Intentのbucket到来の再評価、(b)期限前catch-up走査(expires_atまで2時間以内かつlast_evaluated_atから30分以上経過・01 §16)、(c)全active Intentの期限切れバッチ、(d)LATCHのcompleted判定(つながり=チャット非活動90日・機会=対象時刻から3時間・01 §8)、(e)埋め込み未完了のIntentのバックフィル再試行、(f)usage_counters集計とJev予算の80%到達検知とアラート、(g)埋め込み済みかつ未評価のactive Intentの回収再評価(キュー消失の安全網)、(h)active化後10分経過のつながりIntentの1回きり遅延再評価、(i)提案クローズ後続処理。F3で(a)(b)(c)(e)(g)(h)と保持期間削除(05 §2.6)を、F4aで(f)(i)と回答期限切れ・pending残留の掃査を、F5で(d)を実装済みである(06 §2)。毎分1回のCron Trigger内で走査対象をインデックス(status・starts_at・expires_at)で最小化する。
+**Cron(毎分)。** 記号と内容は06 §2に揃える。(a)機会Intentのbucket到来の再評価、(b)期限前catch-up走査(expires_atまで2時間以内かつlast_evaluated_atから30分以上経過・01 §16)、(c)全active Intentの期限切れバッチ、(d)LATCHのcompleted判定(つながり=チャット非活動90日・機会=対象時刻から3時間・01 §8)、(e)埋め込み未完了のIntentのバックフィル再試行、(f)usage_counters集計とJev予算の80%到達検知とアラート、(g)埋め込み済みかつ未評価のactive Intentの回収再評価(キュー消失の安全網)、(h)active化後10分経過のつながりIntentの1回きり遅延再評価、(i)提案クローズ後続処理。F3で(a)(b)(c)(e)(g)(h)と保持期間削除(05 §2.6)を、F4aで(f)(i)と回答期限切れ・pending残留の掃査を、F5で(d)を、F7bでWeb Pushの回収走査と(c)の期限切れのアプリ内通知を実装済みである(06 §2)。毎分1回のCron Trigger内で走査対象をインデックス(status・starts_at・expires_at)で最小化する。
 
 **地理の実装。** 地域添付は中心座標+半径をD1に保存し、候補検索はSQLのバウンディングボックス事前絞り+TSでの距離判定。相手への表示は地域名のみ(01 §21の丸め規定)。座標・距離の数値は一切表示しない。
 
 **地名データ(D-A-03解消)。** ソースは国土交通省の位置参照情報(ISJ・大字/町丁目級。CC BY 2.0 JP)と駅データ.jp(駅位置・CC BY 4.0)とする。取り込みは `scripts/` の前処理スクリプトがCSVからINSERT SQLを生成し、`wrangler d1 execute --file` で環境ごとに適用する(生データはリポジトリにコミットしない)。座標→地名の変換は約1kmグリッド(0.01度)のgrid_keyで行い、座標の属するセルの中心を基準点として、そのセルと周囲を合わせた3×3セルの地名からハバーシン距離の最近傍を採る(基準点を丸めるため元の座標は距離計算にも使わない・05 §2.2)。両データのクレジット表記を利用規約のクレジット節に含める(08 §10)。
 
-**Web Push。** PWAのService Workerが購読し、購読情報をD1に保存。提案通知の送信は汎用文のみ(01 §10の表示規制どおり)。VAPID鍵はWorkersシークレットで管理し、送信記録を残す。
+**Web Push。** PWAのService Workerが購読し、購読情報をD1に保存。提案通知の送信は汎用文のみ(01 §10の表示規制どおり)。VAPID鍵はWorkersシークレットで管理し、送信記録を残す。**送信の構成(F7b実装確定・2026-10-21オーナー裁定)。** Web Pushは通知行を書いた処理の直後に同じWorker内で送り(waitUntil)、送れていない行を毎分Cronで回収する。通知専用のキュー・Cronだけの送信は採らない(前者はキューの追加を、後者は最大1分の遅れを伴う)。通知行(05 §2.2)はWeb Push対象の種別(proposal・matched)を送信の状態push_state=pendingで書き、書き込みを行い得る入口(LATCH・Intent・安全のAPIの変更系(POST・PATCH・DELETE)の2xx応答の後と、主キューのバッチの後。DLQは除く)で送出処理(flushPush)を呼ぶ。送出は作成から10分以内で未試行(または試行から60秒以上)のpending行(1回あたり上限100件)を照会して送り、その失敗はAPIの応答・キューの消費に影響させない。行ごとに条件付きUPDATE(push_attempted_atの記録)で順番を取り、直後の送出とCronの回収が同時に拾っても片方だけが送る。送信の判断は、本人の当該LATCHでの参加Intentのnotification_levelがmuted→送らない(muted・01冒頭の決定記録(2026-10-21・通知のAPI))、本人のactiveな購読が無い→no_subscription、activeな各購読へ送り1件でも成功→sent・全部が恒久失敗→failed・一時失敗を含み成功が無い→pendingのまま(Cronで再試行)とする。送信先の応答は2xxで購読のlast_success_atを更新し、404・410は購読をfailedにして以後送らず、400・403・413はその送信の恒久失敗、429・5xx・ネットワーク例外は一時失敗とする。本文の暗号化はRFC 8291(aes128gcm・WebCrypto)、VAPID(RFC 8292)はES256のJWT(aud=送信先のorigin・exp=12時間後・sub=VAPID_SUBJECT)をjoseで署名する。**送り手の差し替え口と鍵(F7b実装確定)。** LATCH_PUSH_MODEは既定stub(外部へ送らず各購読への送信を成功として扱う。試験・E2Eを外部のPushサービスに依存させない)、realで実送信する。シークレットはVAPID_PUBLIC_KEY(base64url・非圧縮P-256点)・VAPID_PRIVATE_KEY(JWKのJSON)・VAPID_SUBJECT(mailto:)で、stubでも公開鍵APIのためにVAPID_PUBLIC_KEYを使う(ローカル・E2Eはコミット済みのテスト専用鍵)。起動ガードとして、prodでLATCH_PUSH_MODEがreal以外の場合・VAPID_*のいずれかが無い場合・VAPID公開鍵がコミット済みのテスト鍵の場合は起動を拒否する。本番のVAPID鍵の発行と登録はF10(公開準備)で行う。
 
 **チャット(リアルタイム・オーナー確定)。** 成立LATCHごとに1つのDurable Objectを置き、WebSocketで接続中の参加者へ新着を即時配信する。メッセージの正はD1に保存し、履歴取得・未読管理・つながり品質の計測(01 §14)はD1に対するREST/クエリで行う。DOは配信に専念し、障害・再起動があっても履歴は失われない。接続の維持はHibernation APIを使いコストを抑える。オフラインの参加者にはアプリ内通知とWeb Pushで到達する(01 §10)。**チャットの構成(F6a実装確定)。** DOはLATCHごとに1つ(LATCH IDから名前で引く)で、外部から直接到達できず、Workerのルートだけが内部要求(接続・送信・`closed`の知らせ)で呼ぶ。送信はWebSocketでもREST(05 §3.2)でもDOへ集め、DOが1か所で直列に保存→配信する(メッセージIDはDO内で単調増加のULIDを採番し、IDの順=保存の順=配信の順)。保存は「LATCHがmatchedかつ送り手が離脱・表示削除をしていない」を条件にしたD1の1文で行うため、終了・離脱と送信が並行しても終了後のメッセージは保存されない(05 §3.4)。配信の前にDOはD1で現在の参加者を照会し、参加者でない接続には`closed`を送って閉じる。離脱・表示削除(05 §3.3)の成功後はルートがDOへ`closed`を知らせる(最善努力。正しい状態はD1にある)。**接続チケットの検証位置(F6a実装確定)。** WebSocket接続(GET /v1/latches/{id}/ws)はAuthorizationヘッダを使わず、URLのクエリのチケット(05 §3.4)で認証する。署名・期限(60秒)・用途(typ)・LATCH IDの一致の検証と、D1での参加者かつmatchedであることの再検証はWorkerのルートで行い、1回限りの使用済み記録(jti)はDOのストレージ(SQLite)で行う(KVは使わない・05 §2.3)。いずれの失敗も401で理由を区別しない(08 §11)。
 
@@ -194,7 +195,7 @@
 - Intent保存 p95 0.5秒 / Candidate Retrieval p95 1秒: Workers+D1(同一ネットワーク内)で十分達成可能。D1は読み取りを `withReplication`(Sessions API)でスケールさせる余地を持つ(D-A-05)
 - Parser構造化プレビュー p95 3秒: 外部LLM呼び出し(timeout 10秒・再試行なし・フォールバック)は07の仕様どおり。stubモードでは即時
 - 初期LATCH判定 p95 10秒: Queues経由の非同期処理のため、この目標は「保存コミット→通知送信記録」の計測(01 §20)であり、apiの応答性能とは独立
-- 通知5秒以内: 判定確定後のWeb Push送信を同一Worker内で直列実行
+- 通知5秒以内: 判定確定後のWeb Push送信を同一Worker内で直列実行(F7b実装確定: 通知行を書いた要求・キューのバッチの直後にwaitUntilで送り、取りこぼしは毎分Cronで回収する・§4)
 - バックアップ: D1のポイントインタイムリストア(7日)を利用。VectorizeはD1の構造化データから再構築できる構造を保つ(埋め込みの再計算を許容・01 §18のモデル識別子記録)
 - 可用性: Cloudflareのアナウンスに従う。計画停止はcron・キューの滞留として現れ、復帰後に消化される(冪等性がこれを許容する設計)
 

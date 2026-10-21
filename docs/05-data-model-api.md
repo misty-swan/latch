@@ -1,9 +1,9 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.18
+- 文書バージョン: v0.19
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.18更新: 2026-10-21)
+- 作成日: 2026-10-17(v0.19更新: 2026-10-21)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
@@ -21,7 +21,8 @@
 - v0.16の変更点: F6a(チャットのバックエンド)実装とオーナー裁定(2026-10-21・01冒頭の決定記録: 続いているLATCHを表示から消すと本人はそのLATCHから抜けたものとして扱う)に伴い、§2.2のlatch_membersへhidden_at(表示削除の時刻)と、下限割れでLATCH全体を取り消した離脱者はleft_atを記録せず読み取り専用の参加者として残す旨(オーナー裁定 2026-10-21・01冒頭の決定記録)を、messagesへclient_id(再送の重複防止・UNIQUE(latch_id, user_id, client_id))と保存の条件を、両者のマイグレーション0005と戻す手順を追記。§3.1へUPGRADE_REQUIRED=426を、§3.2へWebSocket接続のルートを、§3.3へチャットのAPI(ws-ticket・履歴・送信・既読)とMessageDTO・LatchDTOのlast_message / unread_count・成立一覧のmatched経由のcancelled・DELETE /v1/latches/{id}の挙動・hidden_atの本人の扱い・全体を取り消した離脱者の読み取り専用の扱い(DELETEはhidden_atの確認を先に行う)を追記。§3.4をF6aの実装確定(チケットの検証はWorkerのルート・1回限りはDO・`retract`フレームを`closed`へ改める・フレームのclient_id・errorのcode・配信前の参加者確認)に改めた。前提文書欄の版数を更新
 - v0.17の変更点: 前提文書欄の版数同期(F6b(チャットの画面)の完了とオーナー裁定3件(2026-10-21・01冒頭の決定記録)に伴う01・02・04改版への追従)。内容の変更はない
 - v0.18の変更点: F7a(安全のAPI)実装とオーナー裁定(2026-10-21・01冒頭の決定記録)に伴い、§2.2のreportsへ通報の対象の種別(target)・対象メッセージ(message_id)・通報者内の統合の規定と、マイグレーション0006と戻す手順(適用前にreportsが0行であることの確認を含む)を、blocksへブロックの即時効果(トークンは失効させず、提案・LATCHを閉じて送信・回答を止める)を、§2.4へreportsの索引を追記し、§2.3のKVの失効の補完からblocksの再検証を外した。§3.2のブロック・通報のAPIを確定値に改め、§3.3へブロックのAPI(対象の判定・即時効果の順序・一覧)・通報のAPI(対象の判定・理由コード)・Intentの有効化での飲酒年齢の判定(422 ALCOHOL_RESTRICTED・判定の順・年齢を確かめられないときの拒否)・dev専用API GET /v1/dev/reportsを追記。前提文書欄の版数を更新。あわせて成立後の通報の条件を「自分が成立後の参加者だった(left_at・hidden_atは問わない)」へ改めた(2026-10-21オーナー裁定・01冒頭の決定記録(安全のAPI)の4)
-- 前提文書: 01 要件定義書 v0.16 / 02 スコープ・受け入れ条件合意書 v0.10 / 04 アーキテクチャ設計書 v0.18
+- v0.19の変更点: F7b(通知のAPI)実装とオーナー裁定(2026-10-21・01冒頭の決定記録: notification_level=mutedはWeb Pushだけを止め、アプリ内通知は作る)に伴い、§2.2のnotificationsへ列(intent_id・push_state・push_attempted_at)・種別intent_expired・UNIQUE(intent_id, type)・送信の状態の値とマイグレーション0007と戻す手順を、push_subscriptionsへ登録・解除・失効の扱いを、§2.4へnotificationsの索引を、§2.5へIntent削除でintent_expiredの行を消すことを追記した。§3.2へ購読のAPI(GET /v1/push/vapid-public-key・POST/DELETE /v1/push-subscriptions)を加え、§3.3へNotificationDTOと一覧・既読・購読の検証の確定形状とdev専用GET /v1/dev/notificationsを追記した。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.17 / 02 スコープ・受け入れ条件合意書 v0.11 / 04 アーキテクチャ設計書 v0.19
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -48,7 +49,7 @@
 | マッチング | match_candidates / group_candidates / proposal_history | 評価の途中結果・同一ペア排除(恒久) |
 | LATCH/チャット | latches / latch_members / latch_responses / latch_status_events / messages / chat_reads / latch_feedback | 提案と成立・参加者・回答・状態遷移・チャット・既読・申告 |
 | 安全 | blocks / reports | ブロック・通報 |
-| 通知 | notifications / push_subscriptions | アプリ内お知らせ・Web Push購読 |
+| 通知 | notifications / push_subscriptions | アプリ内通知・Web Push購読 |
 | 計測 | sessions / survey_responses / calibration_records / usage_counters | DAU・アンケート・正解データ・レート/予算カウンタ |
 | 地域 | geofeatures | 地名の代表点(逆引き・丸め用。D-A-03) |
 
@@ -239,9 +240,9 @@ UNIQUE(latch_id, user_id, client_id)   # 同じclient_idの再送は既存行を
 
 **blocks**: `blocker_user_id / blocked_user_id / created_at — PK(blocker, blocked)`。行の書き込みと即時効果(進行中の提案の取り消し・続いているLATCHからの本人の離脱)はPOST /v1/users/{user_id}/blockが行う(§3.3・F7a実装確定)。ブロックはトークンを失効させない(§2.3)。チャット送信・回答は、ブロックで該当する提案・LATCHがcancelled(読み取り専用・回答不可)になることで止まり、送信・回答の各処理へblocksの照会は加えない。**reports**: `id / reporter / reportee / reason(spam|harassment|inappropriate|other) / target(proposal|profile|icon|message) / latch_id|null / message_id|null / note(0..500) / status(open|resolved) / created_at — INDEX(reporter, latch_id, reportee, target, status)`。targetは通報の対象の種別(proposal=成立前の提案・profile / icon / message=成立後)、message_idはtarget=messageの対象の発言で、それ以外はnull。noteは前後の空白を除いて保存し、未指定は空文字とする。提案段階(target=proposal)は自分以外の全参加者をreporteeとして1人1行で記録する(オーナー裁定 2026-10-21・01冒頭の決定記録)。同じreporter・latch_id・reportee・target(messageはmessage_idも)でstatus=openの行があれば新しい行を作らず、reason・note・created_atを今回の値で上書きする(通報者内の統合・08 §8。resolved後の再通報は新しい行)。target・message_idと索引はマイグレーション0006で追加し、戻す手順(migrations_rollback/0006)を対で持つ(12 §4・11 §3。戻すと通報の対象の種別と対象の発言の記録が失われる。F7a実装確定)。0006はtargetをDEFAULTなしのNOT NULLで追加するため、staging・prodへ適用する前に `SELECT COUNT(*) FROM reports` が0であることを確かめる(F7a以前はreportsへの書き込みAPIが無く0のはず。行があればALTERは止まり、データは壊れない)。
 
-**notifications**: `id / user_id / type(proposal|matched|closed|system) / latch_id|null / read_at / created_at — INDEX(user_id, read_at)・UNIQUE(latch_id, user_id, type)`。closedは不成立(rejected / expired / cancelled)の総称であり、成立後の離脱(leave・matched→cancelled)ではclosedを作らない(F4a実装確定)。成立前の意思・条件サマリは格納しない(visibility単値化・01 §21)。
+**notifications**: `id / user_id / type(proposal|matched|closed|intent_expired|system) / latch_id|null / read_at / created_at / intent_id|null / push_state(none|pending|sent|muted|no_subscription|failed・既定none) / push_attempted_at|null — INDEX(user_id, read_at)・UNIQUE(latch_id, user_id, type)・UNIQUE(intent_id, type)・INDEX(push_state, created_at)`。closedは不成立(rejected / expired / cancelled)の総称であり、成立後の離脱(leave・matched→cancelled)ではclosedを作らない(F4a実装確定)。成立前の意思・条件サマリは格納しない(visibility単値化・01 §21)。**Web Pushの記録(F7b実装確定)。** intent_expiredはIntentの期限切れ(アプリ内通知のみ・01 §10)で、Cron(c)の第1窓がexpired化と同じバッチで1Intentにつき1行書く(intent_idに対象Intent。他の種別はnull。UNIQUE(intent_id, type)の衝突は無視し、再実行でも1回・06 §2)。systemは未使用のまま残す。push_stateはWeb Pushの送信の状態で、Web Push対象のproposal・matchedは行の作成時にpending、closed・intent_expiredはnone(Web Push対象外)を書く。送信の判断(04 §4)の結果をsent(1件以上の購読へ送れた)/ muted(本人の参加Intentのnotification_levelがmuted・オーナー裁定 2026-10-21・01冒頭の決定記録)/ no_subscription(本人のactiveな購読が無い)/ failed(全購読で恒久失敗、または作成から10分を過ぎて送れなかった)で記録し、一時失敗はpendingのまま再試行する。push_attempted_atは最後に送信の順番を取った時刻(条件付きUPDATEで取り、60秒以内の再取得をさせない)。mutedでもアプリ内通知の行は作り、通知上限(1日6件)の数え方は変えない。intent_id・push_state・push_attempted_atと2索引はマイグレーション0007で追加し、戻す手順(migrations_rollback/0007)を対で持つ(12 §4・11 §3。戻すとWeb Pushの送信の状態・試行時刻とintent_expiredの対象Intentの記録が失われる)。既存行はpush_state=noneとなり、過去の通知を送り直さない。
 
-**push_subscriptions**: `id / user_id / endpoint(string UNIQUE) / p256dh / auth / status(active|failed) / last_success_at / created_at`。
+**push_subscriptions**: `id / user_id / endpoint(string UNIQUE) / p256dh / auth / status(active|failed) / last_success_at / created_at`。端末(ブラウザ)ごとの購読で、ユーザー単位のオン/オフ列は持たない(設定画面のプッシュ通知の切り替えは端末の購読の登録・解除で行う)。同じendpointの再登録は本人への付け替え・鍵の更新・status=activeへの復帰で、送信先が404・410を返した購読はstatus=failedにして以後送らない(F7b実装確定・§3.3)。
 
 **sessions**: `id / user_id / started_at`(DAU・再来訪)。**survey_responses**: `id / user_id / kind(onboarding|week4) / answers(json) / created_at — UNIQUE(user_id, kind)`。
 
@@ -284,6 +285,7 @@ latches:      (user_id...)は user_ids のJSONでなく参照テーブルを避�
               latch_members(latch_id, user_id)を副表として持つ — INDEX(user_id, latch_id)
 messages:     (latch_id, id)・UNIQUE(latch_id, user_id, client_id)
 notifications:(user_id, read_at, id) / (user_id, type, created_at) ← 通知上限(1日6件)の判定
+              UNIQUE(intent_id, type) ← 期限切れ通知を1Intent1行に限る / (push_state, created_at) ← Pushの回収走査(F7b)
 proposal_history: PK(user_low, user_high)
 latches:      (status, response_deadline) ← 回答期限切れ走査 / (status, proposed_at)
 latch_status_events: (latch_id)
@@ -304,7 +306,7 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 | messages | 残す | 残す(表示名は「つながっていた相手」。本人からの削除要求には該当行の削除で応じる) |
 | latch_responses / latch_feedback | 残す(集計値のみ利用) | 同左ののちcalibration_recordsへ匿名集約 |
 | calibration_records | — | latch_idをnull化+粒度低下(時刻日付丸め・地域市区町村)のうえ anonymized=true |
-| notifications / sessions / survey_responses | 当該Intent由来の通知を削除 | 削除(surveyを集計目的で残す場合はID系を除去) |
+| notifications / sessions / survey_responses | 当該Intent由来の通知を削除(intent_idが一致するintent_expiredの行を削除・F7b実装確定。LATCHの通知は当該LATCHの取り消しに従う) | 削除(surveyを集計目的で残す場合はID系を除去) |
 | usage_counters | — | 本人keyの行を削除 |
 | blocks / reports | 残す | 残す(安全のための証跡。最後の活動から1年で削除) |
 | push_subscriptions / refresh_families | — | 削除・失効(発行済みJWTのjtiをKV失効リストへ登録) |
@@ -387,7 +389,11 @@ POST   /v1/users/{user_id}/block      # ブロック(201新規/200既存・効�
 DELETE /v1/users/{user_id}/block      # 解除(204・冪等)
 GET    /v1/blocks                     # 自分のブロック一覧(新しい順)
 POST   /v1/reports                    # 通報(201 {received:true}・§3.3)
-GET    /v1/notifications  / POST /v1/notifications/read
+GET    /v1/notifications?cursor=      # アプリ内通知の一覧(20件/頁・{items, next_cursor, unread_count}・§3.3)
+POST   /v1/notifications/read         # {up_to_id}(id≤up_to_idの本人の未読を既読に・204)
+GET    /v1/push/vapid-public-key      # {public_key}(購読のapplicationServerKey)
+POST   /v1/push-subscriptions         # {endpoint, keys:{p256dh, auth}}(201新規/200既存・本文なし・§3.3)
+DELETE /v1/push-subscriptions         # {endpoint}(本人の行を削除・204・冪等)
 GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完成条件外)
 ```
 
@@ -456,6 +462,21 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 - 応答は通報の件数・対象者を返さない(提案段階で対象者の人数を推測させない)。通報は提案・LATCHの状態を変えず、被通報者のどのAPI応答・通知にも現れない(08 §8)。noteと被通報者はログに出さない(08 §6)
 
 **dev専用API(F7a実装確定・テスト専用)** — GET /v1/dev/reports。存在隠しは上記の観測APIと同一条件(prodは一律404)。認証した本人が通報者(reporter)の行だけを`{reports: [{id, reportee, latch_id, target, reason, note, message_id, status, created_at}]}`(created_atの新しい順)で返す(#27の証拠・10 §4)。
+
+**アプリ内通知のAPI(F7b実装確定)。**
+
+- **GET /v1/notifications?cursor=** — 200 `{items: NotificationDTO[], next_cursor: string|null, unread_count: number}`。本人の通知を新しい順(id=ULIDの降順)に20件で、cursorは§3.1と同じ不透明cursor(形式外は400 VALIDATION_FAILED)。unread_countは本人の未読(read_at null)の総数(下部タブの未読の印)。本人が抜けた(left_at)・表示から消した(hidden_at)LATCHの通知は返さず、unread_countにも数えない(本人からは非参加と同じ・§2.2のlatch_members)。system(未使用)の行は返さない
+- **NotificationDTO** — 共通の`{id, type, read_at, created_at}`に種別ごとの欄を加え、他の種別の欄は持たない。proposal=`latch_id`・`response_deadline`(LATCHの回答期限)/ matched=`latch_id`・`display_names`(本人以外の全参加者の表示名。退会者は「つながっていた相手」・§2.5。成立後のため開示してよい)/ closed=`latch_id`のみ(「この提案は成立しませんでした」の一文しか出さない・01 §10)/ intent_expired=`intent: {id, raw_text}`(本人の意思の本文と「もう一度預ける」の導線)。成立前の条件・相手は一切含めず(visibility単値・01 §21)、push_stateは返さない
+- **POST /v1/notifications/read** — `{up_to_id}` → 204。本人の通知のうちid≤up_to_idで未読の行のread_atを今にする(再送は同じ結果・冪等)。up_to_idが本人の通知に無くても本人の行だけを対象にするため他人の行は変わらず、存在の探索にならないよう一律204とする。形式の誤りは400 VALIDATION_FAILED
+
+**Web Pushの購読のAPI(F7b実装確定)。**
+
+- **GET /v1/push/vapid-public-key** — 200 `{public_key}`(base64url・非圧縮P-256公開鍵。PushManager.subscribeのapplicationServerKeyに使う・04 §4)
+- **POST /v1/push-subscriptions** — `{endpoint, keys: {p256dh, auth}}`。同じendpointの行が無ければ作って201、あれば本人へ付け替え・鍵を更新・status=activeに戻して200(端末でアカウントを切り替えた場合)。応答は本文なし。検証の失敗は400 VALIDATION_FAILED(details.reasonsに理由コード): endpointはhttpsのURL(1,024字以内)で、ホストが既知のPushサービスの許可リスト(`fcm.googleapis.com`・`updates.push.services.mozilla.com`・`*.push.apple.com`・`*.notify.windows.com`)に一致すること(push_endpoint_not_allowed。サーバーが利用者の指定した任意のURLへ送信する経路を塞ぐ・08 §3)/ p256dhはbase64urlで65バイトの非圧縮点・authは16バイト(invalid_push_keys)/ 本人のactiveな購読は登録するendpointを除いて10件まで(push_subscription_limit。1通知あたりの送信回数を抑える。照会と書き込みは1文ではないため、同時の登録で一時的に10件を超えることはあり得る)
+- **DELETE /v1/push-subscriptions** — `{endpoint}` → 204。本人の該当行だけを削除する(無い行・他人の行でも204・冪等)
+- 応答・ログに購読のendpoint・鍵を出さない(08 §6)
+
+**dev専用API(F7b実装確定・テスト専用)** — GET /v1/dev/notifications。存在隠しは上記の観測APIと同一条件(prodは一律404)。認証した本人の通知行だけを全件`{notifications: [{id, type, latch_id, intent_id, push_state, push_attempted_at, read_at, created_at}]}`(id降順)で返す(#16のAPI部分の証拠・10 §4)。
 
 ### 3.4 WebSocket(リアルタイムチャット)
 
