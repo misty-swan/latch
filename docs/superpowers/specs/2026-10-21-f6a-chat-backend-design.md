@@ -57,7 +57,7 @@ DOはLATCHごとに1つ(`CHAT_DO.idFromName(latch_id)`)。ルートからDOへ�
 ### 1.2 送信の流れ
 
 - WebSocket: `webSocketMessage`でフレームを検証し、`messages.send`(§2.1)を呼ぶ。成功は接続中の全員へ`message`を配信、失敗は送信者だけに`error`を返す
-- REST: ルートが認証(requireRegistered)と要求の検証を行い、DOの内部`/send`へ転送する。DOは同じ`messages.send`→配信を行い、結果をルートへ返す
+- REST: ルートが認証(requireRegistered)と要求の検証を行い、続けて参加の確認(§2.2の表。非参加・存在しないは404・成立前等は400 invalid_status・読み取り専用は400 read_only)を行ってから、DOの内部`/send`へ転送する(非参加者・存在しないIDでDOを作らせない。保存の可否の正はDOの条件付きINSERT(§2.1))。DOは同じ`messages.send`→配信を行い、結果をルートへ返す
 - 配信の前に、DOはD1で現在の参加者(left_at・hidden_atがnull)のユーザーIDを1回照会し、その集合に含まれる接続にだけ配信する。含まれない接続(離脱・削除の`closed`の知らせが届かなかった場合)には`closed`を送って閉じる(§2.4の知らせが最善努力であることの補い)
 - 送信がすべてDOを通るため、1つのLATCHの送信は直列に処理される。メッセージIDはDO内で単調増加のULIDを採番し、IDの順=保存の順=配信の順になる
 - 時刻はDOとルートの合成の起点で`systemClock`を使い、`messages.*`はnowを引数で受け取る(04 §4の時刻の規律)

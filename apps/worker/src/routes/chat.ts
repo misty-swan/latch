@@ -155,8 +155,24 @@ chatRoutes.post("/latches/:id/messages", requireRegistered, async (c) => {
 			: validationFailed();
 		return c.json(r.body, r.status);
 	}
+	// 参加の確認を転送の前に行い、非参加・存在しないIDでChatRoomDOを作らせない。
+	// 保存の可否の正はDOの条件付きINSERT(F6a設計 §2.1)で、ここは事前の絞り込み
+	const latchId = c.req.param("id");
+	const access = await chatAccess(dbOf(c.env), latchId, sub);
+	if (access.kind === "not_found") {
+		const r = notFound();
+		return c.json(r.body, r.status);
+	}
+	if (access.kind === "invalid_status") {
+		const r = rejected("invalid_status");
+		return c.json(r.body, r.status);
+	}
+	if (!access.writable) {
+		const r = rejected("read_only");
+		return c.json(r.body, r.status);
+	}
 	const result = await forwardSend(c.env, {
-		latchId: c.req.param("id"),
+		latchId,
 		userId: sub,
 		body: parsed.data.body,
 		clientId: parsed.data.client_id,

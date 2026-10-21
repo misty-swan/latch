@@ -2,7 +2,7 @@
  * チャットのREST・チケット・WebSocket接続ルートの統合試験(F6a設計 §1.1・§2.2・§3.1・§3.4)。
  * 登録は実フロー(auth/token→POST /v1/users)、LATCH・membersは直接INSERTで配置する。
  */
-import { env, SELF } from "cloudflare:test";
+import { env, listDurableObjectIds, SELF } from "cloudflare:test";
 import type { ChatServerFrame, MessageDTO, MessagePage } from "@latch/shared";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -477,6 +477,41 @@ describe("GET/POST /v1/latches/:id/messages", () => {
 			client_id: "c1",
 		});
 		expect(nf.status).toBe(404);
+	});
+
+	it("存在しないID・非参加のLATCHへの送信は404で、ChatRoomDOを作らない(参加の確認を転送の前に行う)", async () => {
+		const ns = testEnv.CHAT_DO as unknown as DurableObjectNamespace;
+		const created = async (latchId: string) =>
+			(await listDurableObjectIds(ns)).some((id) =>
+				id.equals(ns.idFromName(latchId)),
+			);
+		const { b, id } = await setup();
+		const c = await registerUser("丙");
+		const randomId = ulid();
+		const toRandom = await call(
+			"POST",
+			`/v1/latches/${randomId}/messages`,
+			c.token,
+			{ body: "x", client_id: "c1" },
+		);
+		expect(toRandom.status).toBe(404);
+		const toOthers = await call("POST", `/v1/latches/${id}/messages`, c.token, {
+			body: "x",
+			client_id: "c1",
+		});
+		expect(toOthers.status).toBe(404);
+		expect(await created(randomId)).toBe(false);
+		expect(await created(id)).toBe(false);
+		// 対照: 参加者の送信ではDOが作られる(判定の方法が働いていることの確認)
+		expect(
+			(
+				await call("POST", `/v1/latches/${id}/messages`, b.token, {
+					body: "参加者",
+					client_id: "cb-9",
+				})
+			).status,
+		).toBe(201);
+		expect(await created(id)).toBe(true);
 	});
 
 	it("WSで送ったclient_idをRESTで再送しても同じidで1件だけ", async () => {
