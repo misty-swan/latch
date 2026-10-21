@@ -106,5 +106,11 @@ describe("プライバシーポリシー(/privacy)", () => {
 		]) {
 			expect(text).toContain(word);
 		}
+		// 保存は中心と範囲のまま。約1kmの丸めは相手への地名の表示だけ(05 §2.2・08 §4)
+		expect(text).not.toContain("約1kmの区画に丸めて扱います");
+		expect(text).toContain("中心と範囲");
+		// 退会で消すのは本人を含む提案の履歴だけ(05 §2.5)。「提案の記録」を広く消すとは書かない
+		expect(text).not.toContain("提案の記録、");
+		expect(text).toContain("再提案を避けるための提案の履歴");
 	});
 });
