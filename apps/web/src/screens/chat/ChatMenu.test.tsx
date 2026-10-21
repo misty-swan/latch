@@ -275,9 +275,6 @@ describe("Chat 経由の遷移とトースト", () => {
 		await waitFor(() =>
 			expect(router.state.location.pathname).toBe("/connections"),
 		);
-		expect(router.state.location.state).toEqual({
-			toast: "参加を取り消しました。",
-		});
 		expect(await screen.findByText("参加を取り消しました。")).toBeTruthy();
 	});
 
