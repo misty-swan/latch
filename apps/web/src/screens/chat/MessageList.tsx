@@ -67,6 +67,17 @@ export function MessageList({
 					<p className="msg__bubble">{p.body}</p>
 					{p.state === "failed" ? (
 						<span className="msg__fail">
+							<svg className="ic ic--xs" viewBox="0 0 24 24" aria-hidden="true">
+								<circle cx="12" cy="12" r="8.5" />
+								<path d="M12 11v5.2" />
+								<circle
+									cx="12"
+									cy="7.9"
+									r=".9"
+									fill="currentColor"
+									stroke="none"
+								/>
+							</svg>
 							送信できませんでした
 							<button
 								className="btn btn--quiet btn--small"

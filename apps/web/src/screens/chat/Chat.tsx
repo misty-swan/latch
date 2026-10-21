@@ -251,6 +251,7 @@ function ChatView({
 
 	const send = (body: string) => {
 		const clientId = newClientId();
+		forceScroll.current = true;
 		setPending((list) => [...list, { clientId, body, state: "sending" }]);
 		deliver(clientId, body);
 	};
@@ -302,12 +303,21 @@ function ChatView({
 		if (latestId) markRead(latestId);
 	}, [latestId, markRead]);
 
-	// 新しい発言(自分の送信中を含む)が増えたら最下部へ
+	// 自分の送信では必ず最下部へ・他の変化は末尾近く(80px以内)を見ていたときだけ追う
+	const nearBottom = useRef(true);
+	const forceScroll = useRef(false);
 	const scrollKey = `${latestId}:${shownPending.length}`;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: 末尾の変化で走らせる
 	useEffect(() => {
 		const el = scrollRef.current;
-		if (el && firstScrolled.current) el.scrollTop = el.scrollHeight;
+		if (
+			el &&
+			firstScrolled.current &&
+			(forceScroll.current || nearBottom.current)
+		) {
+			el.scrollTop = el.scrollHeight;
+		}
+		forceScroll.current = false;
 	}, [scrollKey]);
 
 	// 初回表示は最下部・古い頁を足した直後は見ていた位置を保つ(scrollHeightの差を足す)
@@ -356,7 +366,15 @@ function ChatView({
 		<div className="screen chat-screen">
 			<ScreenGrain />
 			<ChatTopbar latch={latch} />
-			<div className="screen__body" ref={scrollRef}>
+			<div
+				className="screen__body"
+				ref={scrollRef}
+				onScroll={(e) => {
+					const el = e.currentTarget;
+					nearBottom.current =
+						el.scrollHeight - el.scrollTop - el.clientHeight <= 80;
+				}}
+			>
 				<div className="chat">
 					<div ref={sentinelRef} />
 					{hasNextPage && !hasIntersectionObserver() ? (

@@ -453,4 +453,53 @@ describe("Chat の送信・受信・既読", () => {
 			).toBe(true),
 		);
 	});
+	const stubScroll = () => {
+		const el = document.querySelector(".screen__body") as HTMLElement;
+		Object.defineProperty(el, "scrollHeight", {
+			configurable: true,
+			value: 1000,
+		});
+		Object.defineProperty(el, "clientHeight", {
+			configurable: true,
+			value: 500,
+		});
+		return el;
+	};
+
+	it("最下部から離れて読んでいるときは相手のmessageでスクロール位置を変えない", async () => {
+		open();
+		await screen.findByText("本文02");
+		await waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+		const el = stubScroll();
+		el.scrollTop = 100;
+		fireEvent.scroll(el);
+		FakeSocket.all[0]?.recv(msg("09", "u2"));
+		await screen.findByText("本文09");
+		expect(el.scrollTop).toBe(100);
+	});
+
+	it("最下部付近を見ているときは相手のmessageで最下部へ追う", async () => {
+		open();
+		await screen.findByText("本文02");
+		await waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+		const el = stubScroll();
+		el.scrollTop = 450;
+		fireEvent.scroll(el);
+		FakeSocket.all[0]?.recv(msg("09", "u2"));
+		await screen.findByText("本文09");
+		expect(el.scrollTop).toBe(1000);
+	});
+
+	it("自分の送信は最下部から離れていても最下部へスクロールする", async () => {
+		withPost(() => new Promise<Response>(() => {}));
+		open();
+		await screen.findByText("本文02");
+		const el = stubScroll();
+		el.scrollTop = 100;
+		fireEvent.scroll(el);
+		fireEvent.change(field(), { target: { value: "送るよ" } });
+		fireEvent.click(screen.getByRole("button", { name: "送る" }));
+		await screen.findByText("送るよ");
+		expect(el.scrollTop).toBe(1000);
+	});
 });
