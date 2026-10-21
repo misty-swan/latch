@@ -4,6 +4,8 @@ import {
 	authProviderSchema,
 	authTokenRequestSchema,
 	birthDateSchema,
+	blockDtoSchema,
+	blockListResponseSchema,
 	budgetSchema,
 	categorySchema,
 	chatClientFrameSchema,
@@ -28,6 +30,7 @@ import {
 	patchMeRequestSchema,
 	refreshRequestSchema,
 	registerUserRequestSchema,
+	reportCreateRequestSchema,
 	sendMessageRequestSchema,
 	timeSchema,
 	userDtoSchema,
@@ -650,5 +653,50 @@ describe("チャットのスキーマ(F6a設計)", () => {
 		expect(
 			latchDtoSchema.safeParse({ ...base, unread_count: -1 }).success,
 		).toBe(false);
+	});
+});
+
+describe("reportCreateRequestSchema", () => {
+	const L = "01HZZZZZZZZZZZZZZZZZZZZZZZ";
+	const base = { latch_id: L, target: "proposal", reason: "spam" };
+	it("target=proposalでnote無しを受理する", () => {
+		expect(reportCreateRequestSchema.safeParse(base).success).toBe(true);
+	});
+	it("noteの前後の空白を除く", () => {
+		const r = reportCreateRequestSchema.parse({ ...base, note: "  あ  " });
+		expect(r.note).toBe("あ");
+	});
+	it("note 500字は受理・501字は拒否する", () => {
+		expect(
+			reportCreateRequestSchema.safeParse({ ...base, note: "あ".repeat(500) })
+				.success,
+		).toBe(true);
+		expect(
+			reportCreateRequestSchema.safeParse({ ...base, note: "あ".repeat(501) })
+				.success,
+		).toBe(false);
+	});
+	it("未知のtarget・未知のキーを拒否する", () => {
+		expect(
+			reportCreateRequestSchema.safeParse({ ...base, target: "other" }).success,
+		).toBe(false);
+		expect(
+			reportCreateRequestSchema.safeParse({ ...base, extra: 1 }).success,
+		).toBe(false);
+	});
+});
+
+describe("blockDtoSchema / blockListResponseSchema", () => {
+	it("ブロック一覧の形を受理する", () => {
+		const b = {
+			user_id: "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+			display_name: "a",
+			has_icon: false,
+			created_at: "2026-10-21T00:00:00.000Z",
+		};
+		expect(blockDtoSchema.safeParse(b).success).toBe(true);
+		expect(blockListResponseSchema.safeParse({ blocks: [b] }).success).toBe(
+			true,
+		);
 	});
 });

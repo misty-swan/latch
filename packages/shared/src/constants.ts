@@ -295,6 +295,24 @@ export const DEFER_REASONS = [
 ] as const;
 export type DeferReason = (typeof DEFER_REASONS)[number];
 
+/** 通報の理由。docs/05 §3・F7a設計 §3.2 */
+export const REPORT_REASONS = [
+	"spam",
+	"harassment",
+	"inappropriate",
+	"other",
+] as const;
+export type ReportReasonValue = (typeof REPORT_REASONS)[number];
+
+/** 通報の対象。docs/05 §3・F7a設計 §3.2 */
+export const REPORT_TARGETS = [
+	"proposal",
+	"profile",
+	"icon",
+	"message",
+] as const;
+export type ReportTargetValue = (typeof REPORT_TARGETS)[number];
+
 /** Queuesのキューメッセージ本体。event_type等の詳細はD1のmatch_events行から読む */
 export interface MatchQueueMessage {
 	event_id: string;

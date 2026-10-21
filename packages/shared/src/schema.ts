@@ -18,6 +18,8 @@ import {
 	LIMITS,
 	PARTICIPANTS_MAX,
 	PARTICIPANTS_MIN,
+	REPORT_REASONS,
+	REPORT_TARGETS,
 } from "./constants";
 
 export const intentFormSchema = z.enum(INTENT_FORMS);
@@ -444,3 +446,31 @@ export const chatServerFrameSchema = z.discriminatedUnion("type", [
 	}),
 ]);
 export type ChatServerFrame = z.infer<typeof chatServerFrameSchema>;
+
+/** POST /v1/reports のリクエスト。noteは前後の空白を除いて0〜500字(F7a設計 §3.2) */
+export const reportCreateRequestSchema = z
+	.object({
+		latch_id: ulidSchema,
+		target: z.enum(REPORT_TARGETS),
+		reason: z.enum(REPORT_REASONS),
+		note: z.string().trim().max(500).optional(),
+		reportee_user_id: ulidSchema.optional(),
+		message_id: ulidSchema.optional(),
+	})
+	.strict();
+export type ReportCreateRequest = z.infer<typeof reportCreateRequestSchema>;
+
+/** ブロック一覧の1件(F7a設計 §3) */
+export const blockDtoSchema = z.object({
+	user_id: z.string(),
+	display_name: z.string(),
+	has_icon: z.boolean(),
+	created_at: isoDateTimeSchema,
+});
+export type BlockDTO = z.infer<typeof blockDtoSchema>;
+
+/** GET /v1/blocks の応答 */
+export const blockListResponseSchema = z.object({
+	blocks: z.array(blockDtoSchema),
+});
+export type BlockListResponse = z.infer<typeof blockListResponseSchema>;

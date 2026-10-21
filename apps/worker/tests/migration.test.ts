@@ -4,6 +4,7 @@ import rollback0002Sql from "../migrations_rollback/0002_rollback.sql?raw";
 import rollback0003Sql from "../migrations_rollback/0003_rollback.sql?raw";
 import rollback0004Sql from "../migrations_rollback/0004_rollback.sql?raw";
 import rollback0005Sql from "../migrations_rollback/0005_rollback.sql?raw";
+import rollback0006Sql from "../migrations_rollback/0006_rollback.sql?raw";
 
 /**
  * マイグレーション適用結果の検証。
@@ -293,5 +294,30 @@ it("戻しマイグレーション0005の適用でhidden_at・client_id列と索
 	);
 	expect(await indexNamesOf("messages")).not.toContain(
 		"messages_latch_id_user_id_client_id_uq",
+	);
+});
+
+it("0006適用後、reportsにtarget(NOT NULL)とmessage_id(null可)があり、通報の検索索引がある(F7a設計 §3.2)", async () => {
+	const cols = await columnsOf("reports");
+	const target = cols.find((c) => c.name === "target");
+	expect(target, "target 列が存在すること").toBeDefined();
+	expect(target?.notnull).toBe(1);
+	const messageId = cols.find((c) => c.name === "message_id");
+	expect(messageId, "message_id 列が存在すること").toBeDefined();
+	expect(messageId?.notnull).toBe(0);
+	expect(await indexNamesOf("reports")).toContain(
+		"reports_reporter_latch_id_reportee_target_status_idx",
+	);
+});
+
+it("戻しマイグレーション0006の適用でtarget・message_id列と索引が消える(docs/11 §3の対マイグレーション)", async () => {
+	for (const statement of toStatements(rollback0006Sql)) {
+		await env.DB.prepare(statement).run();
+	}
+	const names = (await columnsOf("reports")).map((c) => c.name);
+	expect(names).not.toContain("target");
+	expect(names).not.toContain("message_id");
+	expect(await indexNamesOf("reports")).not.toContain(
+		"reports_reporter_latch_id_reportee_target_status_idx",
 	);
 });

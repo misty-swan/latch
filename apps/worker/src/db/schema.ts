@@ -61,6 +61,8 @@ export type ProposalOutcome =
 export type LatchFeedbackKind = "attendance" | "connection_quality";
 /** 通報の理由 */
 export type ReportReason = "spam" | "harassment" | "inappropriate" | "other";
+/** 通報の対象(F7a設計 §3.2) */
+export type ReportTarget = "proposal" | "profile" | "icon" | "message";
 /** 通報の処理状態 */
 export type ReportStatus = "open" | "resolved";
 /** Web Push購読の状態 */
@@ -472,17 +474,31 @@ export const blocks = sqliteTable(
 	(t) => [primaryKey({ columns: [t.blockerUserId, t.blockedUserId] })],
 );
 
-/** 通報 */
-export const reports = sqliteTable("reports", {
-	id: text("id", { length: 26 }).primaryKey(),
-	reporter: text("reporter", { length: 26 }).notNull(),
-	reportee: text("reportee", { length: 26 }).notNull(),
-	reason: text("reason").$type<ReportReason>().notNull(),
-	latchId: text("latch_id", { length: 26 }),
-	note: text("note").notNull(),
-	status: text("status").$type<ReportStatus>().notNull(),
-	createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-});
+/** 通報。targetは通報の対象、message_idはtarget=messageのときの対象メッセージ(F7a設計 §3.2) */
+export const reports = sqliteTable(
+	"reports",
+	{
+		id: text("id", { length: 26 }).primaryKey(),
+		reporter: text("reporter", { length: 26 }).notNull(),
+		reportee: text("reportee", { length: 26 }).notNull(),
+		reason: text("reason").$type<ReportReason>().notNull(),
+		target: text("target").$type<ReportTarget>().notNull(),
+		latchId: text("latch_id", { length: 26 }),
+		messageId: text("message_id", { length: 26 }),
+		note: text("note").notNull(),
+		status: text("status").$type<ReportStatus>().notNull(),
+		createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+	},
+	(t) => [
+		index("reports_reporter_latch_id_reportee_target_status_idx").on(
+			t.reporter,
+			t.latchId,
+			t.reportee,
+			t.target,
+			t.status,
+		),
+	],
+);
 
 /** アプリ内通知。closedは不成立(rejected/expired/cancelled)の総称(docs/01 §21) */
 export const notifications = sqliteTable(

@@ -43,6 +43,13 @@
       "when": 1792543754747,
       "tag": "0005_chat_hidden_client_id",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792564436002,
+      "tag": "0006_report_target",
+      "breakpoints": true
     }
   ]
 }
