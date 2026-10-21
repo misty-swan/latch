@@ -361,6 +361,8 @@ export const latchMembers = sqliteTable(
 		userId: text("user_id", { length: 26 }).notNull(),
 		// 離脱時刻。nullは参加中(F4b設計・docs/05 §2.2)
 		leftAt: integer("left_at", { mode: "timestamp_ms" }),
+		// 本人がLATCHを自分の側から消した時刻。nullは非表示にしていない(F6a設計)
+		hiddenAt: integer("hidden_at", { mode: "timestamp_ms" }),
 	},
 	(t) => [
 		primaryKey({ columns: [t.latchId, t.userId] }),
@@ -415,8 +417,17 @@ export const messages = sqliteTable(
 			.references(() => users.id),
 		body: text("body").notNull(),
 		createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+		// 送信側が付ける再送の重複防止ID。nullは付けない送信(F6a設計)
+		clientId: text("client_id", { length: 64 }),
 	},
-	(t) => [index("messages_latch_id_id_idx").on(t.latchId, t.id)],
+	(t) => [
+		index("messages_latch_id_id_idx").on(t.latchId, t.id),
+		uniqueIndex("messages_latch_id_user_id_client_id_uq").on(
+			t.latchId,
+			t.userId,
+			t.clientId,
+		),
+	],
 );
 
 /** 既読管理(未読表示・つながり品質の開始判定に使用) */

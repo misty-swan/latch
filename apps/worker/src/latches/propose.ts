@@ -443,10 +443,11 @@ export const proposeSet = async (
 			${deadline.getTime()}, ${expiresAt.getTime()}, ${nowMs}, NULL, ${present ? nowMs : null}, ${nowMs}, ${nowMs}
 			WHERE ${secured}`,
 	);
+	// 列数が変わるとSELECTの値の個数が合わなくなる: latch_members(latch_id, user_id, left_at, hidden_at)
 	const insertMember = (userId: string) =>
 		db
 			.insert(latchMembers)
-			.select(sql`SELECT ${latchId}, ${userId}, NULL WHERE ${secured}`);
+			.select(sql`SELECT ${latchId}, ${userId}, NULL, NULL WHERE ${secured}`);
 	const insertEvent = db
 		.insert(latchStatusEvents)
 		.select(
