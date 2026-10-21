@@ -491,8 +491,10 @@ describe("Confirm(預ける・保存)", () => {
 			status: "active",
 			expires_in_days: 30,
 		});
-		// 受け渡し状態は預けた画面で消費される
-		expect(readComposeState()).toBeNull();
+		// 受け渡し状態は預けた画面のeffectで消費される(遷移直後には残っていることがある)
+		await waitFor(() => {
+			expect(readComposeState()).toBeNull();
+		});
 	});
 
 	it("機会の保存は編集した日時・予算・お酒を運び・期限はstart+3時間", async () => {
