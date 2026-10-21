@@ -159,6 +159,48 @@ describe("Report", () => {
 		]);
 	});
 
+	it("グループ: ブロックの確認から来たときは引き継いだ相手が選ばれている(01 D-10)", async () => {
+		latch = latchOf({
+			participants_count: 3,
+			members: [
+				{ user_id: "u2", display_name: "ミナト", bio: null, has_icon: false },
+				{ user_id: "u3", display_name: "アオイ", bio: null, has_icon: false },
+			],
+		});
+		open({ pathname: "/latches/L1/report", state: { reporteeId: "u3" } });
+		await screen.findByText("相手");
+		expect((screen.getByLabelText("アオイ") as HTMLInputElement).checked).toBe(
+			true,
+		);
+		fireEvent.click(screen.getByLabelText("アイコン"));
+		fireEvent.click(screen.getByLabelText("嫌がらせ"));
+		fireEvent.click(send());
+		await screen.findByText("通報を受け付けました。");
+		expect(reportBodies()).toEqual([
+			{
+				latch_id: "L1",
+				target: "icon",
+				reason: "harassment",
+				reportee_user_id: "u3",
+			},
+		]);
+	});
+
+	it("引き継いだ相手がmembersに無ければ選ばれていない扱いで送れない", async () => {
+		latch = latchOf({
+			participants_count: 3,
+			members: [
+				{ user_id: "u2", display_name: "ミナト", bio: null, has_icon: false },
+				{ user_id: "u3", display_name: "アオイ", bio: null, has_icon: false },
+			],
+		});
+		open({ pathname: "/latches/L1/report", state: { reporteeId: "u9" } });
+		await screen.findByText("相手");
+		fireEvent.click(screen.getByLabelText("アイコン"));
+		fireEvent.click(screen.getByLabelText("嫌がらせ"));
+		expect((send() as HTMLButtonElement).disabled).toBe(true);
+	});
+
 	it("?message=&user=: 対象・相手の欄なしで発言を引用して通報する", async () => {
 		open({
 			pathname: "/latches/L1/report",

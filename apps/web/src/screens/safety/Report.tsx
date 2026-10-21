@@ -43,7 +43,12 @@ export function Report() {
 	const report = useReport();
 
 	const [target, setTarget] = useState<Target | null>(null);
-	const [reportee, setReportee] = useState<string | null>(null);
+	// ブロックの確認から来たときは選んだ相手を引き継ぐ(01 D-10)。membersに無ければ下で無視する
+	const [reportee, setReportee] = useState<string | null>(() => {
+		const handed = (location.state as { reporteeId?: unknown } | null)
+			?.reporteeId;
+		return typeof handed === "string" ? handed : null;
+	});
 	const [reason, setReason] = useState<Reason | null>(null);
 	const [note, setNote] = useState("");
 	const [done, setDone] = useState(false);
@@ -68,7 +73,9 @@ export function Report() {
 		: proposalStage
 			? null
 			: group
-				? reportee
+				? members.some((m) => m.user_id === reportee)
+					? reportee
+					: null
 				: (soleMember ?? null);
 
 	const ready =

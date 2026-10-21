@@ -388,6 +388,34 @@ describe("ChatMenu 通報・ブロック", () => {
 		expect(callsTo("POST", "/v1/users/u2/block")).toHaveLength(0);
 	});
 
+	it("グループ: 確認の「ブロックの前に通報する」で、選んだ相手を引き継いで通報の画面へ移り・ブロックは送らない(01 D-10)", async () => {
+		const { router, onBlocked } = mount(
+			latchOf({ participants_count: 3, members: GROUP_MEMBERS }),
+		);
+		fireEvent.click(screen.getByText("ブロックする"));
+		fireEvent.click(screen.getByRole("radio", { name: "あお" }));
+		fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+		fireEvent.click(screen.getByText("ブロックの前に通報する"));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/latches/L1/report"),
+		);
+		// 相手のIDはURLに出さず遷移の付帯情報で渡す
+		expect(router.state.location.search).toBe("");
+		expect(router.state.location.state).toEqual({ reporteeId: "u3" });
+		expect(callsTo("POST", "/v1/users/u3/block")).toHaveLength(0);
+		expect(onBlocked).not.toHaveBeenCalled();
+	});
+
+	it("1対1の確認にも「ブロックの前に通報する」があり唯一の相手を引き継ぐ", async () => {
+		const { router } = mount(latchOf());
+		fireEvent.click(screen.getByText("ブロックする"));
+		fireEvent.click(screen.getByText("ブロックの前に通報する"));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/latches/L1/report"),
+		);
+		expect(router.state.location.state).toEqual({ reporteeId: "u2" });
+	});
+
 	it("終了後のグループ(completed・matched経由のcancelled)はLATCHが変わらないので抜ける・読み取り専用の項目を出さない", async () => {
 		for (const status of ["completed", "cancelled"] as const) {
 			const { onBlocked } = mount(

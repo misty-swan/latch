@@ -280,6 +280,24 @@ export function ChatMenu({
 									<span>ブロックしたことは、相手に通知されません。</span>
 								</li>
 							</ul>
+							{/* 続いているグループは抜けた後に開けず通報できなくなるため、ブロックの前に
+							    通報へ進める入口を置く(01 D-10)。相手はURLに出さず遷移の付帯情報で渡す */}
+							{blockee !== null && !busy ? (
+								<div
+									className="list"
+									style={{ margin: "16px calc(var(--gutter) * -1) 0" }}
+								>
+									<Link
+										className="list-row"
+										to={reportPath(latch.id)}
+										state={{ reporteeId: blockee }}
+									>
+										<Icon d={ICON_FLAG} />
+										<span>ブロックの前に通報する</span>
+										<Icon d={ICON_CHEV} className="ic list-row__chev" />
+									</Link>
+								</div>
+							) : null}
 							{blockError !== null ? (
 								<p className="note" role="alert" style={{ marginTop: 16 }}>
 									{blockError}
