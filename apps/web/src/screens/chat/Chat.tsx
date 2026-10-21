@@ -7,7 +7,7 @@
 import type { LatchDTO } from "@latch/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Link, Navigate, useParams } from "react-router";
+import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { ApiError } from "../../api/client";
 import {
 	connectionName,
@@ -33,10 +33,13 @@ import { Avatar, LatchArt } from "../latch/art";
 import { LatchLoadFailed } from "../latch/LatchScreen";
 import { ScreenGrain } from "../shared";
 import "./chat.css";
+import { ChatMenu } from "./ChatMenu";
 import { Composer } from "./Composer";
 import { MessageList, type PendingMessage } from "./MessageList";
 
 const TONES = ["b", "c", "d", "e"] as const;
+/** トーストを出しておく時間(Shelved.tsxと同じ) */
+const TOAST_MS = 2400;
 const isRedirectError = (error: unknown): boolean => {
 	if (!(error instanceof ApiError)) return false;
 	if (error.code === "NOT_FOUND") return true;
@@ -108,7 +111,13 @@ function ChatHead({ latch }: { latch: LatchDTO }) {
 	);
 }
 
-function ChatTopbar({ latch }: { latch: LatchDTO | null }) {
+function ChatTopbar({
+	latch,
+	onMenu,
+}: {
+	latch: LatchDTO | null;
+	onMenu?: () => void;
+}) {
 	return (
 		<header className="topbar">
 			<div className="topbar__side">
@@ -123,11 +132,11 @@ function ChatTopbar({ latch }: { latch: LatchDTO | null }) {
 			</div>
 			<div className="topbar__side topbar__side--end">
 				{latch ? (
-					// 中身(メニューシート)はTask 7で結ぶ
 					<button
 						type="button"
 						className="icon-btn"
 						aria-label="このつながりについて"
+						onClick={onMenu}
 					>
 						<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
 							<circle
@@ -208,6 +217,30 @@ function ChatView({
 	const pendingRef = useRef(pending);
 	pendingRef.current = pending;
 	const matched = latch.status === "matched";
+	const navigate = useNavigate();
+	const [menuOpen, setMenuOpen] = useState(false);
+	const [toast, setToast] = useState<string | null>(null);
+	useEffect(() => {
+		if (toast === null) return;
+		const t = setTimeout(() => setToast(null), TOAST_MS);
+		return () => clearTimeout(t);
+	}, [toast]);
+
+	const onLeft = (result: LatchDTO) => {
+		const message = "参加を取り消しました。";
+		if (result.status === "cancelled") {
+			// 全体が終わった: その場に留まり読み取り専用の表示へ
+			setMenuOpen(false);
+			setToast(message);
+		} else {
+			// 本人だけが抜けた(以後は読めない): 一覧へ戻りトーストは遷移先で出す
+			navigate(PATHS.connections, { replace: true, state: { toast: message } });
+		}
+	};
+	const onHidden = () =>
+		navigate(PATHS.connections, {
+			state: { toast: "一覧から消しました。" },
+		});
 
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const sentinelRef = useRef<HTMLDivElement>(null);
@@ -365,7 +398,7 @@ function ChatView({
 	return (
 		<div className="screen chat-screen">
 			<ScreenGrain />
-			<ChatTopbar latch={latch} />
+			<ChatTopbar latch={latch} onMenu={() => setMenuOpen(true)} />
 			<div
 				className="screen__body"
 				ref={scrollRef}
@@ -425,6 +458,19 @@ function ChatView({
 			) : (
 				<Composer onSend={send} />
 			)}
+			{toast !== null ? (
+				<p className="toast" role="status">
+					{toast}
+				</p>
+			) : null}
+			{menuOpen ? (
+				<ChatMenu
+					latch={latch}
+					onClose={() => setMenuOpen(false)}
+					onLeft={onLeft}
+					onHidden={onHidden}
+				/>
+			) : null}
 		</div>
 	);
 }

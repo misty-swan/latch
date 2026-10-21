@@ -58,9 +58,9 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 	throw new Error(`想定外のfetch: ${url}`);
 });
 
-const open = () => {
+const open = (state?: unknown) => {
 	const router = createMemoryRouter(appRoutes, {
-		initialEntries: ["/connections"],
+		initialEntries: [{ pathname: "/connections", state }],
 	});
 	render(
 		<QueryClientProvider client={createTestQueryClient()}>
@@ -81,6 +81,13 @@ afterEach(() => {
 });
 
 describe("Connections", () => {
+	it("遷移の state.toast をトーストに出し・state は消す", async () => {
+		pages = { "": { items: [], next_cursor: null } };
+		open({ toast: "一覧から消しました。" });
+		expect(await screen.findByText("一覧から消しました。")).toBeTruthy();
+		expect(screen.getByRole("status").textContent).toBe("一覧から消しました。");
+	});
+
 	it("matched・completed・cancelledを「つながっている」「終了」に分け・cancelledは実名を出さない", async () => {
 		pages = {
 			"": {
