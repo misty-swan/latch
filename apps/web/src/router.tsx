@@ -11,6 +11,7 @@ import { PATHS } from "./routes/paths";
 import { Compose } from "./screens/Compose";
 import { Confirm } from "./screens/Confirm";
 import { Consent } from "./screens/Consent";
+import { Chat } from "./screens/chat/Chat";
 import { Connections } from "./screens/chat/Connections";
 import { Home } from "./screens/Home";
 import { Intro } from "./screens/Intro";
@@ -113,6 +114,14 @@ export const appRoutes = [
 		element: (
 			<RequireAuth>
 				<Connections />
+			</RequireAuth>
+		),
+	},
+	{
+		path: PATHS.chat,
+		element: (
+			<RequireAuth>
+				<Chat />
 			</RequireAuth>
 		),
 	},

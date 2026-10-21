@@ -33,10 +33,14 @@ export const connectionSubtitle = (latch: LatchDTO): string[] => {
 	return parts;
 };
 
-/** 送信者名。membersに居なければ(離脱・自分以外の不明者)つながっていた相手 */
-export const senderName = (latch: LatchDTO, userId: string): string =>
-	latch.members?.find((m) => m.user_id === userId)?.display_name ??
-	ENDED_PARTNER_NAME;
+/** 送信者名。cancelledや、membersに居なければ(離脱・自分以外の不明者)つながっていた相手 */
+export const senderName = (latch: LatchDTO, userId: string): string => {
+	if (latch.status === "cancelled") return ENDED_PARTNER_NAME;
+	return (
+		latch.members?.find((m) => m.user_id === userId)?.display_name ??
+		ENDED_PARTNER_NAME
+	);
+};
 
 /** 経過表示「いま」「N分前」「H:MM」「昨日」「N日前」「M月D日」 */
 export const formatAgo = (iso: string, now: Date): string => {

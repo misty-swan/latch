@@ -141,4 +141,9 @@ describe("senderName", () => {
 	it("居なければつながっていた相手", () => {
 		expect(senderName(latch(), "u9")).toBe(ENDED_PARTNER_NAME);
 	});
+	it("cancelledならmembersに居てもつながっていた相手", () => {
+		expect(senderName(latch({ status: "cancelled" }), "u2")).toBe(
+			ENDED_PARTNER_NAME,
+		);
+	});
 });
