@@ -13,6 +13,7 @@ import { devRoutes } from "./routes/dev";
 import { iconRoutes } from "./routes/icons";
 import { intentRoutes } from "./routes/intents";
 import { latchRoutes } from "./routes/latches";
+import { pushRoutes } from "./routes/push";
 import { safetyRoutes } from "./routes/safety";
 import { userRoutes } from "./routes/users";
 
@@ -39,6 +40,8 @@ app.route("/v1/intents", intentRoutes);
 app.route("/v1", chatRoutes);
 // 安全のAPI(POST/DELETE /v1/users/{user_id}/block・GET /v1/blocks・F7a設計 §2.1)
 app.route("/v1", safetyRoutes);
+// Web Push購読のAPI(F7b設計 §4)
+app.route("/v1", pushRoutes);
 // LATCH(提案)API(一覧・取得・回答・取り消し・離脱・見送り理由・F4a設計 §4.1)
 app.route("/v1/latches", latchRoutes);
 // dev専用サインインAPI(POST /v1/dev/idp-token・F2'計画Task 2)。テスト鍵モードの
