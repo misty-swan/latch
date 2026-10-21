@@ -1,0 +1,9 @@
+/* 自分の画面の補足。latch.cssに無い分だけ(latch.cssは編集しない) */
+button.list-row {
+	width: 100%;
+	background: none;
+	border: 0;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}

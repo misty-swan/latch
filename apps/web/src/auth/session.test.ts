@@ -148,3 +148,40 @@ describe("authSession", () => {
 		await expect(authSession.refresh()).resolves.toBe(false);
 	});
 });
+
+describe("authSession.logout", () => {
+	it("beforeClearを待ち・refresh_tokenとBearerを付けてAPIを呼んでからclearする", async () => {
+		authSession.setTokens("access-1", "refresh-1");
+		const order: string[] = [];
+		fetchMock.mockImplementationOnce(async (_u, init) => {
+			order.push("api");
+			expect(JSON.parse(String(init.body))).toEqual({
+				refresh_token: "refresh-1",
+			});
+			expect(new Headers(init.headers).get("Authorization")).toBe(
+				"Bearer access-1",
+			);
+			return new Response(null, { status: 204 });
+		});
+
+		await authSession.logout(async () => {
+			order.push("before");
+		});
+
+		expect(order).toEqual(["before", "api"]);
+		expect(authSession.accessToken).toBeNull();
+		expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
+	});
+
+	it("beforeClearが投げてもAPI失敗でもclearまで進む", async () => {
+		authSession.setTokens("access-1", "refresh-1");
+		fetchMock.mockRejectedValueOnce(new Error("offline"));
+
+		await authSession.logout(async () => {
+			throw new Error("push失敗");
+		});
+
+		expect(authSession.accessToken).toBeNull();
+		expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
+	});
+});

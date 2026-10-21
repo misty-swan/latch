@@ -104,4 +104,17 @@ describe("Consent", () => {
 		expect(router.state.location.pathname).toBe(PATHS.home);
 		expect(localStorage.getItem("latch.consent")).toBeNull();
 	});
+
+	it("?view=1では[同意して進む]を出さず・戻るは/meへ", () => {
+		authSession.setTokens("access-1", null);
+		const router = createMemoryRouter(appRoutes, {
+			initialEntries: ["/consent?view=1"],
+		});
+		render(withQueryClient(<RouterProvider router={router} />));
+
+		expect(screen.queryByText("同意して進む")).toBeNull();
+		expect(
+			screen.getByRole("link", { name: "戻る" }).getAttribute("href"),
+		).toBe(PATHS.me);
+	});
 });

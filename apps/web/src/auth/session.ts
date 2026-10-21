@@ -12,6 +12,7 @@
 
 const REFRESH_STORAGE_KEY = "latch.refresh";
 const REFRESH_ENDPOINT = "/v1/auth/refresh";
+const LOGOUT_ENDPOINT = "/v1/auth/logout";
 
 /** POST /v1/auth/refreshの応答(docs/05 §3.2・workerの実装に一致) */
 interface RefreshResponse {
@@ -100,6 +101,35 @@ export const authSession = {
 	clear(): void {
 		accessToken = null;
 		localStorage.removeItem(REFRESH_STORAGE_KEY);
+	},
+	/**
+	 * ログアウト。後始末(beforeClear・Pushの購読解除等)を待ち→APIへrefresh_tokenを付けて
+	 * 失効を依頼し→セッションを破棄する。APIはアクセストークンを要するため破棄より先に呼ぶ。
+	 * beforeClearやAPIの失敗は無視し・必ずclear()まで進む(端末側のログアウトを妨げない)。
+	 * apiFetchは使わない(循環の防止・401時のwelcome遷移と二重にならないため)
+	 */
+	async logout(beforeClear?: () => Promise<void>): Promise<void> {
+		try {
+			await beforeClear?.();
+		} catch {
+			// 後始末の失敗でログアウトを止めない
+		}
+		try {
+			const stored = readStoredRefreshToken();
+			await fetch(LOGOUT_ENDPOINT, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					...(accessToken === null
+						? {}
+						: { Authorization: `Bearer ${accessToken}` }),
+				},
+				body: JSON.stringify(stored === null ? {} : { refresh_token: stored }),
+			});
+		} catch {
+			// 通信失敗でも端末側の破棄は行う
+		}
+		authSession.clear();
 	},
 	/**
 	 * 起動時の復元。保存済みリフレッシュトークンがあればリフレッシュを試みる。

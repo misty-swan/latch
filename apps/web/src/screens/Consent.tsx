@@ -7,7 +7,7 @@
  * 文言・構造・クラス名はボードどおり。記録と遷移の細部だけ実装の裁量
  */
 
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { PATHS } from "../routes/paths";
 import { ScreenGrain } from "./shared";
 
@@ -34,6 +34,8 @@ const CONSENT_ITEMS: ReadonlyArray<{ n: string; k: string; d: string }> = [
 
 export function Consent() {
 	const navigate = useNavigate();
+	// ?view=1は自分の画面からの閲覧。同意の操作を出さず・戻り先を自分の画面にする
+	const viewOnly = useSearchParams()[0].get("view") === "1";
 
 	const accept = (): void => {
 		try {
@@ -50,7 +52,11 @@ export function Consent() {
 			<ScreenGrain />
 			<header className="topbar">
 				<div className="topbar__side">
-					<Link className="icon-btn" to={PATHS.register} aria-label="戻る">
+					<Link
+						className="icon-btn"
+						to={viewOnly ? PATHS.me : PATHS.register}
+						aria-label="戻る"
+					>
 						<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
 							<path d="M14.5 5.5L8 12l6.5 6.5" />
 						</svg>
@@ -58,9 +64,11 @@ export function Consent() {
 				</div>
 				<span />
 				<div className="topbar__side topbar__side--end">
-					<span className="t-meta" style={{ paddingRight: 14 }}>
-						2 / 2
-					</span>
+					{viewOnly ? null : (
+						<span className="t-meta" style={{ paddingRight: 14 }}>
+							2 / 2
+						</span>
+					)}
 				</div>
 			</header>
 			<div
@@ -93,25 +101,30 @@ export function Consent() {
 					</span>
 				</p>
 			</div>
-			<div className="screen__foot">
-				<button
-					type="button"
-					className="btn btn--primary btn--block"
-					onClick={accept}
-				>
-					同意して進む
-				</button>
-				<button
-					type="button"
-					className="btn btn--quiet"
-					onClick={() => navigate(PATHS.home)}
-				>
-					同意しないで進む
-				</button>
-				<p className="t-caption" style={{ textAlign: "center", marginTop: -4 }}>
-					同意しない場合、意思を預けることはできません。閲覧と設定はできます。
-				</p>
-			</div>
+			{viewOnly ? null : (
+				<div className="screen__foot">
+					<button
+						type="button"
+						className="btn btn--primary btn--block"
+						onClick={accept}
+					>
+						同意して進む
+					</button>
+					<button
+						type="button"
+						className="btn btn--quiet"
+						onClick={() => navigate(PATHS.home)}
+					>
+						同意しないで進む
+					</button>
+					<p
+						className="t-caption"
+						style={{ textAlign: "center", marginTop: -4 }}
+					>
+						同意しない場合、意思を預けることはできません。閲覧と設定はできます。
+					</p>
+				</div>
+			)}
 		</div>
 	);
 }
