@@ -15,6 +15,7 @@
  * - 保存済みリフレッシュトークンがあり通信失敗で復元できなかったときを
  *   「オフライン中のセッション」(offline)とし、保護画面の描画を許す
  * - clear()の最後に登録されたlistenerを呼ぶ(端末に保存した内容の破棄に使う)
+ * - 保存した利用者IDと異なる利用者のトークンを得たらonUserChangeのlistenerを呼ぶ(同上)
  */
 
 const REFRESH_STORAGE_KEY = "latch.refresh";
@@ -42,6 +43,7 @@ let accessUserId: string | null = null;
 let offline = false;
 let refreshInFlight: Promise<RefreshOutcome> | null = null;
 const clearListeners = new Set<() => void>();
+const userChangeListeners = new Set<() => void>();
 
 const readStoredRefreshToken = (): string | null =>
 	localStorage.getItem(REFRESH_STORAGE_KEY);
@@ -71,15 +73,41 @@ const readSubject = (token: string): string | null => {
 	}
 };
 
-/** アクセストークンを置き換え、そのsubを利用者IDとして保存する */
-const applyAccessToken = (token: string): void => {
+/** listenerを順に呼ぶ(配列へ写してから回す・投げても他のlistenerと呼び出し元を止めない) */
+const notify = (listeners: ReadonlySet<() => void>): void => {
+	for (const listener of [...listeners]) {
+		try {
+			listener();
+		} catch {
+			// 後始末の失敗で呼び出し元の処理や他のlistenerを止めない
+		}
+	}
+};
+
+/**
+ * アクセストークンを置き換え、そのsubを利用者IDとして保存する。
+ * 戻り値は利用者が変わったか(前に保存した利用者IDがあり、新しいsubと異なる・または読めない)。
+ * 呼び出し側はトークンの保存を終えてからnotifyUserChangeを呼ぶ
+ */
+const applyAccessToken = (token: string): boolean => {
+	const previousUserId = localStorage.getItem(USER_ID_STORAGE_KEY);
 	accessToken = token;
 	accessUserId = readSubject(token);
+	const userChanged =
+		previousUserId !== null && previousUserId !== accessUserId;
 	if (accessUserId === null) {
 		// 読めないときは古い利用者IDを残さない(別の利用者の保存内容と取り違えないため)
 		localStorage.removeItem(USER_ID_STORAGE_KEY);
 	} else {
 		localStorage.setItem(USER_ID_STORAGE_KEY, accessUserId);
+	}
+	return userChanged;
+};
+
+/** 利用者が変わったときに登録されたlistenerを呼ぶ(別の利用者の保存内容を消すため) */
+const notifyUserChange = (userChanged: boolean): void => {
+	if (userChanged) {
+		notify(userChangeListeners);
 	}
 };
 
@@ -110,12 +138,13 @@ const performRefresh = async (): Promise<RefreshOutcome> => {
 			// 応答が期待どおりでない=判断できない(拒否とは限らない)
 			return "network_error";
 		}
-		applyAccessToken(data.access_token);
+		const userChanged = applyAccessToken(data.access_token);
 		// apiFetch経由のリフレッシュで回復した場合もオフライン中のセッションを解く
 		offline = false;
 		if (data.refresh_token !== null) {
 			localStorage.setItem(REFRESH_STORAGE_KEY, data.refresh_token);
 		}
+		notifyUserChange(userChanged);
 		return "success";
 	} catch {
 		// 応答本文が読めない(ゲートウェイのHTML応答等)。判断できないため保存値は残す
@@ -161,14 +190,25 @@ export const authSession = {
 			clearListeners.delete(listener);
 		};
 	},
+	/**
+	 * 利用者が変わったとき(前に保存した利用者IDと新しいトークンのsubが異なる)に呼ぶlistenerを登録する。
+	 * トークンの保存を終えてから呼ぶ。戻り値で解除する(F8a設計 §2.1・別の利用者でのサインイン)
+	 */
+	onUserChange(listener: () => void): () => void {
+		userChangeListeners.add(listener);
+		return () => {
+			userChangeListeners.delete(listener);
+		};
+	},
 	/** トークンを設定する。refreshTokenがnullのとき保存値は変更しない */
 	setTokens(nextAccessToken: string, nextRefreshToken: string | null): void {
-		applyAccessToken(nextAccessToken);
+		const userChanged = applyAccessToken(nextAccessToken);
 		// トークンを得た=オフライン中のセッションではない(接続の回復時の無駄な復元を防ぐ)
 		offline = false;
 		if (nextRefreshToken !== null) {
 			localStorage.setItem(REFRESH_STORAGE_KEY, nextRefreshToken);
 		}
+		notifyUserChange(userChanged);
 	},
 	/**
 	 * セッションを破棄する(メモリとlocalStorageの両方)。最後に登録されたlistenerを呼ぶ。
@@ -180,13 +220,7 @@ export const authSession = {
 		offline = false;
 		localStorage.removeItem(REFRESH_STORAGE_KEY);
 		localStorage.removeItem(USER_ID_STORAGE_KEY);
-		for (const listener of [...clearListeners]) {
-			try {
-				listener();
-			} catch {
-				// 後始末の失敗で破棄や他のlistenerを止めない
-			}
-		}
+		notify(clearListeners);
 	},
 	/**
 	 * ログアウト。後始末(beforeClear・Pushの購読解除等)を待ち→APIへrefresh_tokenを付けて

@@ -427,3 +427,85 @@ describe("authSession.refreshOutcome", () => {
 		await expect(authSession.refreshOutcome()).resolves.toBe("rejected");
 	});
 });
+
+describe("authSession.onUserChange", () => {
+	it("U1→U2のsetTokensで1回だけ呼ぶ", () => {
+		authSession.setTokens(fakeJwt({ sub: "U1" }), "refresh-1");
+		const listener = vi.fn();
+		const off = authSession.onUserChange(listener);
+
+		authSession.setTokens(fakeJwt({ sub: "U2" }), "refresh-2");
+		off();
+
+		expect(listener).toHaveBeenCalledTimes(1);
+		expect(authSession.userId).toBe("U2");
+	});
+
+	it("同じ利用者(U1→U1)では呼ばない", () => {
+		authSession.setTokens(fakeJwt({ sub: "U1" }), "refresh-1");
+		const listener = vi.fn();
+		const off = authSession.onUserChange(listener);
+
+		authSession.setTokens(fakeJwt({ sub: "U1" }), "refresh-2");
+		off();
+
+		expect(listener).not.toHaveBeenCalled();
+	});
+
+	it("保存された利用者IDが無い初回のサインインでは呼ばない", () => {
+		const listener = vi.fn();
+		const off = authSession.onUserChange(listener);
+
+		authSession.setTokens(fakeJwt({ sub: "U1" }), "refresh-1");
+		off();
+
+		expect(listener).not.toHaveBeenCalled();
+	});
+
+	it("新しいトークンのsubが読めず・前の利用者IDがあったときも呼ぶ", () => {
+		authSession.setTokens(fakeJwt({ sub: "U1" }), "refresh-1");
+		const listener = vi.fn();
+		const off = authSession.onUserChange(listener);
+
+		authSession.setTokens("broken", "refresh-2");
+		off();
+
+		expect(listener).toHaveBeenCalledTimes(1);
+	});
+
+	it("listenerが投げてもトークンの更新は済み・他のlistenerも呼ぶ", () => {
+		authSession.setTokens(fakeJwt({ sub: "U1" }), "refresh-1");
+		const second = vi.fn();
+		const offA = authSession.onUserChange(() => {
+			throw new Error("boom");
+		});
+		const offB = authSession.onUserChange(second);
+		const next = fakeJwt({ sub: "U2" });
+
+		expect(() => authSession.setTokens(next, "refresh-2")).not.toThrow();
+		offA();
+		offB();
+
+		expect(authSession.accessToken).toBe(next);
+		expect(localStorage.getItem(REFRESH_KEY)).toBe("refresh-2");
+		expect(second).toHaveBeenCalledTimes(1);
+	});
+
+	it("リフレッシュで利用者が変わったときも呼ぶ", async () => {
+		authSession.setTokens(fakeJwt({ sub: "U1" }), "refresh-1");
+		const listener = vi.fn();
+		const off = authSession.onUserChange(listener);
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(200, {
+				access_token: fakeJwt({ sub: "U2" }),
+				refresh_token: "refresh-2",
+				expires_in: 3600,
+			}),
+		);
+
+		await authSession.refresh();
+		off();
+
+		expect(listener).toHaveBeenCalledTimes(1);
+	});
+});

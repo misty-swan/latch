@@ -3,7 +3,8 @@ import {
 	persistQueryClientRestore,
 	persistQueryClientSave,
 } from "@tanstack/react-query-persist-client";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { authSession } from "../auth/session";
 import {
 	clearOfflineCache,
 	createOfflinePersister,
@@ -198,5 +199,41 @@ describe("clearOfflineCache", () => {
 	it("保存期間は7日", () => {
 		expect(OFFLINE_MAX_AGE_MS).toBe(7 * 24 * 3_600_000);
 		expect(OFFLINE_CACHE_KEY).toBe("latch.offline-cache");
+	});
+});
+
+describe("利用者が変わったときの後始末", () => {
+	afterEach(() => {
+		authSession.clear();
+		localStorage.clear();
+	});
+
+	it("onUserChangeに登録したclearOfflineCacheでメモリと端末の保存が消える", async () => {
+		authSession.setTokens(
+			`e30.${btoa(JSON.stringify({ sub: "U1" })).replace(/=+$/, "")}.sig`,
+			"refresh-1",
+		);
+		const store = memoryStore();
+		const client = clientWith(["intents"], ["me"]);
+		await persistQueryClientSave({
+			queryClient: client,
+			persister: createOfflinePersister(() => authSession.userId, store),
+			dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
+		});
+		expect(store.data.size).toBe(1);
+		let pending: Promise<void> = Promise.resolve();
+		const off = authSession.onUserChange(() => {
+			pending = clearOfflineCache(client, store);
+		});
+
+		authSession.setTokens(
+			`e30.${btoa(JSON.stringify({ sub: "U2" })).replace(/=+$/, "")}.sig`,
+			"refresh-2",
+		);
+		await pending;
+		off();
+
+		expect(client.getQueryCache().getAll()).toEqual([]);
+		expect(store.data.size).toBe(0);
 	});
 });

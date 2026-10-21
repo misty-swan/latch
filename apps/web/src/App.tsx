@@ -27,15 +27,19 @@ const persistOptions = {
 	dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
 };
 
-// モジュール読み込み時に1回だけ登録する。セッションの破棄(ログアウト・ログインの拒否)で
-// メモリと端末の保存を消し、接続の回復で復元をやり直す
+// モジュール読み込み時に1回だけ登録する。セッションの破棄(ログアウト・ログインの拒否)と
+// 別の利用者でのサインインでメモリと端末の保存を消し、接続の回復で復元をやり直す
 const stopClearListener = authSession.onClear(() => {
+	void clearOfflineCache(queryClient);
+});
+const stopUserChangeListener = authSession.onUserChange(() => {
 	void clearOfflineCache(queryClient);
 });
 const stopReconnect = startReconnect(queryClient);
 // 開発時の差し替え(HMR)でモジュールが読み直されたときに二重に登録しない
 import.meta.hot?.dispose(() => {
 	stopClearListener();
+	stopUserChangeListener();
 	stopReconnect();
 });
 
