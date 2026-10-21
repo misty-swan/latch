@@ -378,7 +378,7 @@ describe("POST /v1/reports", () => {
 		).toBe(404);
 	});
 
-	it("離脱済みの本人・自分自身・非メンバー・別人/別LATCHの発言は404", async () => {
+	it("自分自身・非メンバー・別人/別LATCHの発言は404", async () => {
 		const [a, b, x] = [
 			await registerUser("rf1"),
 			await registerUser("rf2"),
@@ -414,16 +414,66 @@ describe("POST /v1/reports", () => {
 				})
 			).status,
 		).toBe(404);
+		expect((await rowsOf(a.id, latchId)).length).toBe(0);
+	});
+
+	it("成立後に抜けた本人も通報できる(成立後の参加者だったことが条件・2026-10-21オーナー裁定)", async () => {
+		const [a, b, c] = [
+			await registerUser("rl1"),
+			await registerUser("rl2"),
+			await registerUser("rl3"),
+		];
+		const latchId = await seedLatch([a, b, c], "matched");
+		const fromB = await seedMessage(latchId, b.id);
 		await db
 			.update(latchMembers)
 			.set({ leftAt: new Date() })
 			.where(
 				and(eq(latchMembers.latchId, latchId), eq(latchMembers.userId, a.id)),
 			);
+		const send = (body: Record<string, unknown>) =>
+			post(a.token, { latch_id: latchId, reason: "harassment", ...body });
 		expect(
 			(await send({ target: "profile", reportee_user_id: b.id })).status,
-		).toBe(404);
-		expect((await rowsOf(a.id, latchId)).length).toBe(0);
+		).toBe(201);
+		expect(
+			(
+				await send({
+					target: "message",
+					reportee_user_id: b.id,
+					message_id: fromB,
+				})
+			).status,
+		).toBe(201);
+		const rows = await rowsOf(a.id, latchId);
+		expect(rows.map((r) => r.target).sort()).toEqual(["message", "profile"]);
+		expect(rows.every((r) => r.reportee === b.id)).toBe(true);
+	});
+
+	it("グループでブロックして抜けた後に、その相手を通報できる", async () => {
+		const [a, b, c] = [
+			await registerUser("rb1"),
+			await registerUser("rb2"),
+			await registerUser("rb3"),
+		];
+		const latchId = await seedLatch([a, b, c], "matched");
+		const blocked = await call("POST", `/v1/users/${b.id}/block`, a.token);
+		expect(blocked.status).toBe(201);
+		const [me] = await db
+			.select({ leftAt: latchMembers.leftAt })
+			.from(latchMembers)
+			.where(
+				and(eq(latchMembers.latchId, latchId), eq(latchMembers.userId, a.id)),
+			);
+		expect(me?.leftAt).not.toBeNull();
+		const res = await post(a.token, {
+			latch_id: latchId,
+			target: "profile",
+			reason: "harassment",
+			reportee_user_id: b.id,
+		});
+		expect(res.status).toBe(201);
+		expect(await rowsOf(a.id, latchId)).toHaveLength(1);
 	});
 
 	it("同じ通報の再送は1行のまま上書きされ、resolved後の再送は新しい行", async () => {

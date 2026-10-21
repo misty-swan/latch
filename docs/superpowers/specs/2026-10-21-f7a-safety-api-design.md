@@ -98,7 +98,7 @@ POST /v1/reports
 ```
 
 - **target=proposal(提案段階)**: latch_idは自分が参加者で、状態がproposed・partial_accept(提示済み・未成立)のLATCHに限る。reportee_user_id・message_idは指定不可(400)。自分以外の全参加者をreporteeとして1人1行で記録する(裁定4)。提案は閉じない
-- **target=profile・icon・message(成立後)**: latch_idは自分が参加者(left_atなし。hidden_atは問わない)で、状態がmatched・completed・matched経由のcancelledのLATCHに限る。reportee_user_idは必須でそのLATCHのメンバー(自分以外)。target=messageはmessage_idが必須で、そのLATCHのreportee_user_idの発言であること
+- **target=profile・icon・message(成立後)**: latch_idは自分が成立後の参加者だった(left_at・hidden_atは問わない。ブロックや参加取り消しで抜けた後も通報できる。実装後の最終レビューを受けた2026-10-21のオーナー裁定・01冒頭の決定記録(安全のAPI)の4)LATCHで、状態がmatched・completed・matched経由のcancelledのLATCHに限る。reportee_user_idは必須でそのLATCHのメンバー(自分以外)。target=messageはmessage_idが必須で、そのLATCHのreportee_user_idの発言であること
 - 上記に合わないLATCH・参加していないLATCH・存在しないLATCHは一律404。形の誤りは400 VALIDATION_FAILED(理由コードを付ける)
 - noteは前後の空白を除いて0〜500字。ログに出さない
 - 応答は通報の件数・対象者を返さない(提案段階で対象者の人数を推測させない)

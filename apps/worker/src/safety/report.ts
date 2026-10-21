@@ -2,7 +2,7 @@
  * 通報(F7a設計 §0.3の4・§3)。
  * - target=proposal: 提案中(proposed・partial_accept)のLATCHの参加者が、自分以外の全参加者を通報する
  *   (被通報者は本文で指定しない)。提案は提示後に限る(candidateは参加者に見えない)
- * - 成立後(profile・icon・message): left_atのない参加者が、自分以外のメンバー1人を通報する。
+ * - 成立後(profile・icon・message): 成立後の参加者だった人(抜けた後も含む)が、自分以外のメンバー1人を通報する。
  *   対象のLATCHはmatched・completed・matched経由のcancelled。messageは被通報者の発言であること
  * - 同じ通報の再送は統合する(open行があればreason・note・created_atを上書き)。resolved後は新しい行
  * - 通報は被通報者の画面・LATCHの状態に影響しない。noteと被通報者はログに出さない(docs/08 §6)
@@ -142,20 +142,8 @@ export const createReport = async (
 		return { ok: true };
 	}
 
-	// 成立後: 本人はleft_atなしの参加者、LATCHは成立後の状態
-	const [self] = await db
-		.select({ leftAt: latchMembers.leftAt })
-		.from(latchMembers)
-		.where(
-			and(
-				eq(latchMembers.latchId, input.latch_id),
-				eq(latchMembers.userId, reporterId),
-			),
-		)
-		.limit(1);
-	if (self === undefined || self.leftAt !== null) {
-		return { ok: false, reason: "not_found" };
-	}
+	// 成立後: 本人は成立後の参加者だった人(left_atを問わない・冒頭の照会で参加を確認済み)、
+	// LATCHは成立後の状態。ブロックや離脱で抜けた後にも通報できる(2026-10-21オーナー裁定・docs/08 §8)
 	const afterMatch =
 		latch.status === "matched" ||
 		latch.status === "completed" ||
