@@ -329,3 +329,51 @@ export const nextFrame = async (
 	);
 	return found as ChatFrame;
 };
+
+/** GET /v1/dev/notificationsの1項目(F7b設計 §6.1) */
+export interface DevNotification {
+	id: string;
+	type: string;
+	latch_id: string | null;
+	intent_id: string | null;
+	push_state: string;
+	push_attempted_at: string | null;
+	read_at: string | null;
+	created_at: string;
+}
+
+/** 本人の通知とPush送出状態を観測APIで取得する(id降順) */
+export const listDevNotifications = async (
+	request: APIRequestContext,
+	accessToken: string,
+): Promise<DevNotification[]> => {
+	const res = await request.get("/v1/dev/notifications", {
+		headers: bearer(accessToken),
+	});
+	expect(res.status(), "GET /v1/dev/notifications").toBe(200);
+	const body = (await res.json()) as { notifications: DevNotification[] };
+	return body.notifications;
+};
+
+/**
+ * Web Push購読を登録する(POST /v1/push-subscriptions・201か200を保証)。
+ * 鍵はRFC 8291 §5のUA公開鍵とauth secret(許可リスト内のendpointを渡す)
+ */
+export const subscribePush = async (
+	request: APIRequestContext,
+	accessToken: string,
+	endpoint: string,
+): Promise<void> => {
+	const res = await request.post("/v1/push-subscriptions", {
+		data: {
+			endpoint,
+			keys: {
+				p256dh:
+					"BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+				auth: "BTBZMqHH6r4Tts7J_aSIgg",
+			},
+		},
+		headers: bearer(accessToken),
+	});
+	expect([200, 201], "POST /v1/push-subscriptions").toContain(res.status());
+};

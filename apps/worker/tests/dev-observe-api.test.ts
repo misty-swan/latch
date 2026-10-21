@@ -26,6 +26,7 @@ import {
 	latches,
 	matchCandidates,
 	matchEvents,
+	notifications,
 	proposalHistory,
 	reports,
 } from "../src/db/schema";
@@ -864,6 +865,66 @@ describe("GET /v1/dev/reports", () => {
 
 	it("存在隠し: production相当では404", async () => {
 		const res = await getFromDevRoutes("/reports", { LATCH_ENV: "production" });
+		expect(res.status).toBe(404);
+	});
+});
+
+describe("GET /v1/dev/notifications", () => {
+	it("本人の通知だけをid降順で返す(push_stateを含む)", async () => {
+		const a = await registerAccount("devnot-a");
+		const b = await registerAccount("devnot-b");
+		const t0 = Date.now();
+		const mk = (
+			userId: string,
+			i: number,
+			pushState: "pending" | "sent" | "none",
+		) => ({
+			id: nextUlid(),
+			userId,
+			type: "proposal" as const,
+			latchId: nextUlid(),
+			intentId: null,
+			readAt: null,
+			createdAt: new Date(t0 + i * 1000),
+			pushState,
+			pushAttemptedAt: pushState === "sent" ? new Date(t0) : null,
+		});
+		const rows = [
+			mk(a.id, 0, "sent"),
+			mk(a.id, 1, "pending"),
+			mk(b.id, 2, "none"),
+		];
+		await db.insert(notifications).values(rows);
+		const res = await getReq("/v1/dev/notifications", a.token);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			notifications: Array<{ id: string; push_state: string }>;
+		};
+		expect(body.notifications.map((n) => n.id)).toEqual(
+			[rows[1]?.id, rows[0]?.id].sort().reverse(),
+		);
+		expect(body.notifications.map((n) => n.push_state).sort()).toEqual([
+			"pending",
+			"sent",
+		]);
+		expect(Object.keys(body.notifications[0] as object).sort()).toEqual(
+			[
+				"created_at",
+				"id",
+				"intent_id",
+				"latch_id",
+				"push_attempted_at",
+				"push_state",
+				"read_at",
+				"type",
+			].sort(),
+		);
+	});
+
+	it("存在隠し: production相当では404", async () => {
+		const res = await getFromDevRoutes("/notifications", {
+			LATCH_ENV: "production",
+		});
 		expect(res.status).toBe(404);
 	});
 });

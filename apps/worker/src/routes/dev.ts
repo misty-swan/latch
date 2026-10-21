@@ -10,6 +10,7 @@
  *   intents一覧と同じcursor方式(limit=1..50既定20・docs/05 §3.1)。所有者に限定しない
  *   (成立候補は2ユーザーのIntentで構成されるため・E2Eユーザーが証拠を読む経路)。
  *   応答はテーブル列の範囲のみ(raw_text等は含まれない)
+ * - GET /v1/dev/notifications: F7b(Task 8)。本人のアプリ内通知とPush送出状態の観測(id降順)
  * - GET /v1/dev/reports: F7a(Task 4)。本人が出した通報の観測(reporter=本人の行・created_at降順)
  * - GET /v1/dev/latches・GET /v1/dev/proposal-history・POST /v1/dev/latches/:id/backdate:
  *   F4a(Task 17)。提案・履歴の観測と、期限経過をE2Eが時計操作なしで作る書き換え口
@@ -41,6 +42,7 @@ import {
 	latches,
 	matchCandidates,
 	matchEvents,
+	notifications,
 	proposalHistory,
 	reports,
 } from "../db/schema";
@@ -582,3 +584,39 @@ devRoutes.get("/reports", hideWhenDisabled, requireRegistered, async (c) => {
 		200,
 	);
 });
+
+/**
+ * GET /v1/dev/notifications(F7b設計 §6.1)。本人の通知を全件id降順で返す
+ * (push_state・push_attempted_atまで含む観測用。本人以外の行は返さない)
+ */
+devRoutes.get(
+	"/notifications",
+	hideWhenDisabled,
+	requireRegistered,
+	async (c) => {
+		const sub = c.var.auth.sub;
+		if (sub === undefined) {
+			return notFound(c);
+		}
+		const rows = await dbOf(c.env)
+			.select()
+			.from(notifications)
+			.where(eq(notifications.userId, sub))
+			.orderBy(desc(notifications.id));
+		return c.json(
+			{
+				notifications: rows.map((r) => ({
+					id: r.id,
+					type: r.type,
+					latch_id: r.latchId,
+					intent_id: r.intentId,
+					push_state: r.pushState,
+					push_attempted_at: r.pushAttemptedAt?.toISOString() ?? null,
+					read_at: r.readAt?.toISOString() ?? null,
+					created_at: r.createdAt.toISOString(),
+				})),
+			},
+			200,
+		);
+	},
+);
