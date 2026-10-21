@@ -184,4 +184,35 @@ describe("authSession.logout", () => {
 		expect(authSession.accessToken).toBeNull();
 		expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
 	});
+
+	it("401ならリフレッシュして回転後のトークンで1回再試行し・clearまで進む", async () => {
+		authSession.setTokens("access-old", "refresh-1");
+		fetchMock
+			.mockResolvedValueOnce(new Response(null, { status: 401 }))
+			.mockResolvedValueOnce(
+				jsonResponse(200, {
+					access_token: "access-new",
+					refresh_token: "refresh-2",
+					expires_in: 900,
+				}),
+			)
+			.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+		await authSession.logout();
+
+		expect(fetchMock.mock.calls.map(([u]) => String(u))).toEqual([
+			"/v1/auth/logout",
+			"/v1/auth/refresh",
+			"/v1/auth/logout",
+		]);
+		const retry = fetchMock.mock.calls[2][1];
+		expect(new Headers(retry.headers).get("Authorization")).toBe(
+			"Bearer access-new",
+		);
+		expect(JSON.parse(String(retry.body))).toEqual({
+			refresh_token: "refresh-2",
+		});
+		expect(authSession.accessToken).toBeNull();
+		expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
+	});
 });

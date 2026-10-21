@@ -115,17 +115,31 @@ export const authSession = {
 			// 後始末の失敗でログアウトを止めない
 		}
 		try {
-			const stored = readStoredRefreshToken();
-			await fetch(LOGOUT_ENDPOINT, {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					...(accessToken === null
-						? {}
-						: { Authorization: `Bearer ${accessToken}` }),
-				},
-				body: JSON.stringify(stored === null ? {} : { refresh_token: stored }),
-			});
+			const send = (): Promise<Response> => {
+				const stored = readStoredRefreshToken();
+				return fetch(LOGOUT_ENDPOINT, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						...(accessToken === null
+							? {}
+							: { Authorization: `Bearer ${accessToken}` }),
+					},
+					body: JSON.stringify(
+						stored === null ? {} : { refresh_token: stored },
+					),
+				});
+			};
+			// アクセストークンが無い・切れている(401)ときは1回だけリフレッシュして再試行する
+			// (サーバーのlogoutは認証が必要で・失敗するとリフレッシュトークンが生き残るため)。
+			// リフレッシュで回転するので・再試行時の本文は回転後の保存値から作り直す
+			if (accessToken === null && readStoredRefreshToken() !== null) {
+				await refreshTokens();
+			}
+			const response = await send();
+			if (response.status === 401 && (await refreshTokens())) {
+				await send();
+			}
 		} catch {
 			// 通信失敗でも端末側の破棄は行う
 		}
