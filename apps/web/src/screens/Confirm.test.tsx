@@ -747,6 +747,53 @@ describe("Confirm(サーバーエラーの表示)", () => {
 	});
 });
 
+describe("Confirm(お酒と年齢・F7c設計 §1.9)", () => {
+	it("422 ALCOHOL_RESTRICTEDでボードどおりの案内を出して預けるを止め・お酒をオフにすると押せる", async () => {
+		saveComposeState({ raw_text: WORDS, draft_id: null, parse: occasionParse });
+		saveResponse = jsonResponse(422, {
+			error: {
+				code: "ALCOHOL_RESTRICTED",
+				message: "お酒を含む機会は20歳以上のみ",
+				details: {},
+			},
+		});
+		const router = setup();
+
+		fireEvent.click(screen.getByRole("button", { name: "預ける" }));
+
+		// 行の下の注記と足元の注記の2か所に出る(ボードAlcoholRestricted)
+		await waitFor(() => {
+			expect(
+				screen.getAllByText("お酒を含む機会は、20歳以上の方が預けられます。"),
+			).toHaveLength(2);
+		});
+		expect(document.body.textContent).toContain(
+			"「お酒」をオフにすると、このまま預けられます。",
+		);
+		// 汎用のエラー行は出さない
+		expect(document.body.textContent).not.toContain("ALCOHOL_RESTRICTED");
+		const place = screen.getByRole("button", { name: "預ける" });
+		expect((place as HTMLButtonElement).disabled).toBe(true);
+		expect(router.state.location.pathname).toBe(PATHS.confirm);
+
+		fireEvent.click(screen.getByLabelText("お酒を含む"));
+
+		expect(
+			screen.queryAllByText("お酒を含む機会は、20歳以上の方が預けられます。"),
+		).toHaveLength(0);
+		expect(
+			(screen.getByRole("button", { name: "預ける" }) as HTMLButtonElement)
+				.disabled,
+		).toBe(false);
+
+		saveResponse = jsonResponse(201, createdIntent);
+		fireEvent.click(screen.getByRole("button", { name: "預ける" }));
+		await waitFor(() => {
+			expect(router.state.location.pathname).toBe(PATHS.placed);
+		});
+	});
+});
+
 describe("Confirm(導線)", () => {
 	it("文章を直すでcomposeへ戻り・文章が保持されている", async () => {
 		saveComposeState({

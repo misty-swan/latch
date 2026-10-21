@@ -1,0 +1,28 @@
+/* 規約ページの補足。latch.cssに無い分だけ(latch.cssは編集しない) */
+.legal__body {
+	padding-top: 4px;
+	padding-bottom: 40px;
+}
+.legal__mark {
+	margin-top: 16px;
+}
+.legal__section {
+	margin-top: 28px;
+}
+.legal__section p,
+.legal__section ul {
+	margin: 8px 0 0;
+	font-size: 14.5px;
+	line-height: 1.85;
+	color: var(--ink-2);
+}
+.legal__section ul {
+	padding-left: 1.3em;
+}
+.legal__section li + li {
+	margin-top: 4px;
+}
+.legal__section b {
+	color: var(--ink);
+	font-weight: 500;
+}

@@ -7,6 +7,9 @@
  *   status:"active"にする。クライアントはversionを送らない(楽観ロックはサーバー側の判定・docs/05 §3.3)
  * - 422 ACTIVE_INTENT_LIMITはボードLimitReached.dc.htmlどおりのシートを出し・
  *   内容を下書きに残せる。400 VALIDATION_FAILEDはreasonsを人間向けに表示する
+ * - 422 ALCOHOL_RESTRICTED(満20歳未満・年齢を確かめられない・08 §8)はボード
+ *   AlcoholRestricted.dc.htmlどおりお酒の行の下と足元に案内を出し、お酒がオンのあいだ
+ *   預けるを止める。年齢は画面で計算しない(判定の正はサーバー・F7c設計 §1.9)
  * - 地域はF2'では「指定なし(全国)」固定(地名データはF3で取り込み)
  * ボードに無い行内の編集UI(主題・日時・予算・人数の入力)とエラー領域は実装の裁量
  */
@@ -87,6 +90,19 @@ const CloseIcon = () => (
 	</svg>
 );
 
+/** 案内の印(ボードAlcoholRestrictedの丸いi) */
+const InfoIcon = ({ small = false }: { small?: boolean }) => (
+	<svg
+		className={small ? "ic ic--xs" : "ic"}
+		viewBox="0 0 24 24"
+		aria-hidden="true"
+	>
+		<circle cx="12" cy="12" r="8.5" />
+		<path d="M12 11v5.2" />
+		<circle cx="12" cy="7.9" r=".9" fill="currentColor" stroke="none" />
+	</svg>
+);
+
 /** 人数の表示。同一なら「2人(あなたと相手)」・幅なら「2〜4人」(ボードどおり) */
 const formatParticipants = (participants: {
 	min: number;
@@ -121,6 +137,8 @@ export function Confirm() {
 	const [busy, setBusy] = useState(false);
 	const [errorMessages, setErrorMessages] = useState<string[]>([]);
 	const [limitSheet, setLimitSheet] = useState(false);
+	// 422 ALCOHOL_RESTRICTEDを受けた印。お酒をオフにすると下ろす
+	const [alcoholRestricted, setAlcoholRestricted] = useState(false);
 	const [editing, setEditing] = useState<EditingField | null>(null);
 	const [topicDraft, setTopicDraft] = useState("");
 	const [budgetDraft, setBudgetDraft] = useState("");
@@ -263,6 +281,11 @@ export function Confirm() {
 				if (cause.code === "ACTIVE_INTENT_LIMIT") {
 					// 上限(5件)に当たった。ボードLimitReached.dc.htmlどおりのシートを出す
 					setLimitSheet(true);
+					return;
+				}
+				if (cause.code === "ALCOHOL_RESTRICTED") {
+					// 汎用のエラー行は出さず・ボードAlcoholRestrictedどおりの案内に替える
+					setAlcoholRestricted(true);
 					return;
 				}
 				setErrorMessages(messagesFromApiError(cause));
@@ -602,12 +625,21 @@ export function Confirm() {
 					type="checkbox"
 					aria-label="お酒を含む"
 					checked={alcoholInvolved}
-					onChange={(event) => setAlcoholInvolved(event.target.checked)}
+					onChange={(event) => {
+						setAlcoholInvolved(event.target.checked);
+						if (!event.target.checked) {
+							setAlcoholRestricted(false);
+						}
+					}}
 				/>
 				<span />
 			</div>
 		</div>
 	);
+
+	// お酒を含む機会のままでは預けられない状態(つながりへ切り替えた場合はお酒を送らないため解除)
+	const alcoholBlocked =
+		alcoholRestricted && form === "occasion" && alcoholInvolved;
 
 	return (
 		<div className="screen confirm">
@@ -699,6 +731,15 @@ export function Confirm() {
 						{form === "occasion" && budgetRow}
 						{form === "occasion" && alcoholRow}
 					</dl>
+					{alcoholBlocked && (
+						<p className="note note--lamp" style={{ marginTop: 14 }}>
+							<InfoIcon />
+							<span>
+								<b>お酒を含む機会は、20歳以上の方が預けられます。</b>
+								「お酒」をオフにすると、このまま預けられます。
+							</span>
+						</p>
+					)}
 				</section>
 				{form === "connection" ? (
 					<section style={{ marginTop: 30 }}>
@@ -762,11 +803,17 @@ export function Confirm() {
 						{message}
 					</p>
 				))}
+				{alcoholBlocked && (
+					<p className="foot-reason">
+						<InfoIcon small />
+						お酒を含む機会は、20歳以上の方が預けられます。
+					</p>
+				)}
 				<button
 					type="button"
 					className="btn btn--primary btn--block"
 					onClick={() => void onPlace()}
-					disabled={busy}
+					disabled={busy || alcoholBlocked}
 				>
 					預ける
 				</button>

@@ -167,13 +167,13 @@ export function SignIn() {
 			<div className="screen__foot">
 				<p className="t-caption">
 					LATCHは18歳以上の方がご利用いただけます。続けると、
-					<a className="link" href="#terms">
+					<Link className="link" to={PATHS.terms}>
 						利用規約
-					</a>
+					</Link>
 					と
-					<a className="link" href="#privacy">
+					<Link className="link" to={PATHS.privacy}>
 						プライバシーポリシー
-					</a>
+					</Link>
 					に同意したことになります。
 				</p>
 			</div>

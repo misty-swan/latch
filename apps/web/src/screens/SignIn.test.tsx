@@ -38,10 +38,14 @@ describe("SignIn", () => {
 				exact: false,
 			}),
 		).toBeTruthy();
-		expect(screen.getByRole("link", { name: "利用規約" })).toBeTruthy();
 		expect(
-			screen.getByRole("link", { name: "プライバシーポリシー" }),
-		).toBeTruthy();
+			screen.getByRole("link", { name: "利用規約" }).getAttribute("href"),
+		).toBe(PATHS.terms);
+		expect(
+			screen
+				.getByRole("link", { name: "プライバシーポリシー" })
+				.getAttribute("href"),
+		).toBe(PATHS.privacy);
 
 		fireEvent.click(screen.getByRole("button", { name: "Googleで続ける" }));
 		fireEvent.click(screen.getByRole("button", { name: "Appleで続ける" }));

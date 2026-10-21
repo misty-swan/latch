@@ -1,6 +1,6 @@
 /**
  * ルーティング(docs/04 §3.2: React Router library mode)。
- * - welcome/intro/signinは未認証で見られる画面・それ以外はRequireAuthで保護する
+ * - welcome/intro/signin・規約ページ(terms/privacy)は未認証で見られる画面・それ以外はRequireAuthで保護する
  *   (未認証のまま入った場合はwelcomeへ送り返す)
  * ルート定義はappRoutesとして出し・単体試験はcreateMemoryRouter(appRoutes)で使う
  */
@@ -17,6 +17,8 @@ import { Home } from "./screens/Home";
 import { Intro } from "./screens/Intro";
 import { LatchScreen } from "./screens/latch/LatchScreen";
 import { ShelvedScreen } from "./screens/latch/ShelvedScreen";
+import { Privacy } from "./screens/legal/Privacy";
+import { Terms } from "./screens/legal/Terms";
 import { Blocked } from "./screens/me/Blocked";
 import { Me } from "./screens/me/Me";
 import { Profile } from "./screens/me/Profile";
@@ -35,6 +37,9 @@ export const appRoutes = [
 	{ path: PATHS.welcome, element: <Welcome /> },
 	{ path: PATHS.intro, element: <Intro /> },
 	{ path: PATHS.signin, element: <SignIn /> },
+	// 規約ページはサインイン前から開ける(F7c設計 §1.1)
+	{ path: PATHS.terms, element: <Terms /> },
+	{ path: PATHS.privacy, element: <Privacy /> },
 	{
 		path: PATHS.register,
 		element: (
