@@ -1,6 +1,6 @@
 /** 自分のユーザー情報の取得(TanStack Query)。docs/05 §2.5(GET /v1/users/me) */
 
-import { LIMITS, type UserDTO } from "@latch/shared";
+import { type BlockDTO, LIMITS, type UserDTO } from "@latch/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../api/client";
 
@@ -62,4 +62,25 @@ export const validateIconFile = (
 	if (!ICON_TYPES.has(file.type)) return "bad_type";
 	if (file.size > LIMITS.ICON_MAX_BYTES) return "too_large";
 	return null;
+};
+
+export const BLOCKS_QUERY_KEY = ["blocks"] as const;
+
+/** ブロックしている相手の一覧(GET /v1/blocks) */
+export const useBlocksQuery = () =>
+	useQuery({
+		queryKey: BLOCKS_QUERY_KEY,
+		queryFn: async () =>
+			(await apiFetch<{ blocks: BlockDTO[] }>("/blocks")).blocks,
+	});
+
+/** ブロックの解除(DELETE /v1/users/{user_id}/block)。成功で一覧を取り直す */
+export const useUnblock = () => {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (userId: string) =>
+			apiFetch<void>(`/users/${userId}/block`, { method: "DELETE" }),
+		onSuccess: () =>
+			queryClient.invalidateQueries({ queryKey: BLOCKS_QUERY_KEY }),
+	});
 };
