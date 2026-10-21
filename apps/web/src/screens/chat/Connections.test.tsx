@@ -4,7 +4,7 @@
  */
 
 import type { LatchDTO } from "@latch/shared";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
 	cleanup,
 	fireEvent,
@@ -16,8 +16,10 @@ import {
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../../auth/session";
+import { CONNECTIONS_QUERY_KEY } from "../../chat/queries";
 import { appRoutes } from "../../router";
 import { createTestQueryClient } from "../../test/helpers";
+import { restoreOnline, setOnline } from "../../test/offline";
 
 const latchOf = (over: Partial<LatchDTO> = {}): LatchDTO => ({
 	id: "L1",
@@ -62,12 +64,12 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 	throw new Error(`想定外のfetch: ${url}`);
 });
 
-const open = (state?: unknown) => {
+const open = (state?: unknown, client = createTestQueryClient()) => {
 	const router = createMemoryRouter(appRoutes, {
 		initialEntries: [{ pathname: "/connections", state }],
 	});
 	render(
-		<QueryClientProvider client={createTestQueryClient()}>
+		<QueryClientProvider client={client}>
 			<RouterProvider router={router} />
 		</QueryClientProvider>,
 	);
@@ -79,6 +81,7 @@ beforeEach(() => {
 	authSession.setTokens("access-conn", null);
 });
 afterEach(() => {
+	restoreOnline();
 	cleanup();
 	vi.unstubAllGlobals();
 	authSession.clear();
@@ -185,5 +188,48 @@ describe("Connections", () => {
 			).toBe(true),
 		);
 		expect(screen.queryByRole("button", { name: "さらに表示" })).toBeNull();
+	});
+});
+
+describe("Connections(オフラインの帯)", () => {
+	const BANNER = "オフラインです。最後に確かめた内容を表示しています。";
+
+	it("オフライン中は帯を出す", async () => {
+		pages = { "": { items: [latchOf()], next_cursor: null } };
+		setOnline(false);
+		open();
+		expect(await screen.findByText(BANNER)).toBeTruthy();
+	});
+
+	it("オンラインなら帯を出さない", async () => {
+		pages = { "": { items: [latchOf()], next_cursor: null } };
+		open();
+		await screen.findByRole("heading", { name: "つながっている" });
+		expect(screen.queryByText(BANNER)).toBeNull();
+	});
+
+	it("再取得がTypeErrorで失敗し、データがあるときは帯と一覧を出す", async () => {
+		const client = new QueryClient({
+			defaultOptions: { queries: { retry: false, staleTime: 0 } },
+		});
+		client.setQueryData(CONNECTIONS_QUERY_KEY, {
+			pages: [{ items: [latchOf()], next_cursor: null }],
+			pageParams: [undefined],
+		});
+		fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.startsWith("/v1/latches?type=matched")) {
+				throw new TypeError("network");
+			}
+			if (url.startsWith("/v1/notifications")) {
+				return json({ items: [], next_cursor: null, unread_count: 0 });
+			}
+			return json({ id: "u1", has_icon: false });
+		});
+		open(undefined, client);
+		expect(await screen.findByText(BANNER)).toBeTruthy();
+		expect(
+			screen.getByRole("heading", { name: "つながっている" }),
+		).toBeTruthy();
 	});
 });

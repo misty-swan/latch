@@ -417,16 +417,26 @@ describe("LatchScreen", () => {
 		);
 	});
 
-	it("通信失敗では送れませんでしたと知らせる", async () => {
-		postResponse = () => {
-			throw new TypeError("network");
-		};
+	it("サーバーの失敗では送れませんでしたと知らせる", async () => {
+		postResponse = () =>
+			jsonResponse(500, { error: { code: "INTERNAL", message: "x" } });
 		setup();
 		fireEvent.click(await screen.findByRole("button", { name: "参加する" }));
 		expect(
 			await screen.findByText("送れませんでした。もう一度お試しください。"),
 		).toBeTruthy();
 		expect(getCalls()).toBe(2);
+	});
+
+	it("オフラインの失敗ではオフラインの案内を出す", async () => {
+		postResponse = () => {
+			throw new TypeError("network");
+		};
+		setup();
+		fireEvent.click(await screen.findByRole("button", { name: "参加する" }));
+		expect(
+			await screen.findByText("オフラインのため、いまは操作できません。"),
+		).toBeTruthy();
 	});
 
 	it("回答待ちは30秒ごとに取り直し、matchedへ切り替わる", async () => {

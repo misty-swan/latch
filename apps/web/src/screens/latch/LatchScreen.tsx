@@ -15,6 +15,7 @@ import {
 	useRespondMutation,
 	useRetractMutation,
 } from "../../latches/queries";
+import { isOfflineError, OFFLINE_MESSAGES } from "../../offline/errors";
 import { chatPath, latchShelvedPath, PATHS } from "../../routes/paths";
 import { ScreenGrain } from "../shared";
 import { Awaiting } from "./Awaiting";
@@ -66,6 +67,7 @@ const isNotFound = (error: unknown): boolean =>
 
 /** 送信失敗の一文。締め切られた提案か・それ以外(通信失敗等)かで分ける */
 const noticeFor = (error: unknown): string => {
+	if (isOfflineError(error)) return OFFLINE_MESSAGES.generic;
 	const reasons = error instanceof ApiError ? error.details.reasons : undefined;
 	if (
 		Array.isArray(reasons) &&

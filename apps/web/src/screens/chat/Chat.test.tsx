@@ -393,6 +393,18 @@ describe("Chat の送信・受信・既読", () => {
 		expect(document.querySelector(".msg.is-failed")).not.toBeNull();
 	});
 
+	it("通信失敗(TypeError)ではオフラインのトーストと[もう一度送る]を出す", async () => {
+		withPost(() => {
+			throw new TypeError("Failed to fetch");
+		});
+		open();
+		await type("届かない");
+		expect(
+			await screen.findByText("オフラインのため、送れませんでした。"),
+		).toBeTruthy();
+		expect(screen.getByRole("button", { name: "もう一度送る" })).toBeTruthy();
+	});
+
 	it("400 read_onlyは失敗表示を出さずLATCHを取り直す", async () => {
 		withPost(() =>
 			json(

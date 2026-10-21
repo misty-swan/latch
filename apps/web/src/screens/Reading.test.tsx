@@ -147,14 +147,29 @@ describe("Reading", () => {
 		expect(readComposeState()).toBeNull();
 	});
 
-	it("通信エラーでもparse-failedへ遷移する", async () => {
-		fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+	it("サーバーの失敗(500)でもparse-failedへ遷移する", async () => {
+		parseApiResponse = jsonResponse(500, {
+			error: { code: "INTERNAL", message: "x", details: {} },
+		});
 		savePendingCompose({ raw_text: WORDS, draft_id: null });
 		const router = setup();
 
 		await waitFor(() => {
 			expect(router.state.location.pathname).toBe(PATHS.parseFailed);
 		});
+	});
+
+	it("オフラインの失敗ではparse-failedへ行かず、トースト付きでcomposeへ戻る", async () => {
+		fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+		savePendingCompose({ raw_text: WORDS, draft_id: null });
+		const router = setup();
+
+		await waitFor(() => {
+			expect(router.state.location.pathname).toBe(PATHS.compose);
+		});
+		expect(
+			await screen.findByText("オフラインのため、いまは読み解けません。"),
+		).toBeTruthy();
 	});
 
 	it("入力が無い直アクセスではcomposeへ送り返す(parseも呼ばない)", async () => {

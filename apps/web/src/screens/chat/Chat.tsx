@@ -29,6 +29,7 @@ import { openChatSocket } from "../../chat/socket";
 import { formatMatchedAt } from "../../latches/format";
 import { latchQueryKey, useLatchQuery } from "../../latches/queries";
 import { useMeQuery } from "../../me/queries";
+import { isOfflineError, OFFLINE_MESSAGES } from "../../offline/errors";
 import { latchPath, PATHS, reportPath } from "../../routes/paths";
 import { Avatar, LatchArt } from "../latch/art";
 import { LatchLoadFailed } from "../latch/LatchScreen";
@@ -301,6 +302,7 @@ function ChatView({
 					void client.invalidateQueries({ queryKey: latchQueryKey(latch.id) });
 				} else {
 					setState(clientId, "failed");
+					if (isOfflineError(error)) setToast(OFFLINE_MESSAGES.send);
 				}
 			},
 		);

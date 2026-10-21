@@ -39,6 +39,7 @@ import {
 	REASON_MESSAGES,
 	validateConfirmValues,
 } from "../intents/submit";
+import { isOfflineError, OFFLINE_MESSAGES } from "../offline/errors";
 import { PATHS } from "../routes/paths";
 import { ScreenGrain } from "./shared";
 
@@ -188,6 +189,8 @@ export function Confirm() {
 					return;
 				}
 				setErrorMessages(messagesFromApiError(cause));
+			} else if (isOfflineError(cause)) {
+				setErrorMessages([OFFLINE_MESSAGES.generic]);
 			} else {
 				setErrorMessages(["預けられませんでした。もう一度お試しください"]);
 			}

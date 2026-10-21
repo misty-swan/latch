@@ -16,6 +16,9 @@ import { Link } from "react-router";
 import { INTENT_STATUS_LABELS, useIntentsQuery } from "../intents/queries";
 import { formatWhen } from "../latches/format";
 import { useProposalsQuery } from "../latches/queries";
+import { isOfflineError } from "../offline/errors";
+import { OfflineBanner } from "../offline/OfflineBanner";
+import { useOnline } from "../offline/online";
 import { usePushStatus } from "../push/subscription";
 import { intentPath, latchPath, PATHS } from "../routes/paths";
 import { LatchArt } from "./latch/art";
@@ -325,7 +328,10 @@ function PushOffBanner() {
 
 export function Home() {
 	const toast = useRouteToast();
-	const { data, isPending, isError, refetch } = useIntentsQuery();
+	const { data, isPending, isRefetchError, error, refetch } = useIntentsQuery();
+	const online = useOnline();
+	// オフライン中・または再取得が通信失敗で、保存済みの一覧を見せているとき
+	const offline = !online || (isRefetchError && isOfflineError(error));
 	const pushDenied = usePushStatus().data === "denied";
 	// 提案の取得中・失敗は空として扱い・意思の一覧だけを出す
 	const proposals = useProposalsQuery().data?.items ?? [];
@@ -354,7 +360,7 @@ export function Home() {
 		);
 	}
 
-	if (isError || data === undefined) {
+	if (data === undefined) {
 		return (
 			<div className="screen home">
 				<ScreenGrain />
@@ -459,7 +465,8 @@ export function Home() {
 							: `いま、${activeCount}つの意思を預けています。`}
 					</p>
 				</div>
-				{pushDenied && <PushOffBanner />}
+				{offline && <OfflineBanner />}
+				{pushDenied && !offline && <PushOffBanner />}
 				{proposals.map((latch) => (
 					<ArrivalCard key={latch.id} latch={latch} now={now} />
 				))}

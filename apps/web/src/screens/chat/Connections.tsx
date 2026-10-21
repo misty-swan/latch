@@ -13,6 +13,9 @@ import {
 	isEndedConnection,
 } from "../../chat/format";
 import { useConnectionsQuery } from "../../chat/queries";
+import { isOfflineError } from "../../offline/errors";
+import { OfflineBanner } from "../../offline/OfflineBanner";
+import { useOnline } from "../../offline/online";
 import { chatPath, PATHS } from "../../routes/paths";
 import { Avatar, LatchArt } from "../latch/art";
 import { RouteToast, useRouteToast } from "../RouteToast";
@@ -129,14 +132,18 @@ export function Connections() {
 		data,
 		isPending,
 		isError,
+		isRefetchError,
+		error,
 		refetch,
 		hasNextPage,
 		fetchNextPage,
 		isFetchingNextPage,
 	} = useConnectionsQuery();
+	const online = useOnline();
+	const offline = !online || (isRefetchError && isOfflineError(error));
 	const now = new Date();
 
-	if (isPending || isError || data === undefined) {
+	if (isPending || data === undefined) {
 		return (
 			<div className="screen connections">
 				<ScreenGrain />
@@ -215,6 +222,11 @@ export function Connections() {
 						お互いが参加して、つながった相手です。
 					</p>
 				</div>
+				{offline && (
+					<div className="pad">
+						<OfflineBanner />
+					</div>
+				)}
 				{active.length > 0 ? (
 					<>
 						<h2 className="list__head t-label">つながっている</h2>

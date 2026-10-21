@@ -25,6 +25,7 @@ import {
 	savePendingCompose,
 } from "../intents/composeState";
 import { PATHS } from "../routes/paths";
+import { RouteToast, useRouteToast } from "./RouteToast";
 import { ScreenGrain } from "./shared";
 
 /** カウンタがis-near(注意色)になる残り字数(DSComponents.dc.html: 285/300がis-near) */
@@ -32,6 +33,7 @@ const NEAR_REMAINING = 15;
 
 export function Compose() {
 	const navigate = useNavigate();
+	const toast = useRouteToast();
 	const [searchParams] = useSearchParams();
 	const draftParam = searchParams.get("draft");
 
@@ -134,6 +136,7 @@ export function Compose() {
 	return (
 		<div className="screen compose-screen">
 			<ScreenGrain />
+			<RouteToast text={toast} />
 			<header className="topbar">
 				<div className="topbar__side">
 					<Link className="icon-btn" to={PATHS.home} aria-label="閉じる">

@@ -3,7 +3,7 @@
  * - Composeが置いた入力(composeState・sessionStorage経由)をPOST /v1/intents/parseへかける
  *   (画面遷移してからparseする=ボードの画面フローどおり)
  * - 成功→parse結果をcomposeStateへ保存してconfirmへ。
- *   失敗(422 PARSE_FAILED・通信断・その他のエラー)→parse-failedへ遷移する
+ *   失敗(422 PARSE_FAILED・その他のエラー)→parse-failedへ遷移する(通信断はcomposeへ戻して案内する)
  *   (遷移先の画面自体はTask 5で組む)
  * - parse済みの状態では再parseせずconfirmへ・入力が無い直アクセスではcomposeへ送り返す
  *   (確認画面がリロード・直アクセスで壊れないようにする: F2'計画Review Focus #3)
@@ -18,6 +18,7 @@ import {
 	readPendingCompose,
 	saveComposeState,
 } from "../intents/composeState";
+import { isOfflineError, OFFLINE_MESSAGES } from "../offline/errors";
 import { PATHS } from "../routes/paths";
 import { ScreenGrain } from "./shared";
 
@@ -60,11 +61,20 @@ export function Reading() {
 				});
 				navigate(PATHS.confirm, { replace: true });
 			})
-			.catch(() => {
-				// 422 PARSE_FAILEDをはじめ読み解けなかった場合はparse-failedへ
-				if (!cancelled) {
-					navigate(PATHS.parseFailed, { replace: true });
+			.catch((error: unknown) => {
+				if (cancelled) {
+					return;
 				}
+				if (isOfflineError(error)) {
+					// 通信できない: 読み解けなかったわけではないので入力欄へ戻して案内する
+					navigate(PATHS.compose, {
+						replace: true,
+						state: { toast: OFFLINE_MESSAGES.parse },
+					});
+					return;
+				}
+				// 422 PARSE_FAILEDをはじめ読み解けなかった場合はparse-failedへ
+				navigate(PATHS.parseFailed, { replace: true });
 			});
 		return () => {
 			cancelled = true;

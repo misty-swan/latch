@@ -6,6 +6,7 @@
  */
 
 import type { IntentDTO, LatchDTO } from "@latch/shared";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
 	cleanup,
 	fireEvent,
@@ -20,6 +21,7 @@ import { browserPushEnv } from "../push/subscription";
 import { appRoutes } from "../router";
 import { PATHS } from "../routes/paths";
 import { withQueryClient } from "../test/helpers";
+import { restoreOnline, setOnline } from "../test/offline";
 
 const DAY_MS = 24 * 3_600_000;
 
@@ -197,6 +199,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	restoreOnline();
 	cleanup();
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
@@ -534,5 +537,56 @@ describe("Home", () => {
 		expect(await screen.findByText("取り下げました。")).toBeTruthy();
 		expect(screen.getByRole("status").textContent).toBe("取り下げました。");
 		await waitFor(() => expect(router.state.location.state).toBeNull());
+	});
+});
+
+describe("Home(オフラインの帯)", () => {
+	const BANNER = "オフラインです。最後に確かめた内容を表示しています。";
+
+	it("オフライン中は帯を出し、通知オフの帯は出さない(オフライン優先)", async () => {
+		vi.spyOn(browserPushEnv, "permission").mockReturnValue("denied");
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		setOnline(false);
+		setup();
+		expect(await screen.findByText(BANNER)).toBeTruthy();
+		expect(screen.queryByText(/通知がオフです/)).toBeNull();
+	});
+
+	it("オンラインなら帯を出さない", async () => {
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		setup();
+		await screen.findByText("いま、1つの意思を預けています。");
+		expect(screen.queryByText(BANNER)).toBeNull();
+	});
+
+	it("一覧の再取得がTypeErrorで失敗し、データがあるときは帯を出す", async () => {
+		const client = new QueryClient({
+			defaultOptions: { queries: { retry: false, staleTime: 0 } },
+		});
+		client.setQueryData(["intents"], {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		fetchMock.mockImplementation(async (input) => {
+			const url = String(input);
+			if (url === "/v1/intents?limit=50") throw new TypeError("network");
+			return jsonResponse(200, { items: [], next_cursor: null });
+		});
+		const router = createMemoryRouter(appRoutes, {
+			initialEntries: [PATHS.home],
+		});
+		render(
+			<QueryClientProvider client={client}>
+				<RouterProvider router={router} />
+			</QueryClientProvider>,
+		);
+		expect(await screen.findByText(BANNER)).toBeTruthy();
+		expect(screen.getByText(connectionIntent.raw_text)).toBeTruthy();
 	});
 });

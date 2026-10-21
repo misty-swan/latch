@@ -472,6 +472,22 @@ describe("Confirm(期限の選択)", () => {
 	});
 });
 
+describe("Confirm(オフライン)", () => {
+	it("預けるの通信失敗(TypeError)でオフラインの案内を出す", async () => {
+		saveComposeState({
+			raw_text: WORDS,
+			draft_id: null,
+			parse: connectionParse,
+		});
+		fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+		setup();
+		fireEvent.click(screen.getByRole("button", { name: "預ける" }));
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			"オフラインのため、いまは操作できません。",
+		);
+	});
+});
+
 describe("Confirm(預ける・保存)", () => {
 	it("つながりの新規保存はPOST /v1/intents(status=active・expires_in_days)で/placedへ進む", async () => {
 		saveComposeState({
