@@ -7,6 +7,7 @@
 import type { AuthProvider } from "@latch/shared";
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
+import { issueChatTicket } from "../chat/ticket";
 import { fixedClock } from "../clock/clock";
 import { newUlid } from "../ids";
 import {
@@ -202,5 +203,22 @@ describe("sub無し(登録前JWT・docs/04 §4: 登録フロー途中のトー�
 		expect(verified.sub).toBeUndefined();
 		expect(verified.idpProvider).toBeUndefined();
 		expect(verified.idpSubject).toBeUndefined();
+	});
+});
+
+describe("チケットの拒否(F6a設計 §3.5)", () => {
+	it("typクレームを持つWebSocketチケットはAccessTokenError(kind=invalid)", async () => {
+		const { ticket } = await issueChatTicket(SECRET, fixedClock(new Date()), {
+			userId: newUlid(),
+			latchId: newUlid(),
+		});
+		let caught: unknown;
+		try {
+			await verifyAccessToken(SECRET, ticket);
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).toBeInstanceOf(AccessTokenError);
+		expect((caught as AccessTokenError).kind).toBe("invalid");
 	});
 });

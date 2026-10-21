@@ -13,8 +13,8 @@ import type { Clock } from "../clock/clock";
 /** アクセストークンの有効期限(秒)。docs/04 §4: 独自JWT(有効期限1時間) */
 export const ACCESS_TOKEN_TTL_SECONDS = 3600;
 
-/** アクセストークンのJWT issuer(docs/04 §4: LATCHが発行する独自JWT) */
-const JWT_ISSUER = "latch";
+/** LATCHが発行するJWTのissuer(docs/04 §4: 独自JWT)。WebSocketチケットも共用する */
+export const JWT_ISSUER = "latch";
 
 /** アクセストークンのクレーム。idpProvider/idpSubjectはワイヤ上ではidp_provider/idp_subject(snake_case) */
 export interface AccessClaims {
@@ -103,6 +103,13 @@ export const verifyAccessToken = async (
 			kind === "expired"
 				? "TOKEN_EXPIRED: アクセストークンの有効期限が切れている(docs/05 §3.1)"
 				: "TOKEN_INVALID: アクセストークンが不正(docs/05 §3.1のUNAUTHORIZED)",
+		);
+	}
+	// typを持つトークン(WebSocketチケット等)はアクセストークンとして使わせない(F6a設計 §3.5)
+	if (payload.typ !== undefined) {
+		throw new AccessTokenError(
+			"invalid",
+			"TOKEN_INVALID: typクレームを持つトークンはアクセストークンではない(F6a設計 §3.5)",
 		);
 	}
 	if (typeof payload.jti !== "string") {
