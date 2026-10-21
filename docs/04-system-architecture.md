@@ -1,9 +1,9 @@
 # LATCH アーキテクチャ設計書
 
-- 文書バージョン: v0.20
+- 文書バージョン: v0.21
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.20更新: 2026-10-21)
+- 作成日: 2026-10-17(v0.21更新: 2026-10-21)
 - v0.2の変更点: §3を全面改訂し、スタックを「バックエンド・フロントエンドの構成部品」(DBアクセス・マイグレーション・入力検証・プッシュ実装・フォーム等)まで確定した。D-A-06(Biome)を解消し、D-A-07(スタイリング=03で確定)を新設した
 - v0.3の変更点: 07(LLM利用仕様書)の策定に伴いD-A-01(Embedding)を解消した(Workers AI bge-m3・1024次元・cosine)。R2(ユーザーアイコン)をスタックへ追加した
 - v0.4の変更点: 本書が単体で完結するよう記述を整理した(変更の経緯はgit履歴を参照)
@@ -23,7 +23,8 @@
 - v0.18の変更点: F7a(安全のAPI)の実装確定に伴い、§4の認証・セッションのKV失効リストの反映対象からブロックを外し、ブロックはトークンを失効させず進行中の提案の取り消しと続いているLATCHからの本人の離脱で即時に効かせる旨(05 §2.2・§3.3)に改めた。前提文書欄の版数を更新(F7aの完了とオーナー裁定(2026-10-21・01冒頭の決定記録・12 §2の決定記録)に伴う01・02改版への追従)
 - v0.19の変更点: F7b(通知のAPI)の実装確定に伴い、§4のWeb Pushへ送信の構成(書き込みの直後に同じWorker内でwaitUntilにより送り、送れていない行を毎分Cronで回収する・2026-10-21オーナー裁定)・送信の判断(mutedはWeb Pushだけを止める・01冒頭の決定記録)・順番取りの時刻と1回の送出の45秒の予算・順番取りの時刻を条件にした結果の記録・送信1件の10秒の時間制限とリダイレクトを追わないこと・送り手の差し替え口(LATCH_PUSH_MODE=stub/real)・VAPID鍵の設定と起動ガードを追記し、§4のCronへPushの回収走査と(c)の期限切れのアプリ内通知を、§3.1の表と§3.4へ実装状況を、§7の通知5秒以内へ構成の確定を加えた。前提文書欄の版数を更新
 - v0.20の変更点: F7c(安全と通知の画面)の実装確定に伴い、§4のWeb Pushへ画面側の構成(Service Workerはvite-plugin-pwaの自動生成(generateSW)にworkbox.importScriptsでプッシュ処理のpush-sw.jsを読み込ませる・タップでアプリ内通知の一覧(`/notices`)を開く・購読の解除はサーバーの行の削除(DELETE /v1/push-subscriptions)を先に行ってから端末の購読を外す)を追記し、§3.1の表と§3.4の実機ブラウザでの受信確認の工程をF8(02 #32)に改めた。前提文書欄の版数を更新
-- 前提文書: 01 要件定義書 v0.18 / 02 スコープ・受け入れ条件合意書 v0.12
+- v0.21の変更点: F8a(PWAと画面の仕上げ)の実装確定とオーナー合意(2026-10-21・01冒頭の決定記録(PWAと画面の仕上げ))に伴い、§3.2の表へオフライン保存の部品を加え、§3.2へオフライン表示の構成(`PersistQueryClientProvider`とIndexedDBの保存部品・4つのキー・7日・利用者IDの紐づけ・消去の契機・帯と案内の文)を、§4へService Workerの`navigateFallbackDenylist`(`/v1/`・`/healthz`)・APIの応答をService Workerで保存しないこと・ホーム画面追加のPNGアイコン・オフライン中のセッション(`authSession.offline`・接続の回復で復元)を追記した。§3.1の表と§3.4の実機検証の工程をF8a(02 #32・実機確認はオーナーの記録待ち)に改めた。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.19 / 02 スコープ・受け入れ条件合意書 v0.13
 - 本書の位置づけ: 01第19節の技術スタック選定を確定させる文書。UIの正本は`prototype/`(03は不作成)。スタイリング手法(D-A-07)はバニラCSS(グローバル)に確定済み(§3.2・決定記録(2026-10-19))
 
 **決定記録(2026-10-17・プロダクトオーナー)**
@@ -91,7 +92,7 @@
 | DBアクセス | Drizzle ORM(D1ドライバ) | D1公式対応(2026-10-17確認)。型安全なクエリビルダ |
 | マイグレーション | drizzle-kit(スキーマ差分からSQL生成)+ `wrangler d1 migrations apply`(適用) | 生成SQLをリポジトリ管理。適用は明示実行のみ |
 | 認証 | jose(JWT署名/検証・createRemoteJWKSet) | §4の認証設計に対応 |
-| Web Push送信 | 自前実装(VAPID署名=jose/WebCrypto・aes128gcm暗号化=WebCrypto・送信=fetch) | web-push公式ライブラリは参考実装とする(§3.4)。F7bで実装済み(§4)。実機検証はF8 |
+| Web Push送信 | 自前実装(VAPID署名=jose/WebCrypto・aes128gcm暗号化=WebCrypto・送信=fetch) | web-push公式ライブラリは参考実装とする(§3.4)。F7bで実装済み(§4)。実機検証はF8a(02 #32・実機確認はオーナーの記録待ち) |
 | WebSocketチャット | Durable Objects(Hibernation API)を直接使用 | 追加ライブラリなし。 WorkersネイティブのAPIで足りる |
 | キュー/定時処理 | Queues(consumer)+ Cron Triggers | Workersネイティブ。DLQで失敗隔離(01 §16) |
 | ベクトル検索 | Vectorize | metadata filter(form・status・category)=Layer 2の絞り込み |
@@ -109,6 +110,7 @@
 | ビルド・PWA | Vite + vite-plugin-pwa | マニフェスト・Service Worker・オフラインキャッシュの生成 |
 | ルーティング | React Router(library mode) | 5画面フロー+一覧(01 §10) |
 | サーバー状態 | TanStack Query | 一覧・提案・履歴の取得キャッシュと再検証を標準化 |
+| オフライン保存 | @tanstack/react-query-persist-client + idb-keyval | 一部の取得結果を端末(IndexedDB)に保存し、オフライン表示に使う(F8a・下記) |
 | チャット受信 | WebSocket(DOへ直結) | 受信メッセージはTanStack Queryのキャッシュへ書き込み |
 | フォーム | react-hook-form + @hookform/resolvers(zod) | 読み解き確認の修正UI・Parser失敗時の構造化フォールバック。zodスキーマはsharedから流用 |
 | スタイリング | **バニラCSS(グローバル)(確定・D-A-07解消)** | 正本は `apps/web/src/styles/latch.css`(`prototype/project/latch.css` を移植)。追加スタイルはapps/web側のCSSに記述し、デザインシステム側の変更はprototypeで行い再移植する(2026-10-19オーナー裁定) |
@@ -116,6 +118,8 @@
 | E2E | Playwright(chromium) | 02の対応表#34の社内クローズドテストに使用 |
 
 上記のフロント構成(React Router・TanStack Query・react-hook-form+zod resolver・vite-plugin-pwa)はF2'(フロント基盤)で実装済みで稼働している。バージョン番号は§1の規律どおり `package.json` が正である。スタイリングの移植運用(D-A-07): `prototype/project/latch.css` から `apps/web/src/styles/latch.css` への移植は**不改変コピー**とし、整形・リントの対象外とする(Biomeの除外設定に加える。§3.3の生成物除外と同型の運用で、デザイン定義の単一源を保つ)
+
+**オフライン表示の構成(F8a実装確定・01冒頭の決定記録(2026-10-21・PWAと画面の仕上げ)の3)。** 画面の取得結果のうち、意思の一覧(`["intents"]`)・提案の一覧(`["latches","proposals"]`)・つながり一覧(`["latches","connections"]`)・自分(`["me"]`)の4つのキーに完全一致し、取得に成功したものだけを端末に保存する。保存はTanStack Queryの`PersistQueryClientProvider`と、IndexedDB(idb-keyval)へ書く自前の保存部品で行い、保存期間(`maxAge`)は7日とする。保存値には利用者ID(アクセストークンのsub)を添え、現在の利用者と異なる保存は読まずに消す。利用者IDが無いときは保存しない。IndexedDBが使えない端末では保存せず、表示は通常の取得に任せる。保存はログアウト・サーバーによるログインの拒否・別の利用者でのサインイン(`authSession.onUserChange`)で消す。ホームとつながり一覧は、再取得に失敗しても保存済みの内容を出し続け、オフラインの間は帯「オフラインです。最後に確かめた内容を表示しています。」(`prototype/`の文言)を出す。保存済みの内容が無いときは帯と「一覧を読み込めませんでした。」を出す。オフラインでできない操作は固定の案内(読み解きは入力欄へ戻ってトーストで「オフラインのため、いまは読み解けません。」・チャットの送信は「オフラインのため、送れませんでした。」・その他は「オフラインのため、いまは操作できません。」)を出す。チャットの本文・アプリ内通知の一覧・LATCHや意思の単一取得は保存しない(01 §20・§21・08 §7)
 
 ### 3.3 共有・品質・CI
 
@@ -137,7 +141,7 @@
 
 **DBアクセス — Drizzle ORM(D1ドライバ)を採用、生SQL・Kysely・Prisma不採用。** DrizzleはD1公式ドキュメントに接続方法が掲載され(2026-10-17確認)、型安全なクエリビルダとスキーマからのマイグレーション生成(drizzle-kit)を備える。生SQLは型の保証が弱く、PrismaはWorkers上で動くもののクエリエンジン分がヘビーである。注意点として、drizzle-kitの新版(RC)で `wrangler d1 migrations apply` との非互換が報告されているため、**安定版にバージョン固定**して使う(§1のバージョン規律)。
 
-**Web Push送信 — 自前実装を採用、web-pushライブラリ直接利用は不採用(loop1裁定)。** VAPID署名はjose(WebCrypto)で、メッセージ暗号化(aes128gcm・RFC8291)はWebCryptoで行い、送信はfetchで直接行う。定番ライブラリ(web-push)は通知送信にNodeのHTTPクライアントを使いWorkers上の動作が保証されないため、参考実装(署名生成の検証用)と位置づける。実装と実機検証(iOS/Android/デスクトップ各ブラウザ)はF7(12)に明示的に計上する。実装はF7b(通知のAPI)で済み(暗号化はRFC 8291の試験ベクトル・VAPID署名はjoseでの検証で単体試験)、実機ブラウザでの受信確認はF8(02 #32)で行う。
+**Web Push送信 — 自前実装を採用、web-pushライブラリ直接利用は不採用(loop1裁定)。** VAPID署名はjose(WebCrypto)で、メッセージ暗号化(aes128gcm・RFC8291)はWebCryptoで行い、送信はfetchで直接行う。定番ライブラリ(web-push)は通知送信にNodeのHTTPクライアントを使いWorkers上の動作が保証されないため、参考実装(署名生成の検証用)と位置づける。実装と実機検証(iOS/Android/デスクトップ各ブラウザ)はF7(12)に明示的に計上する。実装はF7b(通知のAPI)で済み(暗号化はRFC 8291の試験ベクトル・VAPID署名はjoseでの検証で単体試験)、実機ブラウザでの受信確認はF8a(02 #32)で行う(手順と記録は`docs/reports/f8a-pwa-device-check.md`・オーナーの記録待ち)。
 
 **WebSocketチャット — リアルタイム(Durable Objects+WebSocket)を採用(2026-10-17オーナー選定)、ポーリング不採用。** 成立後の対話そのものが主目的のつながりIntentでは、表示の即時性が体験の中心になる。DOのHibernation APIで接続維持のコストを抑え、メッセージの正はD1に置くことでDOの障害・再起動でも履歴を失わない構造とする(詳細は§4)。追加ライブラリは使わない(WorkersネイティブのWebSocket APIで足りる)。
 
@@ -165,7 +169,9 @@
 
 **地名データ(D-A-03解消)。** ソースは国土交通省の位置参照情報(ISJ・大字/町丁目級。CC BY 2.0 JP)と駅データ.jp(駅位置・CC BY 4.0)とする。取り込みは `scripts/` の前処理スクリプトがCSVからINSERT SQLを生成し、`wrangler d1 execute --file` で環境ごとに適用する(生データはリポジトリにコミットしない)。座標→地名の変換は約1kmグリッド(0.01度)のgrid_keyで行い、座標の属するセルの中心を基準点として、そのセルと周囲を合わせた3×3セルの地名からハバーシン距離の最近傍を採る(基準点を丸めるため元の座標は距離計算にも使わない・05 §2.2)。両データのクレジット表記を利用規約のクレジット節に含める(08 §10)。
 
-**Web Push。** PWAのService Workerが購読し、購読情報をD1に保存。提案通知の送信は汎用文のみ(01 §10の表示規制どおり)。VAPID鍵はWorkersシークレットで管理し、送信記録を残す。**送信の構成(F7b実装確定・2026-10-21オーナー裁定)。** Web Pushは通知行を書いた処理の直後に同じWorker内で送り(waitUntil)、送れていない行を毎分Cronで回収する。通知専用のキュー・Cronだけの送信は採らない(前者はキューの追加を、後者は最大1分の遅れを伴う)。通知行(05 §2.2)はWeb Push対象の種別(proposal・matched)を送信の状態push_state=pendingで書き、書き込みを行い得る入口(LATCH・Intent・安全のAPIの変更系(POST・PATCH・DELETE)の2xx応答の後と、主キューのバッチの後。DLQは除く)で送出処理(flushPush)を呼ぶ。送出は作成から10分以内で未試行(または試行から60秒以上)のpending行(1回あたり上限100件)を照会して送り、その失敗はAPIの応答・キューの消費に影響させない。行ごとに条件付きUPDATE(push_attempted_atの記録)で順番を取り、直後の送出とCronの回収が同時に拾っても片方だけが送る。順番取りの時刻は行ごとにその時点のClockで読み、1回の送出は開始から45秒を過ぎたら新しい行の順番を取らない(残りは後の送出・Cronの回収が拾う。60秒の再取得の間隔を1回の送出が越えないため)。結果の記録(sent・muted・no_subscription・failed)はpendingかつpush_attempted_atがその試行の順番取りの時刻である行だけに書き、遅れて戻った先行の試行が後続の試行の結果を上書きしない。送信の判断は、本人の当該LATCHでの参加Intentのnotification_levelがmuted→送らない(muted・01冒頭の決定記録(2026-10-21・通知のAPI))、本人のactiveな購読が無い→no_subscription、activeな各購読へ送り1件でも成功→sent・全部が恒久失敗→failed・一時失敗を含み成功が無い→pendingのまま(Cronで再試行)とする。送信先の応答は2xxで購読のlast_success_atを更新し、404・410は購読をfailedにして以後送らず、400・403・413はその送信の恒久失敗、429・5xx・ネットワーク例外は一時失敗とする。送信1件には10秒の時間制限を設けて時間切れを一時失敗とし、リダイレクトは追わず3xxをその送信の恒久失敗とする(許可ホスト以外へ送らない)。本文の暗号化はRFC 8291(aes128gcm・WebCrypto)、VAPID(RFC 8292)はES256のJWT(aud=送信先のorigin・exp=12時間後・sub=VAPID_SUBJECT)をjoseで署名する。**送り手の差し替え口と鍵(F7b実装確定)。** LATCH_PUSH_MODEは既定stub(外部へ送らず各購読への送信を成功として扱う。試験・E2Eを外部のPushサービスに依存させない)、realで実送信する。シークレットはVAPID_PUBLIC_KEY(base64url・非圧縮P-256点)・VAPID_PRIVATE_KEY(JWKのJSON)・VAPID_SUBJECT(mailto:)で、stubでも公開鍵APIのためにVAPID_PUBLIC_KEYを使う(ローカル・E2Eはコミット済みのテスト専用鍵)。起動ガードとして、prodでLATCH_PUSH_MODEがreal以外の場合・VAPID_*のいずれかが無い場合・VAPID公開鍵がコミット済みのテスト鍵の場合は起動を拒否する。本番のVAPID鍵の発行と登録はF10(公開準備)で行う。**画面側の構成(F7c実装確定)。** Service Workerはvite-plugin-pwaの自動生成(generateSW)を変えず、`workbox.importScripts`でプッシュ処理だけの小さなファイル(`apps/web/public/push-sw.js`)を読み込ませる(injectManifestへ切り替えてキャッシュ処理を自前で持つことはしない)。受信したペイロードの汎用文をそのまま本文に出し(題名は「LATCH」・読めなければ既定の汎用文)、タップでアプリ内通知の一覧(`/notices`)を開く(開いているタブがあればそこで開き、無ければ新しく開く)。購読は、許可を求める→公開鍵の取得(GET /v1/push/vapid-public-key)→`pushManager.subscribe`→登録(POST /v1/push-subscriptions)の順で行い、登録に失敗したら作った端末の購読を外す。解除は、サーバーの行の削除(DELETE /v1/push-subscriptions)を先に行ってから端末の購読を外す(`unsubscribe()`)。ログアウトはこの解除(失敗は無視し、時間を区切る)の後にトークンを捨てるため、アクセストークンが有効なうちにサーバーの行を消せる(文書の裁量で定めた技術的事項)。購読の手順は単体試験でpushManagerを差し替えて確かめ、実機ブラウザでの購読と受信はF8(02 #32)で確かめる。
+**Web Push。** PWAのService Workerが購読し、購読情報をD1に保存。提案通知の送信は汎用文のみ(01 §10の表示規制どおり)。VAPID鍵はWorkersシークレットで管理し、送信記録を残す。**送信の構成(F7b実装確定・2026-10-21オーナー裁定)。** Web Pushは通知行を書いた処理の直後に同じWorker内で送り(waitUntil)、送れていない行を毎分Cronで回収する。通知専用のキュー・Cronだけの送信は採らない(前者はキューの追加を、後者は最大1分の遅れを伴う)。通知行(05 §2.2)はWeb Push対象の種別(proposal・matched)を送信の状態push_state=pendingで書き、書き込みを行い得る入口(LATCH・Intent・安全のAPIの変更系(POST・PATCH・DELETE)の2xx応答の後と、主キューのバッチの後。DLQは除く)で送出処理(flushPush)を呼ぶ。送出は作成から10分以内で未試行(または試行から60秒以上)のpending行(1回あたり上限100件)を照会して送り、その失敗はAPIの応答・キューの消費に影響させない。行ごとに条件付きUPDATE(push_attempted_atの記録)で順番を取り、直後の送出とCronの回収が同時に拾っても片方だけが送る。順番取りの時刻は行ごとにその時点のClockで読み、1回の送出は開始から45秒を過ぎたら新しい行の順番を取らない(残りは後の送出・Cronの回収が拾う。60秒の再取得の間隔を1回の送出が越えないため)。結果の記録(sent・muted・no_subscription・failed)はpendingかつpush_attempted_atがその試行の順番取りの時刻である行だけに書き、遅れて戻った先行の試行が後続の試行の結果を上書きしない。送信の判断は、本人の当該LATCHでの参加Intentのnotification_levelがmuted→送らない(muted・01冒頭の決定記録(2026-10-21・通知のAPI))、本人のactiveな購読が無い→no_subscription、activeな各購読へ送り1件でも成功→sent・全部が恒久失敗→failed・一時失敗を含み成功が無い→pendingのまま(Cronで再試行)とする。送信先の応答は2xxで購読のlast_success_atを更新し、404・410は購読をfailedにして以後送らず、400・403・413はその送信の恒久失敗、429・5xx・ネットワーク例外は一時失敗とする。送信1件には10秒の時間制限を設けて時間切れを一時失敗とし、リダイレクトは追わず3xxをその送信の恒久失敗とする(許可ホスト以外へ送らない)。本文の暗号化はRFC 8291(aes128gcm・WebCrypto)、VAPID(RFC 8292)はES256のJWT(aud=送信先のorigin・exp=12時間後・sub=VAPID_SUBJECT)をjoseで署名する。**送り手の差し替え口と鍵(F7b実装確定)。** LATCH_PUSH_MODEは既定stub(外部へ送らず各購読への送信を成功として扱う。試験・E2Eを外部のPushサービスに依存させない)、realで実送信する。シークレットはVAPID_PUBLIC_KEY(base64url・非圧縮P-256点)・VAPID_PRIVATE_KEY(JWKのJSON)・VAPID_SUBJECT(mailto:)で、stubでも公開鍵APIのためにVAPID_PUBLIC_KEYを使う(ローカル・E2Eはコミット済みのテスト専用鍵)。起動ガードとして、prodでLATCH_PUSH_MODEがreal以外の場合・VAPID_*のいずれかが無い場合・VAPID公開鍵がコミット済みのテスト鍵の場合は起動を拒否する。本番のVAPID鍵の発行と登録はF10(公開準備)で行う。**画面側の構成(F7c実装確定)。** Service Workerはvite-plugin-pwaの自動生成(generateSW)を変えず、`workbox.importScripts`でプッシュ処理だけの小さなファイル(`apps/web/public/push-sw.js`)を読み込ませる(injectManifestへ切り替えてキャッシュ処理を自前で持つことはしない)。受信したペイロードの汎用文をそのまま本文に出し(題名は「LATCH」・読めなければ既定の汎用文)、タップでアプリ内通知の一覧(`/notices`)を開く(開いているタブがあればそこで開き、無ければ新しく開く)。購読は、許可を求める→公開鍵の取得(GET /v1/push/vapid-public-key)→`pushManager.subscribe`→登録(POST /v1/push-subscriptions)の順で行い、登録に失敗したら作った端末の購読を外す。解除は、サーバーの行の削除(DELETE /v1/push-subscriptions)を先に行ってから端末の購読を外す(`unsubscribe()`)。ログアウトはこの解除(失敗は無視し、時間を区切る)の後にトークンを捨てるため、アクセストークンが有効なうちにサーバーの行を消せる(文書の裁量で定めた技術的事項)。購読の手順は単体試験でpushManagerを差し替えて確かめ、実機ブラウザでの購読と受信はF8a(02 #32・実機確認はオーナーの記録待ち)で確かめる。
+
+**Service Workerとオフライン中のセッション(F8a実装確定)。** Service Workerはvite-plugin-pwaの自動生成(generateSW)と`workbox.importScripts`によるpush-sw.jsの読み込み(F7c)を保ち、画面遷移の代替応答(navigateFallback)から`/v1/`と`/healthz`を除く(`navigateFallbackDenylist`)。APIの応答はService Workerで保存しない(利用者を区別しない保存を避けるため・端末への保存は上記§3.2のオフライン表示の構成だけが担う)。ホーム画面追加のアイコンはPNG(apple-touch-icon 180・192・512・maskable 512(背景色#EEF0F2の中央に図柄を80%で置く))を`apps/web/scripts/make-icons.mjs`(@resvg/resvg-js)で生成してコミットし、マニフェストは`any`と`maskable`を別の項目で持つ(SVGは`any`として残す)。apple-touch-iconはPNGを指す。オフライン中のセッション: 起動時のセッションの復元(リフレッシュ)が通信の失敗で終わり、リフレッシュトークンが端末に残っているときは`authSession.offline`を真とし、保護された画面の描画を許す(`RequireAuth`)。`online`のイベントで復元をやり直し、成功したら取得をやり直す。apiFetchのリフレッシュが通信の失敗(`network_error`)のときはTypeErrorを投げてセッションを捨てず、サーバーが拒んだ(`rejected`)ときは従来どおり捨てる。利用者IDとして、最後に確立したアクセストークンのsub(識別子のみ)を`localStorage`の`latch.uid`に置く(文書の裁量で定めた技術的事項)
 
 **チャット(リアルタイム・オーナー確定)。** 成立LATCHごとに1つのDurable Objectを置き、WebSocketで接続中の参加者へ新着を即時配信する。メッセージの正はD1に保存し、履歴取得・未読管理・つながり品質の計測(01 §14)はD1に対するREST/クエリで行う。DOは配信に専念し、障害・再起動があっても履歴は失われない。接続の維持はHibernation APIを使いコストを抑える。オフラインの参加者にはアプリ内通知とWeb Pushで到達する(01 §10)。**チャットの構成(F6a実装確定)。** DOはLATCHごとに1つ(LATCH IDから名前で引く)で、外部から直接到達できず、Workerのルートだけが内部要求(接続・送信・`closed`の知らせ)で呼ぶ。送信はWebSocketでもREST(05 §3.2)でもDOへ集め、DOが1か所で直列に保存→配信する(メッセージIDはDO内で単調増加のULIDを採番し、IDの順=保存の順=配信の順)。保存は「LATCHがmatchedかつ送り手が離脱・表示削除をしていない」を条件にしたD1の1文で行うため、終了・離脱と送信が並行しても終了後のメッセージは保存されない(05 §3.4)。配信の前にDOはD1で現在の参加者を照会し、参加者でない接続には`closed`を送って閉じる。離脱・表示削除(05 §3.3)の成功後はルートがDOへ`closed`を知らせる(最善努力。正しい状態はD1にある)。**接続チケットの検証位置(F6a実装確定)。** WebSocket接続(GET /v1/latches/{id}/ws)はAuthorizationヘッダを使わず、URLのクエリのチケット(05 §3.4)で認証する。署名・期限(60秒)・用途(typ)・LATCH IDの一致の検証と、D1での参加者かつmatchedであることの再検証はWorkerのルートで行い、1回限りの使用済み記録(jti)はDOのストレージ(SQLite)で行う(KVは使わない・05 §2.3)。いずれの失敗も401で理由を区別しない(08 §11)。
 
