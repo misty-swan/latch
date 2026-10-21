@@ -18,6 +18,7 @@ import { Intro } from "./screens/Intro";
 import { LatchScreen } from "./screens/latch/LatchScreen";
 import { ShelvedScreen } from "./screens/latch/ShelvedScreen";
 import { Me } from "./screens/me/Me";
+import { Profile } from "./screens/me/Profile";
 import { Notices } from "./screens/notices/Notices";
 import { ParseFailed } from "./screens/ParseFailed";
 import { Placed } from "./screens/Placed";
@@ -132,6 +133,14 @@ export const appRoutes = [
 		element: (
 			<RequireAuth>
 				<Me />
+			</RequireAuth>
+		),
+	},
+	{
+		path: PATHS.profile,
+		element: (
+			<RequireAuth>
+				<Profile />
 			</RequireAuth>
 		),
 	},

@@ -89,6 +89,7 @@ export function Me() {
 						size="l"
 						tone="b"
 						label="あなたのアイコン"
+						version={me.dataUpdatedAt}
 					/>
 					<div className="stack" style={{ gap: 4, minWidth: 0 }}>
 						<p className="t-title">{me.data?.display_name ?? ""}</p>

@@ -31,6 +31,7 @@ export function TopbarActions() {
 					hasIcon={me.data?.has_icon ?? false}
 					size="s"
 					tone="b"
+					version={me.dataUpdatedAt}
 				/>
 			</Link>
 		</>

@@ -174,13 +174,22 @@ export const AVATAR_TONE_FILLS = {
 type AvatarProps = {
 	userId?: string;
 	hasIcon: boolean;
-	size: "s" | "m" | "l";
+	size: "s" | "m" | "l" | "xl";
 	tone: "b" | "c" | "d" | "e";
 	label?: string;
+	/** 画像のキャッシュ回避(?v=)。アイコンの変更直後に古い画像を出さない */
+	version?: number;
 };
 
 /** アイコンがあれば画像、無ければ半円模様の無地(toneで色) */
-export function Avatar({ userId, hasIcon, size, tone, label }: AvatarProps) {
+export function Avatar({
+	userId,
+	hasIcon,
+	size,
+	tone,
+	label,
+	version,
+}: AvatarProps) {
 	const a11y = label
 		? ({ role: "img", "aria-label": label } as const)
 		: ({ "aria-hidden": true } as const);
@@ -188,7 +197,7 @@ export function Avatar({ userId, hasIcon, size, tone, label }: AvatarProps) {
 		return (
 			<span className={`avatar avatar--${size}`} {...a11y}>
 				<img
-					src={`/v1/users/${userId}/icon`}
+					src={`/v1/users/${userId}/icon${version === undefined ? "" : `?v=${version}`}`}
 					alt=""
 					style={{
 						position: "absolute",

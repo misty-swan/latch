@@ -89,3 +89,23 @@ describe("LatchArt / DomeRest", () => {
 		).not.toBeNull();
 	});
 });
+
+describe("Avatar version", () => {
+	it("versionがあると画像のsrcへ?v=を付ける", () => {
+		const { container } = render(
+			<Avatar userId="U1" hasIcon size="m" tone="b" version={123} />,
+		);
+		expect(container.querySelector("img")?.getAttribute("src")).toBe(
+			"/v1/users/U1/icon?v=123",
+		);
+	});
+
+	it("versionが無ければ付けない", () => {
+		const { container } = render(
+			<Avatar userId="U1" hasIcon size="m" tone="b" />,
+		);
+		expect(container.querySelector("img")?.getAttribute("src")).toBe(
+			"/v1/users/U1/icon",
+		);
+	});
+});
