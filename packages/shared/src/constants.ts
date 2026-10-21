@@ -258,6 +258,10 @@ export const LATCH = {
 	GROUP_SIZE_MAX: 4,
 	// 1対1に最低限保証するJev呼び出し回数。docs/06 §3
 	JEV_ONE_ON_ONE_MIN: 4,
+	// つながりLATCHのcompleted: 最終メッセージ(0件ならmatched時刻)から90日。docs/01 §8
+	CONNECTION_QUIET_MS: 90 * 24 * 60 * 60_000,
+	// 機会LATCHのcompleted: 対象時刻から3時間。docs/01 §8(2026-10-21オーナー裁定)
+	OCCASION_COMPLETE_AFTER_START_MS: 3 * 60 * 60_000,
 } as const;
 
 /** 見送り(defer)の理由。回答APIのreasonに使う。docs/05 §3 */

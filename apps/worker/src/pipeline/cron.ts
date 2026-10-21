@@ -16,9 +16,10 @@
  *   (F4a設計 §3.5・§4.2)
  * - (f) Jev予算アラート(全体1日・1か月の80%・docs/06 §6)
  * - pending残留の掃査(10分経過のpendingイベントをfailedへ・docs/06 §4)
+ * - (d) matchedのLATCHのcompleted判定(つながり=最終メッセージから90日・機会=対象時刻から
+ *   3時間・F5設計 §2)
  * 評価本体はevaluateIntent・第1段はrunEmbeddingStageを再利用し、Cronからは
  * 新たな起点イベントを発行しない(直接呼び出し・docs/06 §2)。
- * (d)つながりLATCHのcompleted判定はF5で計上する(docs/12)。
  */
 import { LATCH, LIMITS, PIPELINE } from "@latch/shared";
 import {
@@ -48,6 +49,7 @@ import {
 import type { Env } from "../env";
 import { MS_PER_DAY } from "../intents/expiry";
 import { closeLatch } from "../latches/close";
+import { completeDueLatches } from "../latches/complete";
 import { proposeNextGroupAfterClose } from "../latches/next-group";
 import { expireHeld, releaseHeld } from "../latches/release";
 import { createLogger } from "../logging/logger";
@@ -782,7 +784,7 @@ const runIsolated = async (
  * 既存7走査(a〜h・保持期間)のクエリ自体の失敗は呼び出し元へ伝播させる(Cron起動の
  * 失敗として可視化し、次回の実行でやり直す)。F4aで追加した4走査(回答期限切れ・保留・
  * 予算アラート・pending残留)と、回答期限切れで閉じたグループ提案の次集合の提案(保留走査の後・
- * F4b設計 §3.5)は互いに隔離し、失敗をログに出して続行する(docs/06 §2)
+ * F4b設計 §3.5)・(d)completed判定(F5)は互いに隔離し、失敗をログに出して続行する(docs/06 §2)
  */
 export const runScheduledPipeline = async (
 	env: Env,
@@ -806,4 +808,7 @@ export const runScheduledPipeline = async (
 	);
 	await runIsolated("budget_alert", () => runBudgetAlert(env, clock));
 	await runIsolated("pending", () => runPendingSweep(env, clock));
+	await runIsolated("completion", async () => {
+		await completeDueLatches(drizzle(env.DB), clock.now());
+	});
 };

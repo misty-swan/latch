@@ -159,6 +159,8 @@ describe("LATCH(提案化の定数・docs/06 §5〜§7)", () => {
 			GROUP_SIZE_MIN: 3,
 			GROUP_SIZE_MAX: 4,
 			JEV_ONE_ON_ONE_MIN: 4,
+			CONNECTION_QUIET_MS: 90 * 24 * 60 * 60_000,
+			OCCASION_COMPLETE_AFTER_START_MS: 3 * 60 * 60_000,
 		});
 	});
 });
