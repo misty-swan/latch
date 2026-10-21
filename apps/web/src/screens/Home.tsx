@@ -18,6 +18,7 @@ import { useProposalsQuery } from "../latches/queries";
 import { latchPath, PATHS } from "../routes/paths";
 import { LatchArt } from "./latch/art";
 import { ScreenGrain } from "./shared";
+import { TabBar } from "./TabBar";
 
 const DAY_MS = 24 * 3_600_000;
 
@@ -304,34 +305,6 @@ function HomeTopbar() {
 	);
 }
 
-/** 下部タブ。置くはcomposeへ・つながりの一覧は後続フェーズのため表示のみ */
-function HomeTabbar() {
-	return (
-		<nav className="tabbar" aria-label="メイン">
-			<span className="tab" aria-current="page">
-				<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
-					<path d="M11.2 3.8a8.2 8.2 0 0 0 0 16.4z" fill="currentColor" />
-					<path d="M13.2 3.9a8.2 8.2 0 0 1 0 16.2" strokeDasharray="2.2 2.4" />
-				</svg>
-				<span>預けている</span>
-			</span>
-			<Link className="tab__put" to={PATHS.compose}>
-				<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
-					<path d="M12 5.5v13M5.5 12h13" />
-				</svg>
-				<span>置く</span>
-			</Link>
-			<span className="tab">
-				<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
-					<circle cx="12" cy="12" r="8.2" />
-					<path d="M12 3.8v16.4" />
-				</svg>
-				<span>つながり</span>
-			</span>
-		</nav>
-	);
-}
-
 export function Home() {
 	const { data, isPending, isError, refetch } = useIntentsQuery();
 	// 提案の取得中・失敗は空として扱い・意思の一覧だけを出す
@@ -355,7 +328,7 @@ export function Home() {
 						<h1 className="t-display">預けている</h1>
 					</div>
 				</div>
-				<HomeTabbar />
+				<TabBar current="home" />
 			</div>
 		);
 	}
@@ -379,7 +352,7 @@ export function Home() {
 						もう一度読み込む
 					</button>
 				</div>
-				<HomeTabbar />
+				<TabBar current="home" />
 			</div>
 		);
 	}
@@ -429,7 +402,7 @@ export function Home() {
 						ひとこと置く
 					</Link>
 				</div>
-				<HomeTabbar />
+				<TabBar current="home" />
 			</div>
 		);
 	}
@@ -500,7 +473,7 @@ export function Home() {
 					合う相手が現れたときだけ、ここに届きます。
 				</p>
 			</div>
-			<HomeTabbar />
+			<TabBar current="home" />
 		</div>
 	);
 }

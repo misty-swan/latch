@@ -11,6 +11,7 @@ import { PATHS } from "./routes/paths";
 import { Compose } from "./screens/Compose";
 import { Confirm } from "./screens/Confirm";
 import { Consent } from "./screens/Consent";
+import { Connections } from "./screens/chat/Connections";
 import { Home } from "./screens/Home";
 import { Intro } from "./screens/Intro";
 import { LatchScreen } from "./screens/latch/LatchScreen";
@@ -104,6 +105,14 @@ export const appRoutes = [
 		element: (
 			<RequireAuth>
 				<ShelvedScreen />
+			</RequireAuth>
+		),
+	},
+	{
+		path: PATHS.connections,
+		element: (
+			<RequireAuth>
+				<Connections />
 			</RequireAuth>
 		),
 	},

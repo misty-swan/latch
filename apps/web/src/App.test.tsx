@@ -49,6 +49,8 @@ describe("App", () => {
 			"/home",
 			"/latches/:id",
 			"/latches/:id/shelved",
+			"/connections",
+			"/latches/:id/chat",
 		]);
 	});
 

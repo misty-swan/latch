@@ -16,6 +16,8 @@ export const PATHS = {
 	home: "/home",
 	latch: "/latches/:id",
 	latchShelved: "/latches/:id/shelved",
+	connections: "/connections",
+	chat: "/latches/:id/chat",
 } as const;
 
 /** 提案1件の画面(F4c設計 §1.1) */
@@ -25,3 +27,6 @@ export const latchPath = (id: string): string =>
 /** 見送った直後の画面(F4c設計 §1.1) */
 export const latchShelvedPath = (id: string): string =>
 	`${latchPath(id)}/shelved`;
+
+/** チャット画面(F6b設計 §1.3) */
+export const chatPath = (id: string): string => `${latchPath(id)}/chat`;

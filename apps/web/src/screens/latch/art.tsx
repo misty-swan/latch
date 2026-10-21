@@ -6,7 +6,7 @@
 
 import type { CSSProperties, Ref } from "react";
 
-export type LatchArtState = "arrived" | "pressed" | "latched";
+export type LatchArtState = "arrived" | "pressed" | "latched" | "ended";
 
 type LatchArtProps = {
 	state: LatchArtState;
