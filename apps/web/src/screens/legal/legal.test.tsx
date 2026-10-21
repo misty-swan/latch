@@ -11,7 +11,7 @@ import { appRoutes } from "../../router";
 import { PATHS } from "../../routes/paths";
 import { withQueryClient } from "../../test/helpers";
 
-const DRAFT_MARK = "この文書は法務確認前の草案です。";
+const DRAFT_MARK = "この文書は公開前の版です。";
 
 const setup = (entries: string[]) => {
 	const router = createMemoryRouter(appRoutes, {
@@ -59,10 +59,12 @@ describe("利用規約(/terms)", () => {
 			"CC BY 2.0 JP",
 			"駅データ.jp",
 			"CC BY 4.0",
-			"法務確認時に確定",
+			"公開前に記入",
 		]) {
 			expect(text).toContain(word);
 		}
+		// 弁護士等の法務確認は予定していないため、確認を前提にした文言を出さない(01冒頭の決定記録)
+		expect(text).not.toContain("法務確認");
 	});
 
 	it("直接開いたときの戻るはようこそへ進む", () => {
@@ -102,10 +104,12 @@ describe("プライバシーポリシー(/privacy)", () => {
 			"7日",
 			"退会",
 			"開示",
-			"法務確認時に確定",
+			"公開前に記入",
 		]) {
 			expect(text).toContain(word);
 		}
+		// 弁護士等の法務確認は予定していないため、確認を前提にした文言を出さない(01冒頭の決定記録)
+		expect(text).not.toContain("法務確認");
 		// 保存は中心と範囲のまま。約1kmの丸めは相手への地名の表示だけ(05 §2.2・08 §4)
 		expect(text).not.toContain("約1kmの区画に丸めて扱います");
 		expect(text).toContain("中心と範囲");

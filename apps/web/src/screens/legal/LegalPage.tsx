@@ -1,6 +1,7 @@
 /**
  * 規約ページの共通の枠(/terms・/privacy・F7c設計 §1.10)。
- * - 冒頭(題名の直下)に「この文書は法務確認前の草案です。」の印を置く(F7c設計 §0.2の1)
+ * - 冒頭(題名の直下)に「この文書は公開前の版です。」の印を置く(F7c設計 §0.2の1・公開時に外す。
+ *   弁護士等の法務確認は予定していない=01冒頭の決定記録(規約と法務確認))
  * - 戻るは直前の画面へ。アプリ内の履歴が無い直接の入場(location.keyが"default")はようこそへ
  * - サインイン前から開けるため、ルートはRequireAuthの外に置く(router.tsx)
  * prototypeにボードが無いため、見た目は既存のトップバー・注記のクラスを組み合わせた実装の裁量
@@ -12,10 +13,10 @@ import { PATHS } from "../../routes/paths";
 import { ScreenGrain } from "../shared";
 import "./legal.css";
 
-export const DRAFT_MARK = "この文書は法務確認前の草案です。";
+export const DRAFT_MARK = "この文書は公開前の版です。";
 
-/** 法務確認で決める箇所の表記(運営者名・連絡先・施行日など) */
-export const TBD = "法務確認時に確定";
+/** 公開準備(F10)で記入する箇所の表記(運営者名・連絡先・施行日など) */
+export const TBD = "公開前に記入";
 
 export function LegalPage({
 	title,
@@ -65,7 +66,7 @@ export function LegalPage({
 					</svg>
 					<span>
 						<b>{DRAFT_MARK}</b>
-						内容は法務確認を経て確定し、変わることがあります。
+						内容は公開までに見直し、変わることがあります。
 					</span>
 				</p>
 				{children}
