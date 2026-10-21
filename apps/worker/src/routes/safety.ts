@@ -31,7 +31,9 @@ import { createReport } from "../safety/report";
 export const safetyRoutes = new Hono<AppEnv>();
 
 // 変更系の成功後にWeb Pushを送り出す(F7b設計 §5.1)
-safetyRoutes.use("*", pushFlushAfterWrite);
+// /v1にマウントされるため"*"は他のルーターまで巻き込む。安全のAPIの変更系だけに限る
+safetyRoutes.use("/users/:user_id/block", pushFlushAfterWrite);
+safetyRoutes.use("/reports", pushFlushAfterWrite);
 
 const dbOf = (env: Env): DrizzleD1Database => drizzle(env.DB);
 

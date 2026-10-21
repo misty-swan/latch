@@ -24,16 +24,29 @@ export const pushFlushAfterWrite: MiddlewareHandler<AppEnv> = async (
 	await next();
 	if (!WRITE_METHODS.has(c.req.method)) return;
 	if (c.res.status < 200 || c.res.status >= 300) return;
-	c.executionCtx.waitUntil(
-		flushPush(drizzle(c.env.DB), pushSenderOf(c.env), systemClock.now(), {
-			minAgeMs: 0,
-		}).then(
-			() => undefined,
-			(error: unknown) => {
-				logger.warn("push.flush.failed", {
-					error_code: errorCodeOf(error, "PUSH_FLUSH_FAILED"),
-				});
-			},
-		),
-	);
+	// ここから先は例外を外へ出さない(書き込みは確定済み。VAPID鍵の欠落などで
+	// 成功した書き込みを500にしない)
+	try {
+		const { env } = c;
+		c.executionCtx.waitUntil(
+			(async () => {
+				try {
+					await flushPush(
+						drizzle(env.DB),
+						pushSenderOf(env),
+						systemClock.now(),
+						{ minAgeMs: 0 },
+					);
+				} catch (error) {
+					logger.warn("push.flush.failed", {
+						error_code: errorCodeOf(error, "PUSH_FLUSH_FAILED"),
+					});
+				}
+			})(),
+		);
+	} catch (error) {
+		logger.warn("push.flush.failed", {
+			error_code: errorCodeOf(error, "PUSH_FLUSH_FAILED"),
+		});
+	}
 };

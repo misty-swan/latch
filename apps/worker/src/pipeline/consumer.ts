@@ -368,16 +368,17 @@ export const handleQueueBatch = async (
 		// 提案化・成立で作られた通知をその場で送り出す(F7b設計 §5.1 手順2)。
 		// 失敗はログだけ(取りこぼしはCronの回収が担う・§5.6)
 		ctx.waitUntil(
-			flushPush(drizzle(env.DB), pushSenderOf(env), clock.now(), {
-				minAgeMs: 0,
-			}).then(
-				() => undefined,
-				(error: unknown) => {
+			(async () => {
+				try {
+					await flushPush(drizzle(env.DB), pushSenderOf(env), clock.now(), {
+						minAgeMs: 0,
+					});
+				} catch (error) {
 					logger.warn("push.flush.failed", {
 						error_code: errorCodeOf(error, "PUSH_FLUSH_FAILED"),
 					});
-				},
-			),
+				}
+			})(),
 		);
 	} catch (error) {
 		// 最終安全網: 例外を外へ出さずackする(失敗はメッセージごとの記録に努める)

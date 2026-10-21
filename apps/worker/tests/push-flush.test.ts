@@ -56,6 +56,7 @@ const fetchAndWait = async (
 	path: string,
 	token: string | undefined,
 	body?: unknown,
+	envOverride: WorkerEnv = testEnv,
 ): Promise<Response> => {
 	const ctx = createExecutionContext();
 	const res = await worker.fetch(
@@ -67,7 +68,7 @@ const fetchAndWait = async (
 			},
 			body: body === undefined ? undefined : JSON.stringify(body),
 		}),
-		testEnv,
+		envOverride,
 		ctx,
 	);
 	await waitOnExecutionContext(ctx);
@@ -251,6 +252,58 @@ describe("変更系APIの後の送出", () => {
 			.from(notifications)
 			.where(eq(notifications.userId, a.id));
 		expect(rows.map((r) => r.s)).toEqual(["pending"]);
+	});
+});
+
+describe("送出の失敗と範囲", () => {
+	it("real送り手でVAPID鍵が無くても、成功した書き込みは2xxのまま", async () => {
+		const a = await registerUser("己");
+		const b = await registerUser("庚");
+		const id = await seedProposed(a, b);
+		const broken = {
+			...testEnv,
+			LATCH_PUSH_MODE: "real",
+			VAPID_PUBLIC_KEY: undefined,
+			VAPID_PRIVATE_KEY: undefined,
+		} as unknown as WorkerEnv;
+		const res = await fetchAndWait(
+			"POST",
+			`/v1/latches/${id}/response`,
+			a.token,
+			{ response: "yes" },
+			broken,
+		);
+		expect(res.status).toBe(200);
+	});
+
+	it("他のルーターの書き込みは安全のAPIのミドルウェアで送出されない", async () => {
+		const a = await registerUser("辛");
+		const nid = ulid();
+		await db.insert(notifications).values({
+			id: nid,
+			userId: a.id,
+			type: "proposal",
+			latchId: null,
+			readAt: null,
+			createdAt: new Date(Date.now() - 1000),
+			intentId: null,
+			pushState: "pending",
+			pushAttemptedAt: null,
+		});
+		const res = await fetchAndWait(
+			"DELETE",
+			"/v1/push-subscriptions",
+			a.token,
+			{
+				endpoint: `https://fcm.googleapis.com/fcm/send/${ulid()}`,
+			},
+		);
+		expect(res.status).toBe(204);
+		const [row] = await db
+			.select({ s: notifications.pushState })
+			.from(notifications)
+			.where(eq(notifications.id, nid));
+		expect(row?.s).toBe("pending");
 	});
 });
 
