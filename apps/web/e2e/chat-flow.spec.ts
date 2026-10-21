@@ -5,11 +5,19 @@
  * 地域はweb専用のsite 42・43(latch-flow.spec.tsの40・41と分ける)
  */
 
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { establishLatch, expireLeftoverE2eIntents } from "./helpers";
 
 const NAME_A = "E2Eあさひ";
 const NAME_B = "E2Eゆうひ";
+
+/** 既読の前進(POST /v1/latches/{id}/read)の完了を待つPromiseを先に作る(離れる前に完了させ中断を防ぐ) */
+const watchRead = (page: Page, latchId: string) =>
+	page.waitForResponse(
+		(r) =>
+			new URL(r.url()).pathname === `/v1/latches/${latchId}/read` &&
+			r.request().method() === "POST",
+	);
 
 test.beforeEach(() => {
 	expireLeftoverE2eIntents();
@@ -45,12 +53,15 @@ test("2人が画面で送り合い、一覧に最終メッセージと未読が�
 	).toBeVisible();
 
 	// B返信→Aに出る
+	const readAfterReply = watchRead(a.page, latchId);
 	await b.page.getByLabel("メッセージ").fill("こちらこそ");
 	await b.page.getByRole("button", { name: "送る" }).click();
 	await expect(
 		a.page.locator(".msg--theirs .msg__bubble", { hasText: "こちらこそ" }),
 	).toBeVisible();
 
+	// 既読の前進が完了してから離れる(中断されると未読が2件になるため)
+	await readAfterReply;
 	// Aは一覧へ移り、Bがもう1通送る→Aの一覧を再表示すると最終メッセージと未読1件
 	await a.page.goto("/connections");
 	await expect(
@@ -67,11 +78,13 @@ test("2人が画面で送り合い、一覧に最終メッセージと未読が�
 	await expect(row.getByLabel("未読1件")).toBeVisible();
 
 	// 行を押してチャットを開き、一覧へ戻ると未読表示が消える
+	const readAfterOpen = watchRead(a.page, latchId);
 	await row.click();
 	await expect(a.page).toHaveURL(new RegExp(`/latches/${latchId}/chat$`));
 	await expect(
 		a.page.locator(".msg--theirs .msg__bubble", { hasText: "また明日" }),
 	).toBeVisible();
+	await readAfterOpen;
 	await a.page.goto("/connections");
 	const rowAfter = a.page.locator(".conn", { hasText: NAME_B });
 	await expect(rowAfter).toBeVisible();
