@@ -51,6 +51,8 @@ describe("App", () => {
 			"/latches/:id/shelved",
 			"/connections",
 			"/latches/:id/chat",
+			"/intents/:id",
+			"/intents/:id/edit",
 			"/notices",
 			"/me",
 			"/me/profile",

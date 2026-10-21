@@ -17,8 +17,9 @@ import { INTENT_STATUS_LABELS, useIntentsQuery } from "../intents/queries";
 import { formatWhen } from "../latches/format";
 import { useProposalsQuery } from "../latches/queries";
 import { usePushStatus } from "../push/subscription";
-import { latchPath, PATHS } from "../routes/paths";
+import { intentPath, latchPath, PATHS } from "../routes/paths";
 import { LatchArt } from "./latch/art";
+import { RouteToast, useRouteToast } from "./RouteToast";
 import { ScreenGrain } from "./shared";
 import { TabBar } from "./TabBar";
 import { TopbarActions } from "./TopbarActions";
@@ -240,8 +241,12 @@ function IntentCard({
 	}
 	return (
 		<li>
-			{/* 詳細画面はF3以降のため・表示のみのカードにする */}
-			<div className={`intent${dim ? " is-dim" : ""} ${riseClass}`}>{body}</div>
+			<Link
+				className={`intent${dim ? " is-dim" : ""} ${riseClass}`}
+				to={intentPath(intent.id)}
+			>
+				{body}
+			</Link>
 		</li>
 	);
 }
@@ -319,6 +324,7 @@ function PushOffBanner() {
 }
 
 export function Home() {
+	const toast = useRouteToast();
 	const { data, isPending, isError, refetch } = useIntentsQuery();
 	const pushDenied = usePushStatus().data === "denied";
 	// 提案の取得中・失敗は空として扱い・意思の一覧だけを出す
@@ -336,6 +342,7 @@ export function Home() {
 		return (
 			<div className="screen home">
 				<ScreenGrain />
+				<RouteToast text={toast} />
 				<HomeTopbar />
 				<div className="screen__body" style={{ paddingBottom: 132 }}>
 					<div className="pad" style={{ paddingTop: 6, paddingBottom: 18 }}>
@@ -351,6 +358,7 @@ export function Home() {
 		return (
 			<div className="screen home">
 				<ScreenGrain />
+				<RouteToast text={toast} />
 				<HomeTopbar />
 				<div className="screen__body pad" style={{ paddingTop: 6 }}>
 					<h1 className="t-display">預けている</h1>
@@ -375,6 +383,7 @@ export function Home() {
 		return (
 			<div className="screen home home--empty">
 				<ScreenGrain />
+				<RouteToast text={toast} />
 				<HomeTopbar />
 				<div
 					className="screen__body pad"
@@ -434,6 +443,7 @@ export function Home() {
 	return (
 		<div className="screen home">
 			<ScreenGrain />
+			<RouteToast text={toast} />
 			<div
 				className={`vessel vessel--quiet${hasUnanswered ? " is-lit" : ""}`}
 				style={{ width: 340, height: 340, right: -176, top: -128 }}

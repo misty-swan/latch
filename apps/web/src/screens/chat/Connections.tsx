@@ -4,8 +4,8 @@
  */
 
 import type { LatchDTO } from "@latch/shared";
-import { Fragment, useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
+import { Fragment } from "react";
+import { Link } from "react-router";
 import {
 	connectionName,
 	connectionSubtitle,
@@ -15,13 +15,12 @@ import {
 import { useConnectionsQuery } from "../../chat/queries";
 import { chatPath, PATHS } from "../../routes/paths";
 import { Avatar, LatchArt } from "../latch/art";
+import { RouteToast, useRouteToast } from "../RouteToast";
 import { ScreenGrain } from "../shared";
 import { TabBar } from "../TabBar";
 import { TopbarActions } from "../TopbarActions";
 
 const TONES = ["b", "c", "d", "e"] as const;
-/** トーストを出しておく時間(Shelved.tsxと同じ) */
-const TOAST_MS = 2400;
 
 /** トップバー。brandは預けている一覧へ・自分は表示のみ(Homeと同じ扱い) */
 function ConnectionsTopbar() {
@@ -121,35 +120,6 @@ function Row({ latch, now }: { latch: LatchDTO; now: Date }) {
 				</span>
 			</Link>
 		</li>
-	);
-}
-
-/** 遷移元が渡したトースト(location.state.toast)を一度だけ出す。再読み込み・戻るで再表示しない */
-function useRouteToast(): string | null {
-	const location = useLocation();
-	const navigate = useNavigate();
-	const incoming = (location.state as { toast?: unknown } | null)?.toast;
-	const [toast, setToast] = useState<string | null>(
-		typeof incoming === "string" ? incoming : null,
-	);
-	useEffect(() => {
-		if (typeof incoming !== "string") return;
-		setToast(incoming);
-		navigate(location.pathname, { replace: true, state: null });
-	}, [incoming, location.pathname, navigate]);
-	useEffect(() => {
-		if (toast === null) return;
-		const t = setTimeout(() => setToast(null), TOAST_MS);
-		return () => clearTimeout(t);
-	}, [toast]);
-	return toast;
-}
-
-function RouteToast({ text }: { text: string | null }) {
-	return text === null ? null : (
-		<p className="toast" role="status">
-			{text}
-		</p>
 	);
 }
 

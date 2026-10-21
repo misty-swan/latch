@@ -508,4 +508,31 @@ describe("Home", () => {
 		).toBeNull();
 		expect(document.querySelector(".banner")).toBeNull();
 	});
+	it("activeの行は意思の詳細(/intents/<id>)へのリンクになる", async () => {
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		setup();
+		const link = await screen.findByRole("link", {
+			name: new RegExp(connectionIntent.raw_text),
+		});
+		expect(link.getAttribute("href")).toBe(`/intents/${connectionIntent.id}`);
+	});
+
+	it("遷移のstate.toastを一度だけrole=statusで出す", async () => {
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		const router = createMemoryRouter(appRoutes, {
+			initialEntries: [
+				{ pathname: PATHS.home, state: { toast: "取り下げました。" } },
+			],
+		});
+		render(withQueryClient(<RouterProvider router={router} />));
+		expect(await screen.findByText("取り下げました。")).toBeTruthy();
+		expect(screen.getByRole("status").textContent).toBe("取り下げました。");
+		await waitFor(() => expect(router.state.location.state).toBeNull());
+	});
 });

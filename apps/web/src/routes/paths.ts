@@ -18,6 +18,8 @@ export const PATHS = {
 	latchShelved: "/latches/:id/shelved",
 	connections: "/connections",
 	chat: "/latches/:id/chat",
+	intent: "/intents/:id",
+	intentEdit: "/intents/:id/edit",
 	notices: "/notices",
 	me: "/me",
 	profile: "/me/profile",
@@ -48,3 +50,10 @@ export const reportPath = (
 	if (!message) return base;
 	return `${base}?message=${encodeURIComponent(message.messageId)}&user=${encodeURIComponent(message.userId)}`;
 };
+
+/** 意思の詳細画面(F8a設計) */
+export const intentPath = (id: string): string =>
+	`/intents/${encodeURIComponent(id)}`;
+
+/** 意思を直す画面(F8a設計) */
+export const intentEditPath = (id: string): string => `${intentPath(id)}/edit`;
