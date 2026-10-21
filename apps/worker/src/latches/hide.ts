@@ -40,7 +40,7 @@ const readState = async (
 };
 
 /** 成立の状態記録(to_status=matched)があるか(matched経由のcancelledの判定・docs/05 §3.3) */
-const wasMatched = async (
+export const wasMatched = async (
 	db: DrizzleD1Database,
 	latchId: string,
 ): Promise<boolean> => {

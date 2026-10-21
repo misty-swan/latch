@@ -1,14 +1,16 @@
 /**
  * 提案化(proposeSet・1対1=2人の集合)の統合試験(F4a設計 §3.2〜§3.4・§3.6)。
  * 行を直接INSERTし、履歴確保を条件とする1バッチ書き込み・並行時の1件化・
- * 再提案条件・通知上限と同時進行上限による保留・75分判定を確認する。
+ * 再提案条件・通知上限と同時進行上限による保留・75分判定・提案直前のブロック照合を確認する。
  */
 import { env } from "cloudflare:test";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
 import { describe, expect, it } from "vitest";
 import {
+	blocks,
+	groupCandidates,
 	intents,
 	latches,
 	latchMembers,
@@ -437,5 +439,135 @@ describe("proposeSet(1対1)", () => {
 		expect(await latchesOf(a.id)).toHaveLength(0);
 		expect(await historyOf(a, b)).toHaveLength(0);
 		expect((await candidateOf(rowId)).status).toBe("candidate");
+	});
+});
+
+/** blocks行を配置する(blocker → blocked の1方向) */
+const insertBlock = async (blocker: string, blocked: string) => {
+	await db.insert(blocks).values({
+		blockerUserId: blocker,
+		blockedUserId: blocked,
+		createdAt: ago(1 * HOUR),
+	});
+};
+
+const membersOfLatches = (latchIds: string[]) =>
+	latchIds.length === 0
+		? Promise.resolve([])
+		: db
+				.select()
+				.from(latchMembers)
+				.where(inArray(latchMembers.latchId, latchIds));
+
+const notificationsOfUsers = (userIds: string[]) =>
+	db.select().from(notifications).where(inArray(notifications.userId, userIds));
+
+describe("proposeSet の提案直前のブロック照合(F7a設計 §2.4)", () => {
+	const directions = ["a→b", "b→a"] as const;
+
+	it.each(directions)(
+		"1対1の新規ペアで %s のブロックがあればskipped・何も作らない",
+		async (dir) => {
+			const { a, b, rowId, input } = await setup("connection");
+			if (dir === "a→b") await insertBlock(a.userId, b.userId);
+			else await insertBlock(b.userId, a.userId);
+
+			expect(await proposeSet(db, input, NOW)).toBe("skipped");
+			expect(await latchesOf(a.id)).toHaveLength(0);
+			expect(await historyOf(a, b)).toHaveLength(0);
+			expect(await notificationsOfUsers([a.userId, b.userId])).toHaveLength(0);
+			expect((await candidateOf(rowId)).status).toBe("candidate");
+		},
+	);
+
+	it.each(directions)(
+		"1対1の再提案で %s のブロックがあればskipped・既存の履歴行はexpiredのまま",
+		async (dir) => {
+			// ブロックが無ければ再提案される条件(score変化・抑制経過)
+			const { a, b, rowId, input } = await setup("occasion", {}, 0.95);
+			const prev = await insertHistory(a, b, "expired", ago(4 * HOUR), 0.9);
+			if (dir === "a→b") await insertBlock(a.userId, b.userId);
+			else await insertBlock(b.userId, a.userId);
+
+			expect(await proposeSet(db, input, NOW)).toBe("skipped");
+			const ls = await latchesOf(a.id);
+			expect(ls.map((l) => l.id)).toEqual([prev.latchId]);
+			expect(await membersOfLatches([prev.latchId])).toHaveLength(0);
+			expect(await notificationsOfUsers([a.userId, b.userId])).toHaveLength(0);
+			const hs = await historyOf(a, b);
+			expect(hs).toHaveLength(1);
+			expect(hs[0].id).toBe(prev.historyId);
+			expect(hs[0].outcome).toBe("expired");
+			expect(hs[0].latchId).toBe(prev.latchId);
+			expect(hs[0].updatedAt).toEqual(ago(4 * HOUR));
+			expect((await candidateOf(rowId)).status).toBe("candidate");
+		},
+	);
+
+	it.each(directions)(
+		"3人集合の1ペアだけ %s のブロックがあればskipped・全ペアの確保を巻き戻す",
+		async (dir) => {
+			const userIds = [ulid(), ulid(), ulid()];
+			for (const u of userIds) await insertUser(u);
+			const intentIds = [ulid(), ulid(), ulid()].sort();
+			const members: IntentRow[] = [];
+			for (let i = 0; i < 3; i++) {
+				members.push(
+					await insertIntent(intentIds[i], userIds[i], "connection", {
+						participantsMax: 3,
+					}),
+				);
+			}
+			const groupCandidateId = ulid();
+			await db.insert(groupCandidates).values({
+				id: groupCandidateId,
+				intentIds: members.map((m) => m.id),
+				dedupKey: members.map((m) => `${m.id}@${m.version}`).join(","),
+				aggregateScore: 0.8,
+				prevAggregateScore: null,
+				status: "candidate",
+				createdAt: NOW,
+			});
+			// 2人目と3人目のペアだけブロック(1人目は誰ともブロックしていない)
+			const [p, q] =
+				dir === "a→b"
+					? [members[1].userId, members[2].userId]
+					: [members[2].userId, members[1].userId];
+			await insertBlock(p, q);
+
+			expect(
+				await proposeSet(
+					db,
+					{
+						members,
+						score: 0.8,
+						source: { kind: "group", groupCandidateId },
+					},
+					NOW,
+				),
+			).toBe("skipped");
+			for (const m of members) expect(await latchesOf(m.id)).toHaveLength(0);
+			const hs = await db
+				.select()
+				.from(proposalHistory)
+				.where(inArray(proposalHistory.userLow, userIds));
+			expect(hs).toHaveLength(0);
+			expect(await notificationsOfUsers(userIds)).toHaveLength(0);
+			const [gc] = await db
+				.select()
+				.from(groupCandidates)
+				.where(eq(groupCandidates.id, groupCandidateId));
+			expect(gc.status).toBe("candidate");
+		},
+	);
+
+	it("当事者以外のブロックは提案を止めない", async () => {
+		const { a, b, input } = await setup("connection");
+		const outsider = ulid();
+		await insertUser(outsider);
+		await insertBlock(a.userId, outsider);
+		await insertBlock(outsider, b.userId);
+		expect(await proposeSet(db, input, NOW)).toBe("proposed");
+		expect(await latchesOf(a.id)).toHaveLength(1);
 	});
 });

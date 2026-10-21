@@ -42,7 +42,7 @@ import {
 	parseResponseSchema,
 	patchIntentRequestSchema,
 } from "@latch/shared";
-import { and, count, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, lt, or, sql } from "drizzle-orm";
 import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -51,8 +51,6 @@ import { systemClock } from "../clock/clock";
 import {
 	groupCandidates,
 	intents,
-	latches,
-	latchMembers,
 	matchCandidates,
 	matchEvents,
 } from "../db/schema";
@@ -61,9 +59,11 @@ import { type ErrorResult, errorJson } from "../http/errors";
 import { newUlid } from "../ids";
 import { MS_PER_DAY } from "../intents/expiry";
 import { validateIntentForActive } from "../intents/validation";
-import { closeLatch } from "../latches/close";
-import { proposeNextGroupAfterClose } from "../latches/next-group";
-import { releaseHeld } from "../latches/release";
+import {
+	cancelOpenLatches,
+	openLatchIdsOfIntent,
+	proposeNextGroupsAfterCancel,
+} from "../latches/cancel-open";
 import { createLlm } from "../llm/mode";
 import { createLogger } from "../logging/logger";
 import { emitMatchEvent } from "../pipeline/events";
@@ -271,70 +271,6 @@ const intentMeaningChanged = (
 		JSON.stringify(row.softConstraints) ||
 	JSON.stringify(updated.negativeConstraints) !==
 		JSON.stringify(row.negativeConstraints);
-
-/**
- * 指定Intentを含む進行中の提案(candidate・proposed・partial_accept)を cancelled で閉じ
- * (proposal_historyは消費しない=release・提示済みなら参加者へclosed通知)、操作者以外の参加者の保留を
- * 解放する。matchedは成立済みのため変更しない。Intent削除(docs/05 §2.5)と、active更新での
- * 意味フィールドの変更・期限の短縮(docs/01 §8の不成立経路「Hard Constraintが変化した」・
- * docs/05 §3.2)が共有する。
- * 閉じたLATCHのidを返す。次集合の提案(F4b設計 §3.5)は呼び出し側が行う: 削除ではIntent行と
- * そのグループ候補を消した後に呼ぶ(消す前に呼ぶと、削除中のIntentを含む集合が版の照合と
- * 再検証を通って提案され得る)
- */
-const cancelOpenLatchesOf = async (
-	db: DrizzleD1Database,
-	intentId: string,
-	actorUserId: string,
-	now: Date,
-): Promise<string[]> => {
-	const openLatches = await db
-		.select({ id: latches.id })
-		.from(latches)
-		.where(
-			and(
-				inArray(latches.status, ["candidate", "proposed", "partial_accept"]),
-				sql`EXISTS (SELECT 1 FROM json_each(${latches.intentIds}) WHERE json_each.value = ${intentId})`,
-			),
-		);
-	const affectedUserIds = new Set<string>();
-	const closedLatchIds: string[] = [];
-	for (const l of openLatches) {
-		// 削除・条件変更はシステムの都合の閉じ方のため履歴を消費しない(オーナー裁定 2026-10-20)
-		const closed = await closeLatch(
-			db,
-			l.id,
-			"cancelled",
-			{ kind: "release" },
-			["candidate", "proposed", "partial_accept"],
-			now,
-		);
-		if (!closed) continue;
-		closedLatchIds.push(l.id);
-		const members = await db
-			.select({ userId: latchMembers.userId })
-			.from(latchMembers)
-			.where(eq(latchMembers.latchId, l.id));
-		for (const m of members) affectedUserIds.add(m.userId);
-	}
-	// 操作者以外の参加者は、解放された枠で保留の提案が進められるようにする
-	affectedUserIds.delete(actorUserId);
-	if (affectedUserIds.size > 0) {
-		await releaseHeld(db, now, [...affectedUserIds]);
-	}
-	return closedLatchIds;
-};
-
-/** 閉じたグループ提案ごとに、評価済みの次の集合を提案する(F4b設計 §3.5) */
-const proposeNextGroupsAfterCancel = async (
-	db: DrizzleD1Database,
-	closedLatchIds: string[],
-	now: Date,
-): Promise<void> => {
-	for (const id of closedLatchIds) {
-		await proposeNextGroupAfterClose(db, id, now);
-	}
-};
 
 // metadata.statusの同期(syncVectorStatus)はvectorstore/sync-status.tsの共通ヘルパーを使う
 // (pause/resumeとCronの期限切れ2窓走査の共用・docs/06 §2)
@@ -932,9 +868,9 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 				result.row.expiresAt.getTime() < row.expiresAt.getTime()))
 	) {
 		// 版は更新済みのため、旧版を含む評価済みの集合は次集合の版照合で除かれる
-		const closedLatchIds = await cancelOpenLatchesOf(
+		const closedLatchIds = await cancelOpenLatches(
 			db,
-			result.row.id,
+			await openLatchIdsOfIntent(db, result.row.id),
 			sub,
 			now,
 		);
@@ -1040,9 +976,9 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	// このIntentを含む進行中の提案を取り消す(docs/01 §8の不成立経路「参加Intentが削除された」)。
 	// matchedは成立済みのため変更しない(docs/05 §2.5)。閉じるのは候補・イベント行の削除より前
 	const deleteNow = systemClock.now();
-	const closedLatchIds = await cancelOpenLatchesOf(
+	const closedLatchIds = await cancelOpenLatches(
 		db,
-		target.id,
+		await openLatchIdsOfIntent(db, target.id),
 		sub,
 		deleteNow,
 	);

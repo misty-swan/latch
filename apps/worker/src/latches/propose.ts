@@ -4,6 +4,8 @@
  * バッチの先頭に並べ、後続の書き込みをすべて「latch_id=新idの履歴行の数=C(n,2)」で
  * 条件付けた1つのD1バッチ(1トランザクション)で書く。並行した提案化は履歴確保で1件に絞られ、
  * 一部のペアだけ確保できた側は、同じバッチ末尾の補償文が確保分を巻き戻すため何も残らない。
+ * 同じ条件に「参加者のどの2人の間にもblocks行が無いこと」を含め、ブロックがあれば同様に
+ * 何も作らず巻き戻す(F7a設計 §2.4)。
  */
 import { LATCH } from "@latch/shared";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
@@ -364,8 +366,19 @@ export const proposeSet = async (
 		: expiresAt;
 	const latchId = newUlid();
 	const nowMs = now.getTime();
-	// 全ペア(C(n,2)行)を新idで確保できたこと
-	const secured = sql`(SELECT COUNT(*) FROM proposal_history WHERE latch_id = ${latchId}) = ${pairs.length}`;
+	// 全ペアの両方向(ブロックはどちらの向きでも提案を止める・F7a設計 §2.4)
+	const blockPairs = sql.join(
+		pairs.flatMap((pair) => [
+			sql`(${pair.userLow}, ${pair.userHigh})`,
+			sql`(${pair.userHigh}, ${pair.userLow})`,
+		]),
+		sql`, `,
+	);
+	// 全ペア(C(n,2)行)を新idで確保できたこと、かつ参加者のどのペアの間にもブロックが無いこと。
+	// ブロックの照合をバッチ内の条件に含めるため、読み出しの後にブロックされても提案は作られず、
+	// 確保した履歴は末尾の補償文で巻き戻る(F7a設計 §2.4)
+	const secured = sql`((SELECT COUNT(*) FROM proposal_history WHERE latch_id = ${latchId}) = ${pairs.length}
+		AND NOT EXISTS (SELECT 1 FROM blocks WHERE (blocker_user_id, blocked_user_id) IN (VALUES ${blockPairs})))`;
 	const notSecured = sql`NOT (${secured})`;
 
 	// 4. 先頭(外部キー検査の遅延指定を除く)=全ペアの履歴の確保。新規は事前に採番したidでINSERT
