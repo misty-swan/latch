@@ -278,6 +278,15 @@ export const connectChat = async (
 	});
 	expect(ticketRes.status(), "POST /v1/ws-ticket").toBe(200);
 	const { ticket } = (await ticketRes.json()) as { ticket: string };
+	return connectChatWithTicket(baseURL, latchId, ticket);
+};
+
+/** 発行済みチケットでチャットWebSocketへ接続し、openを待って返す */
+export const connectChatWithTicket = async (
+	baseURL: string,
+	latchId: string,
+	ticket: string,
+): Promise<ChatSocket> => {
 	const url = `${baseURL.replace(/^http/, "ws")}/v1/latches/${latchId}/ws?ticket=${ticket}`;
 	const ws = new WebSocket(url);
 	const frames: ChatFrame[] = [];

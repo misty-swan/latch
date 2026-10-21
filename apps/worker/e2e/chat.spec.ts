@@ -12,6 +12,7 @@ import { type APIRequestContext, expect, test } from "@playwright/test";
 import {
 	type ChatSocket,
 	connectChat,
+	connectChatWithTicket,
 	createIntent,
 	nextFrame,
 	type RegisteredUser,
@@ -210,21 +211,44 @@ test("表示から消すと相手側は読み取り専用で残る", async ({
 			pair.latchId,
 		);
 		sockets.push(sb);
-		// Aの古いチケット(未使用)を先に発行しておく
+		// 履歴に残る既存メッセージをBから1件送っておく
+		const firstRes = await request.post(
+			`/v1/latches/${pair.latchId}/messages`,
+			{
+				data: { body: "消す前の発言", client_id: "c-b-0" },
+				headers: auth(pair.b),
+			},
+		);
+		expect(firstRes.status()).toBe(201);
+
+		// チケットの1回限り: Aが参加者のうちに、チケットTで接続できた後の2回目は401
 		const ticketRes = await request.post("/v1/ws-ticket", {
 			data: { scope: "chat", latch_id: pair.latchId },
 			headers: auth(pair.a),
 		});
 		expect(ticketRes.status()).toBe(200);
 		const { ticket } = (await ticketRes.json()) as { ticket: string };
+		const sa = await connectChatWithTicket(
+			baseURL as string,
+			pair.latchId,
+			ticket,
+		);
+		sockets.push(sa);
+		const reuse = await request.get(
+			`/v1/latches/${pair.latchId}/ws?ticket=${ticket}`,
+			{ headers: { upgrade: "websocket", connection: "Upgrade" } },
+		);
+		expect(reuse.status(), "使用済みチケットの再利用").toBe(401);
 
 		const delRes = await request.delete(`/v1/latches/${pair.latchId}`, {
 			headers: auth(pair.a),
 		});
 		expect(delRes.status()).toBe(204);
 		await nextFrame(sb, "closed");
+		// 1対1の全体cancelledでは、Aの既存接続にもclosedが届く
+		await nextFrame(sa, "closed");
 
-		// Bは送れないが履歴は読める
+		// Bは送れないが履歴(消す前の発言)は読める
 		const sendRes = await request.post(`/v1/latches/${pair.latchId}/messages`, {
 			data: { body: "届きますか", client_id: "c-b-2" },
 			headers: auth(pair.b),
@@ -238,28 +262,33 @@ test("表示から消すと相手側は読み取り専用で残る", async ({
 			headers: auth(pair.b),
 		});
 		expect(histRes.status()).toBe(200);
+		const hist = (await histRes.json()) as { items: MessageDTO[] };
+		expect(hist.items.map((m) => m.body)).toEqual(["消す前の発言"]);
 
-		// Aには404・Aの古いチケットでの接続は開かない
+		// Bから見たLATCHはcancelled・membersなし・participants_count=1
+		const bLatchRes = await request.get(`/v1/latches/${pair.latchId}`, {
+			headers: auth(pair.b),
+		});
+		expect(bLatchRes.status()).toBe(200);
+		const bLatch = (await bLatchRes.json()) as {
+			status: string;
+			members: unknown[];
+			participants_count: number;
+		};
+		expect(bLatch.status).toBe("cancelled");
+		expect(bLatch.members).toEqual([]);
+		expect(bLatch.participants_count).toBe(1);
+
+		// Aには404で、チケットの再発行も404
 		const getRes = await request.get(`/v1/latches/${pair.latchId}`, {
 			headers: auth(pair.a),
 		});
 		expect(getRes.status()).toBe(404);
-		const url = `${(baseURL as string).replace(/^http/, "ws")}/v1/latches/${pair.latchId}/ws?ticket=${ticket}`;
-		const ws = new WebSocket(url);
-		let opened = false;
-		ws.addEventListener("open", () => {
-			opened = true;
+		const ticket2 = await request.post("/v1/ws-ticket", {
+			data: { scope: "chat", latch_id: pair.latchId },
+			headers: auth(pair.a),
 		});
-		await new Promise<void>((resolve) => {
-			ws.addEventListener("close", () => resolve(), { once: true });
-		});
-		expect(opened).toBe(false);
-		// 401はHTTPで確認する(同じチケットはWS試行で消費済みでも401)
-		const probe = await request.get(
-			`/v1/latches/${pair.latchId}/ws?ticket=${ticket}`,
-			{ headers: { upgrade: "websocket", connection: "Upgrade" } },
-		);
-		expect(probe.status()).toBe(401);
+		expect(ticket2.status()).toBe(404);
 	} finally {
 		for (const s of sockets) {
 			s.close();
