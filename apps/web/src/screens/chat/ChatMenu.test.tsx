@@ -53,6 +53,8 @@ let latch: LatchDTO;
 let leaveResponse: () => Response;
 let pendingLeave = false;
 let latch404 = false;
+let blockResponse: () => Response;
+let pendingBlock = false;
 const fetchMock = vi.fn(
 	async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
@@ -61,6 +63,10 @@ const fetchMock = vi.fn(
 		if (url === "/v1/latches/L1/leave" && method === "POST") {
 			if (pendingLeave) return new Promise<Response>(() => {});
 			return leaveResponse();
+		}
+		if (/^\/v1\/users\/u\d\/block$/.test(url) && method === "POST") {
+			if (pendingBlock) return new Promise<Response>(() => {});
+			return blockResponse();
 		}
 		if (url === "/v1/latches/L1" && method === "DELETE")
 			return new Response(null, { status: 204 });
@@ -96,17 +102,31 @@ const mount = (l: LatchDTO) => {
 	const onLeft = vi.fn();
 	const onHidden = vi.fn();
 	const onClose = vi.fn();
+	const onBlocked = vi.fn();
+	const router = createMemoryRouter(
+		[
+			{
+				path: "/latches/:id/chat",
+				element: (
+					<ChatMenu
+						latch={l}
+						onClose={onClose}
+						onLeft={onLeft}
+						onHidden={onHidden}
+						onBlocked={onBlocked}
+					/>
+				),
+			},
+			{ path: "/latches/:id/report", element: <p>通報の画面</p> },
+		],
+		{ initialEntries: ["/latches/L1/chat"] },
+	);
 	render(
 		<QueryClientProvider client={createTestQueryClient()}>
-			<ChatMenu
-				latch={l}
-				onClose={onClose}
-				onLeft={onLeft}
-				onHidden={onHidden}
-			/>
+			<RouterProvider router={router} />
 		</QueryClientProvider>,
 	);
-	return { onLeft, onHidden, onClose };
+	return { onLeft, onHidden, onClose, onBlocked, router };
 };
 
 const openChat = (initialEntries = ["/latches/L1/chat"]) => {
@@ -131,6 +151,8 @@ beforeEach(() => {
 	pendingLeave = false;
 	latch404 = false;
 	leaveResponse = () => json(latchOf({ status: "cancelled" }));
+	blockResponse = () => json({ blocked: true }, 201);
+	pendingBlock = false;
 });
 afterEach(() => {
 	cleanup();
@@ -156,8 +178,8 @@ describe("ChatMenu 項目と説明文", () => {
 				"このつながりを終えて、自分の一覧から消します。相手の側には履歴が残ります。",
 			),
 		).toBeTruthy();
-		expect(screen.queryByText("通報する")).toBeNull();
-		expect(screen.queryByText("ブロックする")).toBeNull();
+		expect(screen.getByText("通報する")).toBeTruthy();
+		expect(screen.getByText("ブロックする")).toBeTruthy();
 	});
 
 	it("matched・グループ", () => {
@@ -269,6 +291,129 @@ describe("ChatMenu 確認と操作", () => {
 	});
 });
 
+const GROUP_MEMBERS = [
+	{ user_id: "u2", display_name: "ミナト", bio: null, has_icon: false },
+	{ user_id: "u3", display_name: "あお", bio: null, has_icon: false },
+];
+
+describe("ChatMenu 通報・ブロック", () => {
+	it("グループ・completed・matched経由のcancelledでも「通報する」「ブロックする」が出る", () => {
+		for (const over of [
+			{ participants_count: 3, members: GROUP_MEMBERS },
+			{ status: "completed" as const },
+			{ status: "cancelled" as const },
+		]) {
+			mount(latchOf(over));
+			expect(screen.getByText("通報する")).toBeTruthy();
+			expect(screen.getByText("ブロックする")).toBeTruthy();
+			cleanup();
+		}
+	});
+
+	it("「通報する」で/latches/L1/reportへ移る", async () => {
+		const { router } = mount(latchOf());
+		fireEvent.click(screen.getByText("通報する"));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/latches/L1/report"),
+		);
+		expect(router.state.location.search).toBe("");
+	});
+
+	it("1対1: 「ブロックする」→確認の3項目→[ブロックする]でPOST /v1/users/u2/blockを1回送りonBlocked", async () => {
+		const { onBlocked } = mount(latchOf());
+		fireEvent.click(screen.getByText("ブロックする"));
+		expect(screen.getByRole("dialog", { name: "ブロックの確認" })).toBeTruthy();
+		expect(screen.getByText("ミナトさんを、ブロックしますか。")).toBeTruthy();
+		expect(
+			screen.getByText("このつながりのチャットは、読み取り専用になります。"),
+		).toBeTruthy();
+		expect(
+			screen.getByText("今後、この相手との提案は届きません。"),
+		).toBeTruthy();
+		expect(
+			screen.getByText("ブロックしたことは、相手に通知されません。"),
+		).toBeTruthy();
+		const ok = screen.getByRole("button", { name: "ブロックする" });
+		expect(ok.className).toBe("btn btn--danger btn--block");
+		fireEvent.click(ok);
+		await waitFor(() => expect(onBlocked).toHaveBeenCalledTimes(1));
+		expect(callsTo("POST", "/v1/users/u2/block")).toHaveLength(1);
+	});
+
+	it("確認の[やめる]では要求を送らずメニューへ戻る", () => {
+		mount(latchOf());
+		fireEvent.click(screen.getByText("ブロックする"));
+		fireEvent.click(screen.getByRole("button", { name: "やめる" }));
+		expect(screen.getByText("このつながりについて")).toBeTruthy();
+		expect(callsTo("POST", "/v1/users/u2/block")).toHaveLength(0);
+	});
+
+	it("送信中は[ブロックする]を押せず・連打しても1回", async () => {
+		pendingBlock = true;
+		mount(latchOf());
+		fireEvent.click(screen.getByText("ブロックする"));
+		const ok = screen.getByRole("button", { name: "ブロックする" });
+		fireEvent.click(ok);
+		fireEvent.click(ok);
+		await waitFor(() => expect((ok as HTMLButtonElement).disabled).toBe(true));
+		expect(callsTo("POST", "/v1/users/u2/block")).toHaveLength(1);
+	});
+
+	it("グループ: 相手を選ぶまで[次へ]は押せず・選んだ人の確認→POST /v1/users/u3/block", async () => {
+		const { onBlocked } = mount(
+			latchOf({ participants_count: 3, members: GROUP_MEMBERS }),
+		);
+		fireEvent.click(screen.getByText("ブロックする"));
+		const next = screen.getByRole("button", { name: "次へ" });
+		expect((next as HTMLButtonElement).disabled).toBe(true);
+		expect(screen.getByRole("radio", { name: "ミナト" })).toBeTruthy();
+		fireEvent.click(screen.getByRole("radio", { name: "あお" }));
+		expect((next as HTMLButtonElement).disabled).toBe(false);
+		fireEvent.click(next);
+		expect(screen.getByText("あおさんを、ブロックしますか。")).toBeTruthy();
+		expect(
+			screen.getByText(
+				"このグループから抜けます。チャットは読み取り専用になります。",
+			),
+		).toBeTruthy();
+		expect(
+			screen.getByText("今後、この相手との提案は届きません。"),
+		).toBeTruthy();
+		expect(
+			screen.getByText("ブロックしたことは、相手に通知されません。"),
+		).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: "ブロックする" }));
+		await waitFor(() => expect(onBlocked).toHaveBeenCalledTimes(1));
+		expect(callsTo("POST", "/v1/users/u3/block")).toHaveLength(1);
+		expect(callsTo("POST", "/v1/users/u2/block")).toHaveLength(0);
+	});
+
+	it("404なら「この操作はできませんでした。」をシートに出しonBlockedを呼ばない", async () => {
+		blockResponse = () =>
+			json({ error: { code: "NOT_FOUND", message: "x" } }, 404);
+		const { onBlocked } = mount(latchOf());
+		fireEvent.click(screen.getByText("ブロックする"));
+		fireEvent.click(screen.getByRole("button", { name: "ブロックする" }));
+		expect(
+			await screen.findByText("この操作はできませんでした。"),
+		).toBeTruthy();
+		expect(onBlocked).not.toHaveBeenCalled();
+	});
+
+	it("500なら共通の失敗文", async () => {
+		blockResponse = () =>
+			json({ error: { code: "INTERNAL", message: "x" } }, 500);
+		mount(latchOf());
+		fireEvent.click(screen.getByText("ブロックする"));
+		fireEvent.click(screen.getByRole("button", { name: "ブロックする" }));
+		expect(
+			await screen.findByText(
+				"送れませんでした。時間をおいて、もう一度お試しください。",
+			),
+		).toBeTruthy();
+	});
+});
+
 describe("Chat 経由の遷移とトースト", () => {
 	const startLeave = async () => {
 		const router = openChat();
@@ -329,6 +474,54 @@ describe("Chat 経由の遷移とトースト", () => {
 		expect(
 			after
 				.slice(leaveAt + 1)
+				.filter(
+					([u, i]) =>
+						String(u) === "/v1/latches/L1" && (i?.method ?? "GET") === "GET",
+				),
+		).toHaveLength(0);
+	});
+
+	it("1対1のブロック成功でシートが閉じ・トーストが出て・取り直したLATCHで読み取り専用になる", async () => {
+		blockResponse = () => {
+			latch = latchOf({ status: "cancelled" });
+			return json({ blocked: true }, 201);
+		};
+		const router = openChat();
+		fireEvent.click(await screen.findByLabelText("このつながりについて"));
+		fireEvent.click(await screen.findByText("ブロックする"));
+		fireEvent.click(screen.getByRole("button", { name: "ブロックする" }));
+		expect(await screen.findByText("ブロックしました。")).toBeTruthy();
+		expect(await screen.findByText("このつながりは終了しました")).toBeTruthy();
+		expect(router.state.location.pathname).toBe("/latches/L1/chat");
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
+	it("グループ(matched)のブロック成功は本人が抜けるので/connectionsへreplaceで移る", async () => {
+		latch = latchOf({ participants_count: 3, members: GROUP_MEMBERS });
+		blockResponse = () => {
+			latch404 = true;
+			return json({ blocked: true }, 201);
+		};
+		const router = openChat();
+		const paths: string[] = [];
+		router.subscribe((st) => paths.push(st.location.pathname));
+		fireEvent.click(await screen.findByLabelText("このつながりについて"));
+		fireEvent.click(await screen.findByText("ブロックする"));
+		fireEvent.click(screen.getByRole("radio", { name: "ミナト" }));
+		fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+		const before = fetchMock.mock.calls.length;
+		fireEvent.click(screen.getByRole("button", { name: "ブロックする" }));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/connections"),
+		);
+		expect(await screen.findByText("ブロックしました。")).toBeTruthy();
+		// 抜けたLATCHを取り直さない(404で「見つからない」へ移らない)
+		await new Promise((r) => setTimeout(r, 50));
+		expect(router.state.location.pathname).toBe("/connections");
+		expect(paths).not.toContain("/latches/L1");
+		expect(
+			fetchMock.mock.calls
+				.slice(before)
 				.filter(
 					([u, i]) =>
 						String(u) === "/v1/latches/L1" && (i?.method ?? "GET") === "GET",

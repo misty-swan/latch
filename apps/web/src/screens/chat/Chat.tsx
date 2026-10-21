@@ -4,7 +4,7 @@
  * prototype/app/app.jsのchatHead・screens.chatの移植。
  */
 
-import type { LatchDTO } from "@latch/shared";
+import type { LatchDTO, MessageDTO } from "@latch/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
@@ -29,7 +29,7 @@ import { openChatSocket } from "../../chat/socket";
 import { formatMatchedAt } from "../../latches/format";
 import { latchQueryKey, useLatchQuery } from "../../latches/queries";
 import { useMeQuery } from "../../me/queries";
-import { latchPath, PATHS } from "../../routes/paths";
+import { latchPath, PATHS, reportPath } from "../../routes/paths";
 import { Avatar, LatchArt } from "../latch/art";
 import { LatchLoadFailed } from "../latch/LatchScreen";
 import { ScreenGrain } from "../shared";
@@ -220,6 +220,8 @@ function ChatView({
 	const matched = latch.status === "matched";
 	const navigate = useNavigate();
 	const [menuOpen, setMenuOpen] = useState(false);
+	/** 操作を開いた相手の発言(F7c設計 §1.2) */
+	const [menuMessage, setMenuMessage] = useState<MessageDTO | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
 	useEffect(() => {
 		if (toast === null) return;
@@ -238,6 +240,22 @@ function ChatView({
 			navigate(PATHS.connections, { replace: true, state: { toast: message } });
 		}
 	};
+	// ブロック(F7c設計 §1.8)。1対1は全体が終わりその場で読み取り専用になる(useBlockがLATCHを取り直す)。
+	// 続いているグループは本人が抜けて以後このLATCHを読めない(404)ため・一覧へ置き換えで移る
+	const onBlocked = () => {
+		const message = "ブロックしました。";
+		if (latch.participants_count > 2 && latch.status === "matched") {
+			navigate(PATHS.connections, { replace: true, state: { toast: message } });
+		} else {
+			setMenuOpen(false);
+			setToast(message);
+		}
+	};
+	const reportMessage = (m: MessageDTO) =>
+		navigate(reportPath(latch.id, { messageId: m.id, userId: m.user_id }), {
+			state: { quote: m.body },
+		});
+
 	// 消したチャットへ「戻る」で戻らないよう置き換えで移る
 	const onHidden = () =>
 		navigate(PATHS.connections, {
@@ -461,6 +479,7 @@ function ChatView({
 							now={now}
 							pending={shownPending}
 							onRetry={retry}
+							onMessageMenu={setMenuMessage}
 						/>
 					) : null}
 				</div>
@@ -487,7 +506,61 @@ function ChatView({
 					onClose={() => setMenuOpen(false)}
 					onLeft={onLeft}
 					onHidden={onHidden}
+					onBlocked={onBlocked}
 				/>
+			) : null}
+			{menuMessage !== null ? (
+				<>
+					<div
+						className="backdrop"
+						aria-hidden="true"
+						onClick={() => setMenuMessage(null)}
+					/>
+					<div
+						className="sheet-layer"
+						role="dialog"
+						aria-modal="true"
+						aria-label="このメッセージについて"
+					>
+						<div className="sheet">
+							<span className="sheet__grab" aria-hidden="true" />
+							<h2 className="sheet__title" style={{ fontSize: 19 }}>
+								このメッセージについて
+							</h2>
+							<div
+								className="list"
+								style={{ margin: "0 calc(var(--gutter) * -1)" }}
+							>
+								<button
+									type="button"
+									className="list-row"
+									onClick={() => reportMessage(menuMessage)}
+								>
+									<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
+										<path d="M6 20.5V4.5M6 5h11.2l-2.2 4 2.2 4H6" />
+									</svg>
+									<span>このメッセージを通報する</span>
+									<svg
+										className="ic list-row__chev"
+										viewBox="0 0 24 24"
+										aria-hidden="true"
+									>
+										<path d="M9.5 6l6 6-6 6" />
+									</svg>
+								</button>
+							</div>
+							<div className="sheet__actions">
+								<button
+									type="button"
+									className="btn btn--quiet btn--block"
+									onClick={() => setMenuMessage(null)}
+								>
+									閉じる
+								</button>
+							</div>
+						</div>
+					</div>
+				</>
 			) : null}
 		</div>
 	);

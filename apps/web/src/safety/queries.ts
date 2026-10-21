@@ -6,7 +6,7 @@
 import type { ReportCreateRequest } from "@latch/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiFetch } from "../api/client";
-import { CONNECTIONS_QUERY_KEY } from "../chat/queries";
+import { CONNECTIONS_QUERY_KEY, messagesQueryKey } from "../chat/queries";
 import { latchQueryKey } from "../latches/queries";
 import { BLOCKS_QUERY_KEY } from "../me/queries";
 import { NOTICES_QUERY_KEY } from "../notices/queries";
@@ -20,18 +20,29 @@ export const useReport = () =>
 
 /**
  * ブロック(201新規 / 200再適用)。効果(LATCHからの離脱・提案の取り消し)が
- * 画面に出るよう・LATCH・つながり一覧・お知らせ・ブロック一覧を取り直す
+ * 画面に出るよう・LATCH・つながり一覧・お知らせ・ブロック一覧を取り直す。
+ * leavesLatch=true(続いているグループ: 本人が抜けて以後このLATCHは読めない=404)の成功時は、
+ * LATCHと履歴を取り直さずに捨てる(取り直しの404で画面が「見つからない」へ移るのを防ぐ)
  */
-export const useBlock = (latchId: string) => {
+export const useBlock = (
+	latchId: string,
+	options: { leavesLatch?: boolean } = {},
+) => {
 	const client = useQueryClient();
+	const { leavesLatch = false } = options;
 	return useMutation({
 		mutationFn: (userId: string) =>
 			apiFetch<unknown>(`/users/${encodeURIComponent(userId)}/block`, {
 				method: "POST",
 			}),
-		onSettled: () => {
+		onSettled: (_data, error) => {
+			const dropLatch = leavesLatch && error === null;
+			if (dropLatch) {
+				client.removeQueries({ queryKey: latchQueryKey(latchId) });
+				client.removeQueries({ queryKey: messagesQueryKey(latchId) });
+			}
 			for (const queryKey of [
-				latchQueryKey(latchId),
+				...(dropLatch ? [] : [latchQueryKey(latchId)]),
 				CONNECTIONS_QUERY_KEY,
 				NOTICES_QUERY_KEY,
 				BLOCKS_QUERY_KEY,

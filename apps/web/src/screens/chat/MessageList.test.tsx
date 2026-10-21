@@ -3,8 +3,8 @@
  */
 
 import type { LatchDTO, MessageDTO } from "@latch/shared";
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MessageList } from "./MessageList";
 
 const NOW = new Date("2026-10-21T03:00:00Z");
@@ -48,6 +48,7 @@ describe("MessageList", () => {
 				now={NOW}
 				pending={[]}
 				onRetry={() => {}}
+				onMessageMenu={() => {}}
 			/>,
 		);
 		const days = [...container.querySelectorAll(".chat__day")].map(
@@ -68,6 +69,7 @@ describe("MessageList", () => {
 				now={NOW}
 				pending={[]}
 				onRetry={() => {}}
+				onMessageMenu={() => {}}
 			/>,
 		);
 		expect(container.querySelector(".msg__who")).toBeNull();
@@ -82,6 +84,7 @@ describe("MessageList", () => {
 				now={NOW}
 				pending={[]}
 				onRetry={() => {}}
+				onMessageMenu={() => {}}
 			/>,
 		);
 		const whos = [...container.querySelectorAll(".msg__who")].map(
@@ -99,6 +102,7 @@ describe("MessageList", () => {
 				now={NOW}
 				pending={[]}
 				onRetry={() => {}}
+				onMessageMenu={() => {}}
 			/>,
 		);
 		expect(
@@ -119,11 +123,62 @@ describe("MessageList", () => {
 					{ clientId: "c2", body: "失敗の本文", state: "failed" },
 				]}
 				onRetry={(id) => retried.push(id)}
+				onMessageMenu={() => {}}
 			/>,
 		);
 		expect(container.querySelectorAll(".msg.is-failed")).toHaveLength(1);
 		screen.getByRole("button", { name: "もう一度送る" }).click();
 		expect(retried).toEqual(["c2"]);
 		expect(screen.getByText("送信中の本文")).toBeTruthy();
+	});
+
+	it("相手の発言にだけ「このメッセージの操作」があり・押すとその発言でonMessageMenu", () => {
+		const onMessageMenu = vi.fn();
+		const { container } = render(
+			<MessageList
+				latch={latchOf()}
+				meId="me"
+				messages={three}
+				now={NOW}
+				pending={[
+					{ clientId: "c1", body: "送信中の本文", state: "sending" },
+					{ clientId: "c2", body: "失敗の本文", state: "failed" },
+				]}
+				onRetry={() => {}}
+				onMessageMenu={onMessageMenu}
+			/>,
+		);
+		const buttons = screen.getAllByRole("button", {
+			name: "このメッセージの操作",
+		});
+		expect(buttons).toHaveLength(2);
+		for (const mine of container.querySelectorAll(".msg--mine")) {
+			expect(mine.querySelector(".msg__more")).toBeNull();
+		}
+		fireEvent.click(buttons[1] as HTMLElement);
+		expect(onMessageMenu).toHaveBeenCalledTimes(1);
+		expect(onMessageMenu.mock.calls[0]?.[0].id).toBe("03");
+	});
+
+	it("相手の発言のcontextmenuでも開き既定のメニューを止める・自分の発言では開かない", () => {
+		const onMessageMenu = vi.fn();
+		render(
+			<MessageList
+				latch={latchOf()}
+				meId="me"
+				messages={three}
+				now={NOW}
+				pending={[]}
+				onRetry={() => {}}
+				onMessageMenu={onMessageMenu}
+			/>,
+		);
+		const theirs = screen.getByText("本文01");
+		const notPrevented = fireEvent.contextMenu(theirs);
+		expect(notPrevented).toBe(false);
+		expect(onMessageMenu).toHaveBeenCalledTimes(1);
+		expect(onMessageMenu.mock.calls[0]?.[0].id).toBe("01");
+		fireEvent.contextMenu(screen.getByText("本文02"));
+		expect(onMessageMenu).toHaveBeenCalledTimes(1);
 	});
 });

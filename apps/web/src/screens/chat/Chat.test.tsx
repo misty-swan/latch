@@ -636,3 +636,36 @@ describe("Chat の既読と画面の表示状態", () => {
 		);
 	});
 });
+
+describe("Chat のメッセージの操作", () => {
+	it("相手の発言の操作→「このメッセージについて」→「このメッセージを通報する」で発言と相手付きの通報画面へ(引用をstateで渡す)", async () => {
+		history = {
+			"": { items: [msg("M1", "u2"), msg("02", "me")], next_before: null },
+		};
+		const router = open();
+		fireEvent.click(
+			await screen.findByRole("button", { name: "このメッセージの操作" }),
+		);
+		expect(
+			screen.getByRole("dialog", { name: "このメッセージについて" }),
+		).toBeTruthy();
+		fireEvent.click(screen.getByText("このメッセージを通報する"));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/latches/L1/report"),
+		);
+		expect(router.state.location.search).toBe("?message=M1&user=u2");
+		expect(router.state.location.state).toEqual({ quote: "本文M1" });
+	});
+
+	it("[閉じる]でシートが閉じる", async () => {
+		history = { "": { items: [msg("M1", "u2")], next_before: null } };
+		open();
+		fireEvent.click(
+			await screen.findByRole("button", { name: "このメッセージの操作" }),
+		);
+		fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+		expect(
+			screen.queryByRole("dialog", { name: "このメッセージについて" }),
+		).toBeNull();
+	});
+});

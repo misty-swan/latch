@@ -2,3 +2,36 @@
 .msg.is-sending .msg__bubble {
 	opacity: 0.55;
 }
+
+/* 相手の発言の操作(F7c設計 §1.2)。吹き出しの横に置き・押せる範囲は44px四方 */
+.msg__line {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+/* 長い本文でも吹き出しが折り返し・ボタンが押し出されないように */
+.msg__line > * {
+	min-width: 0;
+}
+.msg__more {
+	flex: none;
+	display: grid;
+	place-items: center;
+	width: 44px;
+	height: 44px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: transparent;
+	color: var(--ink-3);
+	cursor: pointer;
+}
+.msg__more .ic {
+	width: 18px;
+	height: 18px;
+}
+.msg__more:focus-visible {
+	outline: 2px solid var(--ink);
+	outline-offset: -4px;
+}
