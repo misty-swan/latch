@@ -27,6 +27,7 @@ import { Placed } from "./screens/Placed";
 import { Reading } from "./screens/Reading";
 import { Register } from "./screens/Register";
 import { SignIn } from "./screens/SignIn";
+import { Report } from "./screens/safety/Report";
 import { Welcome } from "./screens/Welcome";
 
 export const appRoutes = [
@@ -159,6 +160,14 @@ export const appRoutes = [
 		element: (
 			<RequireAuth>
 				<Profile />
+			</RequireAuth>
+		),
+	},
+	{
+		path: PATHS.report,
+		element: (
+			<RequireAuth>
+				<Report />
 			</RequireAuth>
 		),
 	},

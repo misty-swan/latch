@@ -9,7 +9,7 @@ import type { LatchDTO } from "@latch/shared";
 import { type ReactNode, type Ref, useEffect, useState } from "react";
 import { Link } from "react-router";
 import { formatLeft, formatWhen } from "../../latches/format";
-import { PATHS } from "../../routes/paths";
+import { PATHS, reportPath } from "../../routes/paths";
 import { ScreenGrain } from "../shared";
 import { GroupDisc, LatchArt } from "./art";
 
@@ -47,6 +47,7 @@ export function ProposalFrame({
 	// 親のnowは取得時点で止まるため・再描画ごとに実時計と比べて新しい方を使う
 	void tick;
 	const effectiveNow = new Date(Math.max(now.getTime(), Date.now()));
+	const [menuOpen, setMenuOpen] = useState(false);
 	const group = latch.participants_count > 2;
 	return (
 		<div
@@ -72,7 +73,39 @@ export function ProposalFrame({
 					</Link>
 				</div>
 				<span />
-				<div className="topbar__side topbar__side--end" />
+				<div className="topbar__side topbar__side--end">
+					<button
+						type="button"
+						className="icon-btn"
+						aria-label="この提案について"
+						disabled={closeDisabled}
+						onClick={() => setMenuOpen(true)}
+					>
+						<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
+							<circle
+								cx="5.5"
+								cy="12"
+								r="1.25"
+								fill="currentColor"
+								stroke="none"
+							/>
+							<circle
+								cx="12"
+								cy="12"
+								r="1.25"
+								fill="currentColor"
+								stroke="none"
+							/>
+							<circle
+								cx="18.5"
+								cy="12"
+								r="1.25"
+								fill="currentColor"
+								stroke="none"
+							/>
+						</svg>
+					</button>
+				</div>
 			</header>
 			<div className="screen__body">
 				<div className="proposal__stage">
@@ -114,6 +147,58 @@ export function ProposalFrame({
 				) : null}
 				{foot}
 			</div>
+			{menuOpen ? (
+				<>
+					<div
+						className="backdrop"
+						aria-hidden="true"
+						onClick={() => setMenuOpen(false)}
+					/>
+					<div
+						className="sheet-layer"
+						role="dialog"
+						aria-modal="true"
+						aria-label="この提案について"
+					>
+						<div className="sheet">
+							<span className="sheet__grab" aria-hidden="true" />
+							<h2 className="sheet__title" style={{ fontSize: 19 }}>
+								この提案について
+							</h2>
+							<div
+								className="list"
+								style={{ margin: "0 calc(var(--gutter) * -1)" }}
+							>
+								<Link className="list-row" to={reportPath(latch.id)}>
+									<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
+										<path d="M6 21V4M6 5h11l-2.5 3.5L17 12H6" />
+									</svg>
+									<span>この提案を通報する</span>
+									<svg
+										className="ic list-row__chev"
+										viewBox="0 0 24 24"
+										aria-hidden="true"
+									>
+										<path d="M9.5 6l6 6-6 6" />
+									</svg>
+								</Link>
+							</div>
+							<p className="t-caption">
+								通報したことは、相手には通知されません。
+							</p>
+							<div className="sheet__actions">
+								<button
+									type="button"
+									className="btn btn--quiet btn--block"
+									onClick={() => setMenuOpen(false)}
+								>
+									閉じる
+								</button>
+							</div>
+						</div>
+					</div>
+				</>
+			) : null}
 		</div>
 	);
 }

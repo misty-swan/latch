@@ -50,9 +50,46 @@ afterEach(() => {
 });
 
 describe("Proposal", () => {
+	it("右上の「…」でシートが開き、通報へ進める・[閉じる]で閉じる", () => {
+		const router = createMemoryRouter(
+			[
+				{
+					path: "/",
+					element: (
+						<Proposal
+							latch={latchOf({ id: "L1" })}
+							now={NOW}
+							busy={false}
+							notice={null}
+							onJoin={vi.fn()}
+							onDefer={vi.fn()}
+						/>
+					),
+				},
+				{ path: "/latches/L1/report", element: <p>通報画面</p> },
+			],
+			{ initialEntries: ["/"] },
+		);
+		render(<RouterProvider router={router} />);
+		expect(screen.queryByRole("dialog")).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "この提案について" }));
+		expect(
+			screen.getByRole("dialog", { name: "この提案について" }),
+		).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+		expect(screen.queryByRole("dialog")).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "この提案について" }));
+		fireEvent.click(screen.getByRole("link", { name: /この提案を通報する/ }));
+		expect(router.state.location.pathname).toBe("/latches/L1/report");
+	});
+
 	it("ボタンは参加する・今回は見送るの2つだけ(noの操作は無い)", () => {
 		const { container } = render(view(latchOf()));
-		const names = screen.getAllByRole("button").map((b) => b.textContent);
+		// 右上の「…」(名前だけで文字なし)は回答の操作ではないので除く
+		const names = screen
+			.getAllByRole("button")
+			.map((b) => b.textContent)
+			.filter((t) => t !== "");
 		expect(names).toEqual(["参加する", "今回は見送る"]);
 		expect(container.textContent).not.toMatch(/拒否|参加しない/);
 	});

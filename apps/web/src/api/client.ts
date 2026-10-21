@@ -76,7 +76,9 @@ const readSuccess = async <T>(response: Response): Promise<T> => {
 	if (response.status === 204) {
 		return undefined as T;
 	}
-	return (await response.json()) as T;
+	// 本文なしの2xx(POST /v1/users/{id}/blockの201/200)は値なしとして返す
+	const text = await response.text();
+	return (text === "" ? undefined : JSON.parse(text)) as T;
 };
 
 /** 1リクエストを送る(Bearer・JSONボディの組み立て) */
