@@ -8,6 +8,7 @@ import { internalOnError } from "./http/errors";
 import { handleQueueBatch } from "./pipeline/consumer";
 import { runScheduledPipeline } from "./pipeline/cron";
 import { authRoutes } from "./routes/auth";
+import { chatRoutes } from "./routes/chat";
 import { devRoutes } from "./routes/dev";
 import { iconRoutes } from "./routes/icons";
 import { intentRoutes } from "./routes/intents";
@@ -32,6 +33,9 @@ app.route("/v1/users", iconRoutes);
 // Intent API(構造化プレビュー・作成・一覧・取得・更新・削除・docs/05 §3.2)。
 // pause/resumeは後続タスクでintentRoutesに追加する
 app.route("/v1/intents", intentRoutes);
+// チャットAPI(ws-ticket・履歴・送信・既読・WebSocket・F6a設計 §1.1)。
+// /v1/latches/{id}/messages 等を含むため /v1/latches のマウントより前に置く
+app.route("/v1", chatRoutes);
 // LATCH(提案)API(一覧・取得・回答・取り消し・離脱・見送り理由・F4a設計 §4.1)
 app.route("/v1/latches", latchRoutes);
 // dev専用サインインAPI(POST /v1/dev/idp-token・F2'計画Task 2)。テスト鍵モードの
