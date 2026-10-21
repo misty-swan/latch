@@ -6,13 +6,21 @@ import {
 	birthDateSchema,
 	budgetSchema,
 	categorySchema,
+	chatClientFrameSchema,
+	chatServerFrameSchema,
+	clientIdSchema,
 	constraintsSchema,
 	createIntentRequestSchema,
 	devIdpTokenRequestSchema,
 	intentDtoSchema,
 	intentFormSchema,
 	isoDateTimeSchema,
+	latchDtoSchema,
 	logoutRequestSchema,
+	markReadRequestSchema,
+	messageBodySchema,
+	messageDtoSchema,
+	messagePageSchema,
 	parseIntentRequestSchema,
 	parseResponseSchema,
 	participantsSchema,
@@ -20,8 +28,11 @@ import {
 	patchMeRequestSchema,
 	refreshRequestSchema,
 	registerUserRequestSchema,
+	sendMessageRequestSchema,
 	timeSchema,
 	userDtoSchema,
+	wsTicketRequestSchema,
+	wsTicketResponseSchema,
 } from "./schema";
 
 describe("intentFormSchema", () => {
@@ -484,7 +495,7 @@ describe("ERROR_HTTP_STATUS", () => {
 		expect(ERROR_HTTP_STATUS.INTERNAL).toBe(500);
 	});
 
-	it("13種のエラーコード全てを過不足なく網羅する", () => {
+	it("14種のエラーコード全てを過不足なく網羅する", () => {
 		expect(Object.keys(ERROR_HTTP_STATUS).sort()).toEqual(
 			[...ERROR_CODES].sort(),
 		);
@@ -494,5 +505,150 @@ describe("ERROR_HTTP_STATUS", () => {
 describe("LIMITS", () => {
 	it("ICON_MAX_BYTESは1MB(1_048_576)", () => {
 		expect(LIMITS.ICON_MAX_BYTES).toBe(1_048_576);
+	});
+});
+
+describe("チャットのスキーマ(F6a設計)", () => {
+	const ulid = "01J0000000000000000000000A";
+	const iso = "2026-10-21T00:00:00.000Z";
+
+	it("本文は前後の空白を除いて保存形になる", () => {
+		expect(messageBodySchema.parse("  こんにちは \n")).toBe("こんにちは");
+	});
+	it("空白だけ・2,001字はNG、2,000字はOK", () => {
+		expect(messageBodySchema.safeParse(" \n ").success).toBe(false);
+		expect(messageBodySchema.safeParse("a".repeat(2001)).success).toBe(false);
+		expect(messageBodySchema.safeParse("a".repeat(2000)).success).toBe(true);
+	});
+	it("client_idは65字・空白入り・空文字がNG", () => {
+		expect(clientIdSchema.safeParse("a".repeat(64)).success).toBe(true);
+		expect(clientIdSchema.safeParse("a".repeat(65)).success).toBe(false);
+		expect(clientIdSchema.safeParse("a b").success).toBe(false);
+		expect(clientIdSchema.safeParse("").success).toBe(false);
+	});
+	it("sendMessageRequestの余分なキーはNG", () => {
+		expect(
+			sendMessageRequestSchema.safeParse({ body: "hi", client_id: "c1" })
+				.success,
+		).toBe(true);
+		expect(
+			sendMessageRequestSchema.safeParse({ body: "hi", client_id: "c1", x: 1 })
+				.success,
+		).toBe(false);
+	});
+	it("markReadRequestはULIDを要求する", () => {
+		expect(
+			markReadRequestSchema.safeParse({ last_read_message_id: ulid }).success,
+		).toBe(true);
+		expect(
+			markReadRequestSchema.safeParse({ last_read_message_id: "x" }).success,
+		).toBe(false);
+	});
+	it("wsTicketRequestのscopeがchat以外はNG", () => {
+		expect(
+			wsTicketRequestSchema.safeParse({ scope: "chat", latch_id: ulid })
+				.success,
+		).toBe(true);
+		expect(
+			wsTicketRequestSchema.safeParse({ scope: "other", latch_id: ulid })
+				.success,
+		).toBe(false);
+	});
+	it("wsTicketResponseのexpires_inは60", () => {
+		expect(
+			wsTicketResponseSchema.safeParse({ ticket: "t", expires_in: 60 }).success,
+		).toBe(true);
+		expect(
+			wsTicketResponseSchema.safeParse({ ticket: "t", expires_in: 30 }).success,
+		).toBe(false);
+	});
+	it("messageDto・messagePageが通る", () => {
+		const m = {
+			id: ulid,
+			user_id: "u",
+			body: "b",
+			created_at: iso,
+			client_id: null,
+		};
+		expect(messageDtoSchema.safeParse(m).success).toBe(true);
+		expect(
+			messagePageSchema.safeParse({ items: [m], next_before: null }).success,
+		).toBe(true);
+	});
+	it("chatClientFrameはmessage型だけ", () => {
+		expect(
+			chatClientFrameSchema.safeParse({
+				type: "message",
+				body: " hi ",
+				client_id: "c",
+			}).success,
+		).toBe(true);
+		expect(
+			chatClientFrameSchema.safeParse({
+				type: "ping",
+				body: "hi",
+				client_id: "c",
+			}).success,
+		).toBe(false);
+	});
+	it("chatServerFrameのerrorはcodeが3種以外NG", () => {
+		for (const code of ["read_only", "invalid_message", "internal"]) {
+			expect(
+				chatServerFrameSchema.safeParse({
+					type: "error",
+					code,
+					client_id: null,
+				}).success,
+			).toBe(true);
+		}
+		expect(
+			chatServerFrameSchema.safeParse({
+				type: "error",
+				code: "nope",
+				client_id: null,
+			}).success,
+		).toBe(false);
+	});
+	it("chatServerFrameのmessageとclosedが通る", () => {
+		expect(
+			chatServerFrameSchema.safeParse({
+				type: "message",
+				id: ulid,
+				user_id: "u",
+				body: "b",
+				created_at: iso,
+				client_id: null,
+			}).success,
+		).toBe(true);
+		expect(chatServerFrameSchema.safeParse({ type: "closed" }).success).toBe(
+			true,
+		);
+	});
+	it("latchDtoSchemaはlast_message・unread_countなしでもあっても通る", () => {
+		const base = {
+			id: ulid,
+			form: "connection",
+			status: "matched",
+			response_deadline: iso,
+			participants_count: 2,
+			my_response: "yes",
+			score: 0.5,
+			my_intent_id: null,
+			matched_at: iso,
+		};
+		expect(latchDtoSchema.safeParse(base).success).toBe(true);
+		expect(
+			latchDtoSchema.safeParse({
+				...base,
+				last_message: { body: "b", created_at: iso, user_id: "u" },
+				unread_count: 3,
+			}).success,
+		).toBe(true);
+		expect(
+			latchDtoSchema.safeParse({ ...base, last_message: null }).success,
+		).toBe(true);
+		expect(
+			latchDtoSchema.safeParse({ ...base, unread_count: -1 }).success,
+		).toBe(false);
 	});
 });

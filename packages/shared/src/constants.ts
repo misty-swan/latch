@@ -57,6 +57,7 @@ export const ERROR_CODES = [
 	"PARSE_FAILED",
 	"EMBEDDING_PENDING",
 	"INTERNAL",
+	"UPGRADE_REQUIRED",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
@@ -75,6 +76,7 @@ export const ERROR_HTTP_STATUS: Record<ErrorCode, number> = {
 	PARSE_FAILED: 422,
 	EMBEDDING_PENDING: 409,
 	INTERNAL: 500,
+	UPGRADE_REQUIRED: 426,
 };
 
 /** マッチングイベント種別(Queue/DO間で発行される) */
@@ -141,7 +143,27 @@ export const LIMITS = {
 	DISPLAY_NAME_MAX_LENGTH: 40,
 	BIO_MAX_LENGTH: 200,
 	ICON_MAX_BYTES: 1_048_576,
+	/** チャット本文の最大文字数(前後の空白を除いた後・F6a設計) */
+	MESSAGE_BODY_MAX_LENGTH: 2000,
 } as const;
+
+/** チャットの定数(F6a設計) */
+export const CHAT = {
+	/** 履歴1頁の件数 */
+	MESSAGE_PAGE_SIZE: 50,
+	/** WebSocket接続チケットの有効秒数(発行から) */
+	WS_TICKET_TTL_SECONDS: 60,
+	/** client_idの最大文字数 */
+	CLIENT_ID_MAX_LENGTH: 64,
+} as const;
+
+/** WebSocketのerrorフレームのコード(F6a設計) */
+export const CHAT_ERROR_CODES = [
+	"read_only",
+	"invalid_message",
+	"internal",
+] as const;
+export type ChatErrorCode = (typeof CHAT_ERROR_CODES)[number];
 
 /** つながりIntentの期限選択肢(日)。docs/05 §2.2(expires_at: 7/30/90選択) */
 export const EXPIRY_CHOICES_DAYS = [7, 30, 90] as const;

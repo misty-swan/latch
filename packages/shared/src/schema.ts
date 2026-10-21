@@ -3,6 +3,8 @@ import {
 	AUTH_PROVIDERS,
 	BUDGET_MAX,
 	CATEGORIES,
+	CHAT,
+	CHAT_ERROR_CODES,
 	CONSTRAINT_ITEM_MAX_LENGTH,
 	CONSTRAINT_MAX_ITEMS,
 	DEFER_REASONS,
@@ -340,6 +342,17 @@ export const latchDtoSchema = z.object({
 	my_intent_id: z.string().nullable(),
 	/** 成立時刻(latch_status_eventsのto=matchedの時刻)。成立を経ていなければnull */
 	matched_at: isoDateTimeSchema.nullable(),
+	/** 最新メッセージ(成立後の一覧用・F6a設計)。なければnullまたはキーなし */
+	last_message: z
+		.object({
+			body: z.string(),
+			created_at: isoDateTimeSchema,
+			user_id: z.string(),
+		})
+		.nullable()
+		.optional(),
+	/** 未読件数(成立後の一覧用・F6a設計) */
+	unread_count: z.number().int().min(0).optional(),
 	proposal: latchProposalSchema.optional(),
 	members: z
 		.array(
@@ -353,3 +366,81 @@ export const latchDtoSchema = z.object({
 		.optional(),
 });
 export type LatchDTO = z.infer<typeof latchDtoSchema>;
+
+/** ULID(Crockford base32の26字)。チャットのID入力に使う */
+const ulidSchema = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+
+/** チャット本文。前後の空白を除いて1〜2,000字(保存は除いた形・F6a設計) */
+export const messageBodySchema = z
+	.string()
+	.trim()
+	.min(1)
+	.max(LIMITS.MESSAGE_BODY_MAX_LENGTH);
+
+/** 送信の重複判定用ID。1〜64字の[A-Za-z0-9_-](F6a設計) */
+export const clientIdSchema = z
+	.string()
+	.regex(new RegExp(`^[A-Za-z0-9_-]{1,${CHAT.CLIENT_ID_MAX_LENGTH}}$`));
+
+/** POST /v1/latches/{id}/messages のリクエスト(F6a設計) */
+export const sendMessageRequestSchema = z
+	.object({ body: messageBodySchema, client_id: clientIdSchema })
+	.strict();
+export type SendMessageRequest = z.infer<typeof sendMessageRequestSchema>;
+
+/** POST /v1/latches/{id}/read のリクエスト(F6a設計) */
+export const markReadRequestSchema = z
+	.object({ last_read_message_id: ulidSchema })
+	.strict();
+export type MarkReadRequest = z.infer<typeof markReadRequestSchema>;
+
+/** POST /v1/ws-tickets のリクエスト(F6a設計) */
+export const wsTicketRequestSchema = z
+	.object({ scope: z.literal("chat"), latch_id: ulidSchema })
+	.strict();
+export type WsTicketRequest = z.infer<typeof wsTicketRequestSchema>;
+
+/** POST /v1/ws-tickets のレスポンス(expires_inは有効秒数) */
+export const wsTicketResponseSchema = z.object({
+	ticket: z.string(),
+	expires_in: z.literal(CHAT.WS_TICKET_TTL_SECONDS),
+});
+
+/** メッセージDTO。client_idは本人の送信にだけ値を入れ、他人の送信はnull */
+export const messageDtoSchema = z.object({
+	id: z.string(),
+	user_id: z.string(),
+	body: z.string(),
+	created_at: isoDateTimeSchema,
+	client_id: z.string().nullable(),
+});
+export type MessageDTO = z.infer<typeof messageDtoSchema>;
+
+/** 履歴1頁(ID昇順・next_beforeはさらに古い頁がある場合のカーソル) */
+export const messagePageSchema = z.object({
+	items: z.array(messageDtoSchema),
+	next_before: z.string().nullable(),
+});
+export type MessagePage = z.infer<typeof messagePageSchema>;
+
+/** WebSocketのクライアント発フレーム(F6a設計) */
+export const chatClientFrameSchema = z
+	.object({
+		type: z.literal("message"),
+		body: messageBodySchema,
+		client_id: clientIdSchema,
+	})
+	.strict();
+export type ChatClientFrame = z.infer<typeof chatClientFrameSchema>;
+
+/** WebSocketのサーバー発フレーム(F6a設計) */
+export const chatServerFrameSchema = z.discriminatedUnion("type", [
+	messageDtoSchema.extend({ type: z.literal("message") }),
+	z.object({ type: z.literal("closed") }),
+	z.object({
+		type: z.literal("error"),
+		code: z.enum(CHAT_ERROR_CODES),
+		client_id: z.string().nullable(),
+	}),
+]);
+export type ChatServerFrame = z.infer<typeof chatServerFrameSchema>;

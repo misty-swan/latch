@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
 	BUDGET_MAX,
 	CATEGORIES,
+	CHAT,
+	CHAT_ERROR_CODES,
 	CONNECTION_DEFAULT_EXPIRY_DAYS,
 	CONSTRAINT_ITEM_MAX_LENGTH,
 	CONSTRAINT_MAX_ITEMS,
@@ -9,6 +11,7 @@ import {
 	EMBEDDING_MODEL_REAL,
 	EMBEDDING_MODEL_STUB,
 	ERROR_CODES,
+	ERROR_HTTP_STATUS,
 	EXPIRY_CHOICES_DAYS,
 	GEO_RADIUS_MAX_M,
 	GEO_RADIUS_MIN_M,
@@ -37,7 +40,7 @@ describe("CATEGORIES", () => {
 });
 
 describe("ERROR_CODES", () => {
-	it("docs/05 §3.1の13種と順不同で等しい", () => {
+	it("docs/05 §3.1の14種と順不同で等しい", () => {
 		expect([...ERROR_CODES].sort()).toEqual(
 			[
 				"UNAUTHORIZED",
@@ -53,6 +56,7 @@ describe("ERROR_CODES", () => {
 				"PARSE_FAILED",
 				"EMBEDDING_PENDING",
 				"INTERNAL",
+				"UPGRADE_REQUIRED",
 			].sort(),
 		);
 	});
@@ -91,6 +95,7 @@ describe("LIMITS", () => {
 			DISPLAY_NAME_MAX_LENGTH: 40,
 			BIO_MAX_LENGTH: 200,
 			ICON_MAX_BYTES: 1_048_576,
+			MESSAGE_BODY_MAX_LENGTH: 2000,
 		});
 	});
 });
@@ -172,6 +177,25 @@ describe("DEFER_REASONS", () => {
 			"schedule_mismatch",
 			"just_not_now",
 			"other",
+		]);
+	});
+});
+
+describe("チャットの定数(F6a設計)", () => {
+	it("UPGRADE_REQUIREDは426", () => {
+		expect(ERROR_HTTP_STATUS.UPGRADE_REQUIRED).toBe(426);
+	});
+	it("本文上限・頁サイズ・チケット有効期間・client_id上限", () => {
+		expect(LIMITS.MESSAGE_BODY_MAX_LENGTH).toBe(2000);
+		expect(CHAT.MESSAGE_PAGE_SIZE).toBe(50);
+		expect(CHAT.WS_TICKET_TTL_SECONDS).toBe(60);
+		expect(CHAT.CLIENT_ID_MAX_LENGTH).toBe(64);
+	});
+	it("チャットのエラーコードは3種", () => {
+		expect(CHAT_ERROR_CODES).toEqual([
+			"read_only",
+			"invalid_message",
+			"internal",
 		]);
 	});
 });
