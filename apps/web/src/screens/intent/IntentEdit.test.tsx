@@ -117,8 +117,14 @@ describe("IntentEdit", () => {
 		await screen.findByText("絵を見せ合う");
 		expect(screen.getByText("初心者")).toBeTruthy();
 		expect(screen.getByLabelText("主題を直す")).toBeTruthy();
-		expect(screen.queryByLabelText("預け方")).toBeNull();
-		expect(screen.queryByLabelText("期限")).toBeNull();
+		// 預け方・期限は見えるが、直す入口(ボタン・入力)は無い
+		expect(screen.getByText("預け方")).toBeTruthy();
+		expect(screen.getByText("つながり")).toBeTruthy();
+		expect(screen.getByText("期限")).toBeTruthy();
+		expect(document.body.textContent).toMatch(/まで\(\d+日\)/);
+		expect(screen.queryByLabelText("預け方を直す")).toBeNull();
+		expect(screen.queryByLabelText("期限を直す")).toBeNull();
+		expect(screen.queryByRole("radio")).toBeNull();
 	});
 
 	it("変更して保存すると確認を経てPATCHし、詳細へ戻りトーストを出す", async () => {
@@ -201,9 +207,12 @@ describe("IntentEdit", () => {
 				},
 				400,
 			);
+		const latest = { topic: "別画面で直した主題", soft_constraints: ["雑談"] };
 		open();
 		await editTopic();
 		await waitFor(() => expect(gets()).toHaveLength(1));
+		// 衝突のあとの取り直しでは、サーバーの内容が変わっている
+		intent = { ...intent, ...latest, version: 2 };
 		fireEvent.click(screen.getByRole("button", { name: "直して預ける" }));
 		fireEvent.click(
 			(await screen.findByRole("dialog")).querySelector(
@@ -216,6 +225,11 @@ describe("IntentEdit", () => {
 			),
 		).toBeTruthy();
 		await waitFor(() => expect(gets().length).toBeGreaterThanOrEqual(2));
+		// 画面は最新の内容で作り直され、手元の編集は消える
+		expect(await screen.findByText("別画面で直した主題")).toBeTruthy();
+		expect(screen.getByText("雑談")).toBeTruthy();
+		expect(screen.queryByText("新しい主題")).toBeNull();
+		expect(screen.queryByText("初心者")).toBeNull();
 	});
 
 	it("通信失敗(TypeError)はオフラインの案内を出す", async () => {

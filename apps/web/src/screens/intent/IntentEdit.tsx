@@ -23,12 +23,15 @@ import {
 	buildIntentEditPatch,
 	confirmValuesFromIntent,
 	type FactsValues,
+	formatExpiryClockJst,
+	formatMonthDayJst,
 	REASON_MESSAGES,
 	validateConfirmValues,
 } from "../../intents/submit";
 import { isOfflineError, OFFLINE_MESSAGES } from "../../offline/errors";
 import { intentPath } from "../../routes/paths";
 import { ScreenGrain } from "../shared";
+import { daysUntil } from "./IntentDetail";
 import "./intent.css";
 
 const VERSION_CONFLICT_MESSAGE =
@@ -210,6 +213,12 @@ function Editor({
 				>
 					{intent.raw_text}
 				</p>
+				<section style={{ marginTop: 28 }}>
+					<h2 className="t-label">預け方</h2>
+					<p className="t-body" style={{ marginTop: 8, color: "var(--ink)" }}>
+						{form === "occasion" ? "機会" : "つながり"}
+					</p>
+				</section>
 				<section style={{ marginTop: 30 }}>
 					<h2 className="t-label">読み解いた条件</h2>
 					<dl className="facts" style={{ marginTop: 8 }}>
@@ -222,6 +231,16 @@ function Editor({
 						/>
 					</dl>
 				</section>
+				{intent.expires_at !== null && (
+					<section style={{ marginTop: 30 }}>
+						<h2 className="t-label">期限</h2>
+						<p className="t-body" style={{ marginTop: 8, color: "var(--ink)" }}>
+							{form === "occasion"
+								? formatExpiryClockJst(intent.expires_at, new Date())
+								: `${formatMonthDayJst(intent.expires_at)}まで(${daysUntil(intent.expires_at, new Date())}日)`}
+						</p>
+					</section>
+				)}
 			</div>
 			<div className="screen__foot">
 				{inheritedNotice !== null && (
