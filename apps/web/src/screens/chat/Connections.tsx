@@ -17,6 +17,7 @@ import { chatPath, PATHS } from "../../routes/paths";
 import { Avatar, LatchArt } from "../latch/art";
 import { ScreenGrain } from "../shared";
 import { TabBar } from "../TabBar";
+import { TopbarActions } from "../TopbarActions";
 
 const TONES = ["b", "c", "d", "e"] as const;
 /** トーストを出しておく時間(Shelved.tsxと同じ) */
@@ -44,9 +45,7 @@ function ConnectionsTopbar() {
 			</div>
 			<span />
 			<div className="topbar__side topbar__side--end">
-				<span className="icon-btn" role="img" aria-label="自分">
-					<span className="avatar avatar--a avatar--s" aria-hidden="true" />
-				</span>
+				<TopbarActions />
 			</div>
 		</header>
 	);

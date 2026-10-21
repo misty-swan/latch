@@ -55,6 +55,10 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
 		const cursor = new URL(url, "http://x").searchParams.get("cursor") ?? "";
 		return json(pages[cursor]);
 	}
+	if (url.startsWith("/v1/notifications")) {
+		return json({ items: [], next_cursor: null, unread_count: 0 });
+	}
+	if (url === "/v1/users/me") return json({ id: "u1", has_icon: false });
 	throw new Error(`想定外のfetch: ${url}`);
 });
 

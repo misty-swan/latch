@@ -105,6 +105,17 @@ const fetchMock = vi.fn(
 		if (url === "/v1/latches?type=proposals&limit=50" && method === "GET") {
 			return jsonResponse(200, { items: [], next_cursor: null });
 		}
+		// 右上のお知らせ(未読件数)と自分の取得(TopbarActions)も空で返す
+		if (url.startsWith("/v1/notifications") && method === "GET") {
+			return jsonResponse(200, {
+				items: [],
+				next_cursor: null,
+				unread_count: 0,
+			});
+		}
+		if (url === "/v1/users/me" && method === "GET") {
+			return jsonResponse(200, { id: "u1", has_icon: false });
+		}
 		throw new Error(`想定外のfetch: ${method} ${url}`);
 	},
 );
@@ -293,13 +304,15 @@ describe("Compose", () => {
 		await waitFor(() => {
 			expect(router.state.location.pathname).toBe(PATHS.home);
 		});
-		// homeの一覧取得(limit=50)と提案取得のみが走り・空欄の下書き保存はしない
+		// homeの一覧取得(limit=50)と提案取得・右上の取得のみが走り・空欄の下書き保存はしない
 		await waitFor(() => {
-			expect(fetchMock).toHaveBeenCalledTimes(2);
+			expect(fetchMock).toHaveBeenCalledTimes(4);
 		});
-		const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-		expect(url).toBe("/v1/intents?limit=50");
-		expect(init.method ?? "GET").toBe("GET");
+		const listCall = fetchMock.mock.calls.find(
+			([u]) => String(u) === "/v1/intents?limit=50",
+		) as [string, RequestInit | undefined];
+		expect(listCall).toBeDefined();
+		expect(listCall[1]?.method ?? "GET").toBe("GET");
 	});
 
 	it("?draft=<id>付きで開くと下書きの文章を復元し・下書きに残すはPATCHで更新する", async () => {

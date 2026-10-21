@@ -126,6 +126,17 @@ const fetchMock = vi.fn(
 		if (url === "/v1/latches?type=proposals&limit=50" && method === "GET") {
 			return jsonResponse(200, { items: [], next_cursor: null });
 		}
+		// 右上のお知らせ(未読件数)と自分の取得(TopbarActions)も空で返す
+		if (url.startsWith("/v1/notifications") && method === "GET") {
+			return jsonResponse(200, {
+				items: [],
+				next_cursor: null,
+				unread_count: 0,
+			});
+		}
+		if (url === "/v1/users/me" && method === "GET") {
+			return jsonResponse(200, { id: "u1", has_icon: false });
+		}
 		throw new Error(`想定外のfetch: ${method} ${url}`);
 	},
 );
@@ -719,16 +730,15 @@ describe("Confirm(サーバーエラーの表示)", () => {
 		await waitFor(() => {
 			expect(router.state.location.pathname).toBe(PATHS.home);
 		});
-		// 着地したhomeの一覧取得(limit=50)と提案取得のみが追加で走り・保存の再試行はされない
+		// 着地したhomeの一覧取得(limit=50)と提案取得・右上の取得のみが追加で走り・保存の再試行はされない
 		await waitFor(() => {
-			expect(fetchMock).toHaveBeenCalledTimes(3);
+			expect(fetchMock).toHaveBeenCalledTimes(5);
 		});
-		const [listUrl, listInit] = fetchMock.mock.calls[1] as [
-			string,
-			RequestInit,
-		];
-		expect(listUrl).toBe("/v1/intents?limit=50");
-		expect(listInit.method ?? "GET").toBe("GET");
+		const listCall = fetchMock.mock.calls.find(
+			([u]) => String(u) === "/v1/intents?limit=50",
+		) as [string, RequestInit | undefined];
+		expect(listCall).toBeDefined();
+		expect(listCall[1]?.method ?? "GET").toBe("GET");
 	});
 });
 

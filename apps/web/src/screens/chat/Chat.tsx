@@ -23,12 +23,12 @@ import {
 	refreshLatestMessages,
 	requestWsTicket,
 	useMarkRead,
-	useMeQuery,
 	useMessagesQuery,
 } from "../../chat/queries";
 import { openChatSocket } from "../../chat/socket";
 import { formatMatchedAt } from "../../latches/format";
 import { latchQueryKey, useLatchQuery } from "../../latches/queries";
+import { useMeQuery } from "../../me/queries";
 import { latchPath, PATHS } from "../../routes/paths";
 import { Avatar, LatchArt } from "../latch/art";
 import { LatchLoadFailed } from "../latch/LatchScreen";

@@ -5,7 +5,7 @@
  * - 下書きカードは /compose?draft=<id> への再開導線・それ以外のカードの詳細はF3以降のため表示のみ
  * - 進行中の提案は到着カード(arrival)として見出しの後に並べ・提案先の意思カードは「回答を待っています」にする(F4c設計)。
  *   器の灯りは未回答の提案があるときだけ。提案の取得中・失敗時は到着カードを出さず意思の一覧だけ表示する
- * - お知らせ・自分のアイコンは表示のみ(遷移先はF7)
+ * - 右上はお知らせ(未読の点つき)と自分への入口(TopbarActions)
  * - 取得失敗時は再試行を出す(ボードに通信エラー画面がないための共通表示・実装の裁量)
  */
 
@@ -19,6 +19,7 @@ import { latchPath, PATHS } from "../routes/paths";
 import { LatchArt } from "./latch/art";
 import { ScreenGrain } from "./shared";
 import { TabBar } from "./TabBar";
+import { TopbarActions } from "./TopbarActions";
 
 const DAY_MS = 24 * 3_600_000;
 
@@ -291,15 +292,7 @@ function HomeTopbar() {
 			</div>
 			<span />
 			<div className="topbar__side topbar__side--end">
-				<span className="icon-btn" role="img" aria-label="お知らせ">
-					<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
-						<path d="M6.5 16.5v-5.2a5.5 5.5 0 0 1 11 0v5.2l1.6 1.9H4.9z" />
-						<path d="M10 20.6a2.1 2.1 0 0 0 4 0" />
-					</svg>
-				</span>
-				<span className="icon-btn" role="img" aria-label="自分">
-					<span className="avatar avatar--a avatar--s" aria-hidden="true" />
-				</span>
+				<TopbarActions />
 			</div>
 		</header>
 	);

@@ -4,14 +4,13 @@
  * メッセージIDはULIDなので・文字列比較が時系列順になる。
  */
 
-import type { LatchDTO, MessageDTO, MessagePage, UserDTO } from "@latch/shared";
+import type { LatchDTO, MessageDTO, MessagePage } from "@latch/shared";
 import {
 	type InfiniteData,
 	type QueryClient,
 	replaceEqualDeep,
 	useInfiniteQuery,
 	useMutation,
-	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
@@ -27,17 +26,8 @@ import {
 export const CONNECTIONS_QUERY_KEY = ["latches", "connections"] as const;
 /** 履歴は別系統(LATCHの無効化で履歴まで取り直さない) */
 export const messagesQueryKey = (id: string) => ["messages", id] as const;
-export const ME_QUERY_KEY = ["me"] as const;
 
 type MessagesData = InfiniteData<MessagePage, string | undefined>;
-
-/** 自分のユーザー情報(自分の発言かの判定に使う) */
-export const useMeQuery = () =>
-	useQuery({
-		queryKey: ME_QUERY_KEY,
-		queryFn: () => apiFetch<UserDTO>("/users/me"),
-		staleTime: Number.POSITIVE_INFINITY,
-	});
 
 /** 成立したつながりの一覧(50件ずつ) */
 export const useConnectionsQuery = () =>

@@ -152,6 +152,18 @@ const fetchMock = vi.fn(
 		if (url === "/v1/latches?type=proposals&limit=50") {
 			return proposalsResponse;
 		}
+		if (url.startsWith("/v1/notifications")) {
+			return new Response(
+				JSON.stringify({ items: [], next_cursor: null, unread_count: 0 }),
+				{ status: 200, headers: { "Content-Type": "application/json" } },
+			);
+		}
+		if (url === "/v1/users/me") {
+			return new Response(JSON.stringify({ id: "u1", has_icon: false }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		}
 		throw new Error(`想定外のfetch: ${url}`);
 	},
 );

@@ -51,6 +51,14 @@ describe("App", () => {
 			"/latches/:id/shelved",
 			"/connections",
 			"/latches/:id/chat",
+			"/notices",
+			"/me",
+			"/me/profile",
+			"/settings",
+			"/settings/blocked",
+			"/latches/:id/report",
+			"/terms",
+			"/privacy",
 		]);
 	});
 
