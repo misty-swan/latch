@@ -6,3 +6,4 @@ test-results/
 coverage/
 *.tsbuildinfo
 .vscode/
+__pycache__/
