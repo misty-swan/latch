@@ -19,10 +19,13 @@ const HEADINGS: Record<Variant, string> = {
 export function NotEstablished({
 	variant,
 	notice = null,
+	chatTo,
 }: {
 	variant: Variant;
 	/** 送信失敗の一文(取り直しでこの表示へ移っても残す・F4c設計 §1.4) */
 	notice?: string | null;
+	/** 終了したつながりのチャットへの行き先(endedのときだけ[チャットを見る]を出す・F6b設計 §1.3) */
+	chatTo?: string;
 }) {
 	return (
 		<div className="screen closed">
@@ -64,6 +67,11 @@ export function NotEstablished({
 					<p className="t-caption" role="alert">
 						{notice}
 					</p>
+				) : null}
+				{variant === "ended" && chatTo ? (
+					<Link className="btn btn--primary btn--block" to={chatTo}>
+						チャットを見る
+					</Link>
 				) : null}
 				<Link className="btn btn--secondary btn--block" to={PATHS.home}>
 					預けている一覧へ

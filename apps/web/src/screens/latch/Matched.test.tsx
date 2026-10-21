@@ -77,8 +77,21 @@ describe("Matched", () => {
 		expect(screen.getByText("10月20日 9:05 につながりました")).toBeTruthy();
 		expect(screen.getByText("2人")).toBeTruthy();
 		expect(screen.getByText("指定なし(全国)")).toBeTruthy();
-		expect(screen.queryByText("メッセージを送る")).toBeNull();
+		expect(
+			screen
+				.getByRole("link", { name: "メッセージを送る" })
+				.getAttribute("href"),
+		).toBe("/latches/l1/chat");
 		expect(screen.getByRole("link", { name: "あとで" })).toBeTruthy();
+	});
+
+	it("メッセージを送るは「あとで」より先に並ぶ", () => {
+		view(connection());
+		const send = screen.getByRole("link", { name: "メッセージを送る" });
+		const later = screen.getByRole("link", { name: "あとで" });
+		expect(
+			send.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 	});
 
 	it("1対1は相手の色を--theirs-fillに渡す", () => {

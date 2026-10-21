@@ -1,6 +1,6 @@
 /**
  * つながりました画面(表示のみ・prototype/app/app.js screens.matched・summaryFacts・
- * Matched.dc.html・F4c設計)。メッセージ導線はチャット実装(F5)まで置かない。
+ * Matched.dc.html・F4c設計)。メッセージ導線はF6bでチャット画面(/latches/:id/chat)へ置いた。
  * freshのときだけ「押す→はまる→にじみが引く」の演出を行う。
  */
 
@@ -8,7 +8,7 @@ import type { LatchDTO } from "@latch/shared";
 import { type ReactNode, useEffect, useRef } from "react";
 import { Link } from "react-router";
 import { formatMatchedAt, formatWhen, formatYen } from "../../latches/format";
-import { PATHS } from "../../routes/paths";
+import { chatPath, PATHS } from "../../routes/paths";
 import { ScreenGrain } from "../shared";
 import { AVATAR_TONE_FILLS, Avatar, GroupDisc, LatchArt } from "./art";
 
@@ -209,6 +209,9 @@ export function Matched({ latch, now, fresh, notice = null }: MatchedProps) {
 				</div>
 			</div>
 			<div className="screen__foot m-rise m-rise-4">
+				<Link className="btn btn--primary btn--block" to={chatPath(latch.id)}>
+					メッセージを送る
+				</Link>
 				{notice !== null ? (
 					<p className="t-caption" role="alert">
 						{notice}

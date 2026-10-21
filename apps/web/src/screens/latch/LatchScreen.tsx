@@ -15,7 +15,7 @@ import {
 	useRespondMutation,
 	useRetractMutation,
 } from "../../latches/queries";
-import { latchShelvedPath, PATHS } from "../../routes/paths";
+import { chatPath, latchShelvedPath, PATHS } from "../../routes/paths";
 import { ScreenGrain } from "../shared";
 import { Awaiting } from "./Awaiting";
 import { Matched } from "./Matched";
@@ -260,7 +260,13 @@ export function LatchScreen() {
 				/>
 			);
 		case "ended":
-			return <NotEstablished variant="ended" notice={notice} />;
+			return (
+				<NotEstablished
+					variant="ended"
+					notice={notice}
+					chatTo={chatPath(data.id)}
+				/>
+			);
 		case "closed":
 			return <NotEstablished variant="closed" notice={notice} />;
 	}

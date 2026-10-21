@@ -197,6 +197,23 @@ describe("LatchScreen", () => {
 		expect(await screen.findByText(text)).toBeTruthy();
 	});
 
+	it("終了したつながりの画面からチャットへ行ける", async () => {
+		getQueue = [
+			() =>
+				jsonResponse(200, {
+					...matchedLatch(),
+					status: "completed" as const,
+				}),
+		];
+		setup();
+		expect(
+			await screen.findByText("このつながりは終了しました。"),
+		).toBeTruthy();
+		expect(
+			screen.getByRole("link", { name: "チャットを見る" }).getAttribute("href"),
+		).toBe("/latches/L1/chat");
+	});
+
 	it("deferの本人は見送った画面へ置き換える", async () => {
 		getQueue = [
 			() =>

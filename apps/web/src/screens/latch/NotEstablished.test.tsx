@@ -56,4 +56,41 @@ describe("NotEstablished", () => {
 			screen.queryByText("あなたの意思は、そのまま預けています。"),
 		).toBeNull();
 	});
+	it("endedでchatToがあれば[チャットを見る]を預けている一覧への上に出す", () => {
+		render(
+			<MemoryRouter>
+				<NotEstablished variant="ended" chatTo="/latches/L1/chat" />
+			</MemoryRouter>,
+		);
+		const chat = screen.getByRole("link", { name: "チャットを見る" });
+		expect(chat.getAttribute("href")).toBe("/latches/L1/chat");
+		expect(chat.className).toContain("btn--primary");
+		expect(chat.className).toContain("btn--block");
+		const home = screen.getByRole("link", { name: "預けている一覧へ" });
+		expect(
+			chat.compareDocumentPosition(home) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+	});
+	it("chatToが無いendedや成立しなかった・見つからないではチャットを出さない", () => {
+		render(
+			<MemoryRouter>
+				<NotEstablished variant="ended" />
+			</MemoryRouter>,
+		);
+		expect(screen.queryByRole("link", { name: "チャットを見る" })).toBeNull();
+		cleanup();
+		render(
+			<MemoryRouter>
+				<NotEstablished variant="closed" chatTo="/latches/L1/chat" />
+			</MemoryRouter>,
+		);
+		expect(screen.queryByRole("link", { name: "チャットを見る" })).toBeNull();
+		cleanup();
+		render(
+			<MemoryRouter>
+				<NotEstablished variant="not_found" chatTo="/latches/L1/chat" />
+			</MemoryRouter>,
+		);
+		expect(screen.queryByRole("link", { name: "チャットを見る" })).toBeNull();
+	});
 });
