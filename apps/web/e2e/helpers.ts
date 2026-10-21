@@ -233,10 +233,10 @@ export const setUpUser = async (
 };
 
 /**
- * 2人を登録し・同じtopic・同じ地域のつながりIntentを投入して提案を待ち・
- * 回答の画面はlatch-flow.spec.tsで証明済みのためAPIで2人ともyesにして成立(matched)まで進める
+ * 2人を登録し・同じtopic・同じ地域のつながりIntentを投入して提案(proposed)まで待つ
+ * (提案段階の画面を試すspecと、続けて成立まで進めるestablishLatchで共有する)
  */
-export const establishLatch = async (
+export const proposeLatch = async (
 	browser: Browser,
 	site: number,
 	names: [string, string],
@@ -244,6 +244,7 @@ export const establishLatch = async (
 	a: { page: Page; token: string };
 	b: { page: Page; token: string };
 	latchId: string;
+	intentId: string;
 }> => {
 	const a = await setUpUser(browser, names[0]);
 	const b = await setUpUser(browser, names[1]);
@@ -257,9 +258,17 @@ export const establishLatch = async (
 		intentA.id,
 		(item) => item.status === "proposed",
 	);
-	for (const user of [a, b]) {
+	return { a, b, latchId: proposed.id, intentId: intentA.id };
+};
+
+/** 提案中のLATCHに、指定した人たちがAPIでyesと回答する(回答の画面はlatch-flow.spec.tsで証明済み) */
+export const answerYesViaApi = async (
+	users: ReadonlyArray<{ page: Page; token: string }>,
+	latchId: string,
+): Promise<void> => {
+	for (const user of users) {
 		const res = await user.page.request.post(
-			`/v1/latches/${proposed.id}/response`,
+			`/v1/latches/${latchId}/response`,
 			{
 				data: { response: "yes" },
 				headers: { authorization: `Bearer ${user.token}` },
@@ -267,11 +276,50 @@ export const establishLatch = async (
 		);
 		expect(res.status(), "POST /v1/latches/{id}/response").toBe(200);
 	}
+};
+
+/**
+ * 2人を登録し・同じtopic・同じ地域のつながりIntentを投入して提案を待ち・
+ * 回答の画面はlatch-flow.spec.tsで証明済みのためAPIで2人ともyesにして成立(matched)まで進める
+ */
+export const establishLatch = async (
+	browser: Browser,
+	site: number,
+	names: [string, string],
+): Promise<{
+	a: { page: Page; token: string };
+	b: { page: Page; token: string };
+	latchId: string;
+}> => {
+	const { a, b, latchId, intentId } = await proposeLatch(browser, site, names);
+	await answerYesViaApi([a, b], latchId);
 	await waitForDevLatch(
 		a.page,
 		a.token,
-		intentA.id,
+		intentId,
 		(item) => item.status === "matched",
 	);
-	return { a, b, latchId: proposed.id };
+	return { a, b, latchId };
+};
+
+/** GET /v1/dev/reportsの1項目のうちE2Eが使う欄(F7a設計 §3.3) */
+export interface DevReportForCheck {
+	id: string;
+	reportee: string;
+	latch_id: string;
+	target: string;
+	reason: string;
+	message_id: string | null;
+}
+
+/** 本人が出した通報の記録をdev観測API(GET /v1/dev/reports)から取る */
+export const fetchDevReports = async (
+	page: Page,
+	token: string,
+): Promise<DevReportForCheck[]> => {
+	const res = await page.request.get("/v1/dev/reports", {
+		headers: { authorization: `Bearer ${token}` },
+	});
+	expect(res.status(), "GET /v1/dev/reports").toBe(200);
+	return ((await res.json()) as { reports: DevReportForCheck[] }).reports;
 };

@@ -40,10 +40,14 @@ test("2人が画面で送り合い、一覧に最終メッセージと未読が�
 	await a.page.getByRole("link", { name: "メッセージを送る" }).click();
 	await expect(a.page).toHaveURL(new RegExp(`/latches/${latchId}/chat$`));
 	await b.page.goto(`/latches/${latchId}/chat`);
-	await expect(b.page.getByLabel("メッセージ")).toBeVisible();
+	await expect(
+		b.page.getByRole("textbox", { name: "メッセージ" }),
+	).toBeVisible();
 
 	// A送信→Bに再読み込みなしで出る
-	await a.page.getByLabel("メッセージ").fill("はじめまして");
+	await a.page
+		.getByRole("textbox", { name: "メッセージ" })
+		.fill("はじめまして");
 	await a.page.getByRole("button", { name: "送る" }).click();
 	await expect(
 		a.page.locator(".msg--mine .msg__bubble", { hasText: "はじめまして" }),
@@ -54,7 +58,7 @@ test("2人が画面で送り合い、一覧に最終メッセージと未読が�
 
 	// B返信→Aに出る
 	const readAfterReply = watchRead(a.page, latchId);
-	await b.page.getByLabel("メッセージ").fill("こちらこそ");
+	await b.page.getByRole("textbox", { name: "メッセージ" }).fill("こちらこそ");
 	await b.page.getByRole("button", { name: "送る" }).click();
 	await expect(
 		a.page.locator(".msg--theirs .msg__bubble", { hasText: "こちらこそ" }),
@@ -67,7 +71,7 @@ test("2人が画面で送り合い、一覧に最終メッセージと未読が�
 	await expect(
 		a.page.getByRole("heading", { name: "つながっている" }),
 	).toBeVisible();
-	await b.page.getByLabel("メッセージ").fill("また明日");
+	await b.page.getByRole("textbox", { name: "メッセージ" }).fill("また明日");
 	await b.page.getByRole("button", { name: "送る" }).click();
 	await expect(
 		b.page.locator(".msg--mine .msg__bubble", { hasText: "また明日" }),
@@ -97,8 +101,12 @@ test("参加を取り消すと相手は読み取り専用になり、表示か�
 	const { a, b, latchId } = await establishLatch(browser, 43, [NAME_A, NAME_B]);
 	await a.page.goto(`/latches/${latchId}/chat`);
 	await b.page.goto(`/latches/${latchId}/chat`);
-	await expect(a.page.getByLabel("メッセージ")).toBeVisible();
-	await expect(b.page.getByLabel("メッセージ")).toBeVisible();
+	await expect(
+		a.page.getByRole("textbox", { name: "メッセージ" }),
+	).toBeVisible();
+	await expect(
+		b.page.getByRole("textbox", { name: "メッセージ" }),
+	).toBeVisible();
 
 	// A: このつながりについて→参加を取り消す→[取り消す]
 	await a.page.getByRole("button", { name: "このつながりについて" }).click();
@@ -109,7 +117,9 @@ test("参加を取り消すと相手は読み取り専用になり、表示か�
 
 	// B: 再読み込みなしでclosed(入力欄が消え・終了の帯が出る)
 	await expect(b.page.getByText("このつながりは終了しました")).toBeVisible();
-	await expect(b.page.getByLabel("メッセージ")).toHaveCount(0);
+	await expect(b.page.getByRole("textbox", { name: "メッセージ" })).toHaveCount(
+		0,
+	);
 
 	// B: 一覧の「終了」に「つながっていた相手」
 	await b.page.goto("/connections");
