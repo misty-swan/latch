@@ -36,25 +36,11 @@ import {
 	formatExpiryClockJst,
 	isoFromLocalInput,
 	occasionDefaultExpiryIso,
+	REASON_MESSAGES,
 	validateConfirmValues,
 } from "../intents/submit";
 import { PATHS } from "../routes/paths";
 import { ScreenGrain } from "./shared";
-
-/** サーバーの理由コード(docs/05 §3.3)→人間向けの案内。ボードに理由別の文言が無いため実装の裁量 */
-const REASON_MESSAGES: Record<string, string> = {
-	form_required: "預け方を選んでください",
-	topic_required: "主題を入力してください",
-	starts_at_required: "日時を入力してください。機会は日時が必須です",
-	starts_at_out_of_range: "日時は現在以降7日以内で指定してください",
-	starts_at_not_allowed: "つながりとして預ける場合は日時を指定できません",
-	alcohol_not_allowed: "つながりとして預ける場合は「お酒」を含められません",
-	expires_at_not_allowed: "期限の指定をやり直してください",
-	expires_at_before_start: "期限は日時より後になるようにしてください",
-	expires_in_days_not_allowed: "機会の期限は日時から自動で決まります",
-	expires_choice_on_draft: "期限の選択をやり直してください",
-	version_conflict: "他の操作で内容が変わったため、もう一度お試しください",
-};
 
 /** エラー応答を人間向けの行に正規化する(理由コードの既知分は案内へ・未知分はコードのまま) */
 const messagesFromApiError = (error: ApiError): string[] => {

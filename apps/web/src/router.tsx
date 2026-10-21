@@ -16,6 +16,7 @@ import { Connections } from "./screens/chat/Connections";
 import { Home } from "./screens/Home";
 import { Intro } from "./screens/Intro";
 import { IntentDetail } from "./screens/intent/IntentDetail";
+import { IntentEdit } from "./screens/intent/IntentEdit";
 import { LatchScreen } from "./screens/latch/LatchScreen";
 import { ShelvedScreen } from "./screens/latch/ShelvedScreen";
 import { Privacy } from "./screens/legal/Privacy";
@@ -134,6 +135,14 @@ export const appRoutes = [
 		element: (
 			<RequireAuth>
 				<IntentDetail />
+			</RequireAuth>
+		),
+	},
+	{
+		path: PATHS.intentEdit,
+		element: (
+			<RequireAuth>
+				<IntentEdit />
 			</RequireAuth>
 		),
 	},

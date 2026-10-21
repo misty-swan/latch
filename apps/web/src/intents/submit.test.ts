@@ -6,16 +6,20 @@
 
 import {
 	createIntentRequestSchema,
+	type IntentDTO,
 	parseResponseSchema,
 	patchIntentRequestSchema,
 } from "@latch/shared";
 import { describe, expect, it } from "vitest";
 import {
 	buildCreateIntentRequest,
+	buildIntentEditPatch,
 	buildPatchIntentRequest,
 	type ConfirmValues,
+	confirmValuesFromIntent,
 	connectionExpiryCaption,
 	EMPTY_PARSE,
+	type FactsValues,
 	formatExpiryClockJst,
 	formatMonthDayJst,
 	formatStartJst,
@@ -266,5 +270,135 @@ describe("EMPTY_PARSE(手入力モードの空の構造化値)", () => {
 		expect(parseResponseSchema.parse(EMPTY_PARSE)).toEqual(EMPTY_PARSE);
 		expect(EMPTY_PARSE.form).toBe("connection");
 		expect(EMPTY_PARSE.time).toBeNull();
+	});
+});
+
+describe("confirmValuesFromIntent / buildIntentEditPatch(内容を直す)", () => {
+	const connectionIntent = {
+		id: "01J00000000000000000000001",
+		form: "connection",
+		topic: "絵を見せ合う",
+		category: null,
+		raw_text: "文章",
+		time: null,
+		geo: null,
+		participants: { min: 2, max: 2, includes_owner: true },
+		budget: null,
+		hard_constraints: [],
+		soft_constraints: ["初心者"],
+		negative_constraints: [],
+		visibility: "hidden_until_match",
+		notification_level: "proposals_only",
+		alcohol_involved: false,
+		status: "active",
+		version: 1,
+		expires_at: "2026-11-20T00:00:00.000Z",
+		created_at: "2026-10-21T00:00:00.000Z",
+		updated_at: "2026-10-21T00:00:00.000Z",
+	} as const satisfies IntentDTO;
+	const occasionIntent: IntentDTO = {
+		...connectionIntent,
+		form: "occasion",
+		topic: "ラーメン",
+		time: { start: "2026-10-22T10:00:00.000Z", end: null },
+		budget: { min: 0, max: 3000, currency: "JPY" },
+		soft_constraints: [],
+		alcohol_involved: true,
+	};
+
+	const factsOf = (intent: IntentDTO): FactsValues => {
+		const v = confirmValuesFromIntent(intent);
+		return {
+			topic: v.topic,
+			startLocal: v.startLocal,
+			participants: v.participants,
+			budget: v.budget,
+			softConstraints: v.softConstraints,
+			alcoholInvolved: v.alcoholInvolved,
+		};
+	};
+
+	it("意思の内容から初期値を作る(startLocalはJSTの壁時計)", () => {
+		const values = confirmValuesFromIntent(occasionIntent);
+		expect(values.form).toBe("occasion");
+		expect(values.topic).toBe("ラーメン");
+		expect(values.startLocal).toBe("2026-10-22T19:00");
+		expect(values.budget).toEqual({ min: 0, max: 3000, currency: "JPY" });
+		expect(values.alcoholInvolved).toBe(true);
+		expect(confirmValuesFromIntent(connectionIntent).softConstraints).toEqual([
+			"初心者",
+		]);
+	});
+
+	it("主題だけ変えると主題だけを送る(trim後で比較)", () => {
+		const facts = { ...factsOf(connectionIntent), topic: " 新しい主題 " };
+		expect(buildIntentEditPatch(connectionIntent, facts)).toEqual({
+			topic: "新しい主題",
+		});
+	});
+
+	it("条件の追加はsoft_constraintsだけを送る", () => {
+		const facts = {
+			...factsOf(connectionIntent),
+			softConstraints: ["初心者", "雑談"],
+		};
+		expect(buildIntentEditPatch(connectionIntent, facts)).toEqual({
+			soft_constraints: ["初心者", "雑談"],
+		});
+	});
+
+	it("何も変えない(値が等しい別オブジェクト・空白だけの差)はnull", () => {
+		const facts = {
+			...factsOf(connectionIntent),
+			topic: " 絵を見せ合う ",
+			participants: { ...connectionIntent.participants },
+			softConstraints: [...connectionIntent.soft_constraints],
+		};
+		expect(buildIntentEditPatch(connectionIntent, facts)).toBeNull();
+		expect(
+			buildIntentEditPatch(occasionIntent, factsOf(occasionIntent)),
+		).toBeNull();
+	});
+
+	it("人数の変更はparticipantsを送る", () => {
+		const facts = {
+			...factsOf(connectionIntent),
+			participants: { min: 2, max: 4, includes_owner: true },
+		};
+		expect(buildIntentEditPatch(connectionIntent, facts)).toEqual({
+			participants: { min: 2, max: 4, includes_owner: true },
+		});
+	});
+
+	it("機会の日時と予算の変更はtime({start,end:null})とbudgetを送る", () => {
+		const facts: FactsValues = {
+			...factsOf(occasionIntent),
+			startLocal: "2026-10-22T20:00",
+			budget: { min: 0, max: 5000, currency: "JPY" },
+		};
+		expect(buildIntentEditPatch(occasionIntent, facts)).toEqual({
+			time: { start: "2026-10-22T11:00:00.000Z", end: null },
+			budget: { min: 0, max: 5000, currency: "JPY" },
+		});
+	});
+
+	it("つながりのbudgetとtimeは送らない", () => {
+		const facts: FactsValues = {
+			...factsOf(connectionIntent),
+			startLocal: "2026-10-22T20:00",
+			budget: { min: 0, max: 5000, currency: "JPY" },
+		};
+		expect(buildIntentEditPatch(connectionIntent, facts)).toBeNull();
+	});
+
+	it("お酒は送らない", () => {
+		const facts = { ...factsOf(occasionIntent), alcoholInvolved: false };
+		expect(buildIntentEditPatch(occasionIntent, facts)).toBeNull();
+	});
+
+	it("組み立てた本文はPATCHの契約を満たす", () => {
+		const facts = { ...factsOf(connectionIntent), topic: "新しい主題" };
+		const patch = buildIntentEditPatch(connectionIntent, facts);
+		expect(patchIntentRequestSchema.safeParse(patch).success).toBe(true);
 	});
 });

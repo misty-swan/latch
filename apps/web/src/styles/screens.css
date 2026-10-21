@@ -32,6 +32,7 @@
 
 /* フォーム・APIエラーの表示(ボードにエラー状態が無いため・helpの色違いとして置く) */
 .field__error {
+	display: block;
 	font-size: 12.5px;
 	line-height: 1.7;
 	color: var(--danger);

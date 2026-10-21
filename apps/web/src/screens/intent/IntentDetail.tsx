@@ -38,6 +38,7 @@ import {
 import { isOfflineError, OFFLINE_MESSAGES } from "../../offline/errors";
 import { intentEditPath, PATHS } from "../../routes/paths";
 import { GlyphPaths } from "../Home";
+import { RouteToast, useRouteToast } from "../RouteToast";
 import { ScreenGrain } from "../shared";
 import "./intent.css";
 
@@ -247,6 +248,7 @@ function Detail({ intent, now }: { intent: IntentDTO; now: Date }) {
 		id,
 	);
 
+	const routeToast = useRouteToast();
 	const [toast, setToast] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [sheet, setSheet] = useState(false);
@@ -577,11 +579,7 @@ function Detail({ intent, now }: { intent: IntentDTO; now: Date }) {
 					) : null}
 				</div>
 			</div>
-			{toast !== null ? (
-				<p className="toast" role="status">
-					{toast}
-				</p>
-			) : null}
+			<RouteToast text={toast ?? routeToast} />
 			{sheet ? (
 				<CancelSheet
 					busy={del.isPending}

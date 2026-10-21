@@ -11,6 +11,7 @@ import {
 	type Category,
 	createIntentRequestSchema,
 	EXPIRY_CHOICES_DAYS,
+	type IntentDTO,
 	type IntentForm,
 	isoDateTimeSchema,
 	OCCASION_DEFAULT_TTL_HOURS,
@@ -308,4 +309,84 @@ export const confirmValuesFromParse = (
 		alcoholInvolved: parse.alcohol_involved,
 		expiresInDays: EXPIRY_CHOICES_DAYS[1],
 	};
+};
+
+/**
+ * 意思(IntentDTO)から「内容を直す」画面の初期値を作る。
+ * 期限(expiresInDays)は直せない項目のため既定値を置くだけ(送らない)
+ */
+export const confirmValuesFromIntent = (intent: IntentDTO): ConfirmValues => ({
+	form: intent.form ?? "connection",
+	topic: intent.topic ?? "",
+	category: intent.category,
+	startLocal: intent.time === null ? "" : localInputFromIso(intent.time.start),
+	participants: { ...intent.participants },
+	budget: intent.budget === null ? null : { ...intent.budget },
+	softConstraints: [...intent.soft_constraints],
+	alcoholInvolved: intent.alcohol_involved,
+	expiresInDays: EXPIRY_CHOICES_DAYS[1],
+});
+
+const sameParticipants = (
+	a: IntentDTO["participants"],
+	b: IntentDTO["participants"],
+): boolean =>
+	a.min === b.min && a.max === b.max && a.includes_owner === b.includes_owner;
+
+const sameBudget = (a: IntentDTO["budget"], b: IntentDTO["budget"]): boolean =>
+	a === null || b === null
+		? a === b
+		: a.min === b.min && a.max === b.max && a.currency === b.currency;
+
+const sameStrings = (a: readonly string[], b: readonly string[]): boolean =>
+	a.length === b.length && a.every((value, i) => value === b[i]);
+
+/**
+ * activeな意思を直すPATCH本文(docs/05 §3.3)。変わった項目だけを値で比較して送る。
+ * 送れるのは主題・日時・人数・予算(機会だけ)・条件(つながりだけ)。預け方・期限・地域・お酒は送らない。
+ * 変化が無ければnull(保存しても何も起きないため・呼び出し側は詳細へ戻すだけ)
+ */
+export const buildIntentEditPatch = (
+	before: IntentDTO,
+	values: FactsValues,
+): PatchIntentRequest | null => {
+	const patch: PatchIntentRequest = {};
+	const topic = values.topic.trim();
+	if (topic !== (before.topic ?? "")) {
+		patch.topic = topic;
+	}
+	if (before.form === "occasion") {
+		const start = isoFromLocalInput(values.startLocal);
+		if (start !== null && start !== (before.time?.start ?? null)) {
+			patch.time = { start, end: null };
+		}
+		if (!sameBudget(before.budget, values.budget)) {
+			patch.budget = values.budget;
+		}
+	}
+	if (!sameParticipants(before.participants, values.participants)) {
+		patch.participants = { ...values.participants };
+	}
+	if (
+		before.form === "connection" &&
+		!sameStrings(before.soft_constraints, values.softConstraints)
+	) {
+		patch.soft_constraints = [...values.softConstraints];
+	}
+	return Object.keys(patch).length === 0 ? null : patch;
+};
+
+/** サーバーの理由コード(docs/05 §3.3)→人間向けの案内。ボードに理由別の文言が無いため実装の裁量 */
+export const REASON_MESSAGES: Record<string, string> = {
+	form_required: "預け方を選んでください",
+	topic_required: "主題を入力してください",
+	starts_at_required: "日時を入力してください。機会は日時が必須です",
+	starts_at_out_of_range: "日時は現在以降7日以内で指定してください",
+	starts_at_not_allowed: "つながりとして預ける場合は日時を指定できません",
+	alcohol_not_allowed: "つながりとして預ける場合は「お酒」を含められません",
+	expires_at_not_allowed: "期限の指定をやり直してください",
+	expires_at_before_start: "期限は日時より後になるようにしてください",
+	expires_in_days_not_allowed: "機会の期限は日時から自動で決まります",
+	expires_choice_on_draft: "期限の選択をやり直してください",
+	version_conflict: "他の操作で内容が変わったため、もう一度お試しください",
 };
