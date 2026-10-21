@@ -254,6 +254,19 @@ function ChatView({
 						</button>
 					) : null}
 					<Origin latch={latch} matchedAt={matchedAt} />
+					{messages.isError && !loaded ? (
+						<div style={{ alignSelf: "center", textAlign: "center" }}>
+							<p className="t-caption">履歴を読み込めませんでした。</p>
+							<button
+								type="button"
+								className="btn btn--secondary"
+								style={{ marginTop: 12 }}
+								onClick={() => void messages.refetch()}
+							>
+								もう一度読み込む
+							</button>
+						</div>
+					) : null}
 					{loaded ? (
 						<MessageList
 							latch={latch}

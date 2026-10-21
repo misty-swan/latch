@@ -151,6 +151,32 @@ describe("Chat", () => {
 		expect(document.querySelector(".ended-bar")).not.toBeNull();
 	});
 
+	it("履歴の取得に失敗したら失敗表示と再読み込みが出て・成功すると履歴が出る", async () => {
+		let failing = true;
+		const base = fetchMock.getMockImplementation();
+		fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+			if (failing && String(input).startsWith("/v1/latches/L1/messages")) {
+				return json({ error: { code: "INTERNAL", message: "x" } }, 500);
+			}
+			return (base as (i: RequestInfo | URL) => Promise<Response>)(input);
+		});
+		open();
+		const retry = await screen.findByRole("button", {
+			name: "もう一度読み込む",
+		});
+		expect(screen.getByText("履歴を読み込めませんでした。")).toBeTruthy();
+		failing = false;
+		fetchMock.mockClear();
+		fireEvent.click(retry);
+		expect(await screen.findByText("本文02")).toBeTruthy();
+		expect(
+			fetchMock.mock.calls.some(([u]) =>
+				String(u).startsWith("/v1/latches/L1/messages"),
+			),
+		).toBe(true);
+		fetchMock.mockImplementation(base as never);
+	});
+
 	it("成立前(matched_atがnull)は/latches/L1へ置き換え遷移する", async () => {
 		latch = latchOf({ status: "proposed", matched_at: null });
 		const router = open();
