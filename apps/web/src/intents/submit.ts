@@ -37,6 +37,17 @@ export interface ConfirmValues {
 	expiresInDays: (typeof EXPIRY_CHOICES_DAYS)[number];
 }
 
+/** 「読み解いた条件」の行内編集で直す値(FactsEditorが扱う範囲・預け方と期限は呼び出し側) */
+export type FactsValues = Pick<
+	ConfirmValues,
+	| "topic"
+	| "startLocal"
+	| "participants"
+	| "budget"
+	| "softConstraints"
+	| "alcoholInvolved"
+>;
+
 export type CreateIntentRequest = z.infer<typeof createIntentRequestSchema>;
 export type PatchIntentRequest = z.infer<typeof patchIntentRequestSchema>;
 

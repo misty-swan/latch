@@ -11,24 +11,20 @@
  *   AlcoholRestricted.dc.htmlどおりお酒の行の下と足元に案内を出し、お酒がオンのあいだ
  *   預けるを止める。年齢は画面で計算しない(判定の正はサーバー・F7c設計 §1.9)
  * - 地域はF2'では「指定なし(全国)」固定(地名データはF3で取り込み)
+ * - 「読み解いた条件」の行内編集(主題・日時・予算・人数・条件・お酒)はintents/FactsEditorが受け持つ
  * ボードに無い行内の編集UI(主題・日時・予算・人数の入力)とエラー領域は実装の裁量
  */
 
 import {
-	BUDGET_MAX,
-	CONSTRAINT_ITEM_MAX_LENGTH,
-	CONSTRAINT_MAX_ITEMS,
 	EXPIRY_CHOICES_DAYS,
 	type IntentDTO,
-	LIMITS,
-	PARTICIPANTS_MAX,
-	PARTICIPANTS_MIN,
 	type ParseIntentResponse,
 } from "@latch/shared";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ApiError, apiFetch } from "../api/client";
 import { clearComposeState, readComposeState } from "../intents/composeState";
+import { FactsEditor } from "../intents/FactsEditor";
 import {
 	buildCreateIntentRequest,
 	buildPatchIntentRequest,
@@ -36,17 +32,14 @@ import {
 	confirmValuesFromParse,
 	connectionExpiryCaption,
 	EMPTY_PARSE,
+	type FactsValues,
 	formatExpiryClockJst,
-	formatStartJst,
 	isoFromLocalInput,
 	occasionDefaultExpiryIso,
 	validateConfirmValues,
 } from "../intents/submit";
 import { PATHS } from "../routes/paths";
 import { ScreenGrain } from "./shared";
-
-/** 行内編集の対象(factsの各行。ボードに編集UIが無いため・行の鉛筆で開閉する) */
-type EditingField = "topic" | "time" | "budget" | "participants";
 
 /** サーバーの理由コード(docs/05 §3.3)→人間向けの案内。ボードに理由別の文言が無いため実装の裁量 */
 const REASON_MESSAGES: Record<string, string> = {
@@ -77,19 +70,6 @@ const messagesFromApiError = (error: ApiError): string[] => {
 	return [`${error.code}: ${error.message}`];
 };
 
-const PencilIcon = () => (
-	<svg className="ic ic--s" viewBox="0 0 24 24" aria-hidden="true">
-		<path d="M5 19h3.6L18.3 9.3a2 2 0 0 0 0-2.8l-.8-.8a2 2 0 0 0-2.8 0L5 15.4z" />
-		<path d="M13.4 7l3.6 3.6" />
-	</svg>
-);
-
-const CloseIcon = () => (
-	<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
-		<path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
-	</svg>
-);
-
 /** 案内の印(ボードAlcoholRestrictedの丸いi) */
 const InfoIcon = ({ small = false }: { small?: boolean }) => (
 	<svg
@@ -103,15 +83,6 @@ const InfoIcon = ({ small = false }: { small?: boolean }) => (
 	</svg>
 );
 
-/** 人数の表示。同一なら「2人(あなたと相手)」・幅なら「2〜4人」(ボードどおり) */
-const formatParticipants = (participants: {
-	min: number;
-	max: number;
-}): string =>
-	participants.min === participants.max
-		? `${participants.min}人(あなたと相手)`
-		: `${participants.min}〜${participants.max}人`;
-
 export function Confirm() {
 	const navigate = useNavigate();
 	// 表示と初期値は初回マウント時のcomposeStateで確定させる(読み出しは毎回Zod検証される)
@@ -121,16 +92,15 @@ export function Confirm() {
 	);
 
 	const [form, setForm] = useState(initialValues.form);
-	const [topic, setTopic] = useState(initialValues.topic);
-	const [startLocal, setStartLocal] = useState(initialValues.startLocal);
-	const [participants, setParticipants] = useState(initialValues.participants);
-	const [budget, setBudget] = useState(initialValues.budget);
-	const [softConstraints, setSoftConstraints] = useState(
-		initialValues.softConstraints,
-	);
-	const [alcoholInvolved, setAlcoholInvolved] = useState(
-		initialValues.alcoholInvolved,
-	);
+	// 「読み解いた条件」の各行の値(行内編集はFactsEditorが受け持つ)
+	const [facts, setFacts] = useState<FactsValues>(() => ({
+		topic: initialValues.topic,
+		startLocal: initialValues.startLocal,
+		participants: initialValues.participants,
+		budget: initialValues.budget,
+		softConstraints: initialValues.softConstraints,
+		alcoholInvolved: initialValues.alcoholInvolved,
+	}));
 	const [expiresInDays, setExpiresInDays] = useState(
 		initialValues.expiresInDays,
 	);
@@ -139,22 +109,6 @@ export function Confirm() {
 	const [limitSheet, setLimitSheet] = useState(false);
 	// 422 ALCOHOL_RESTRICTEDを受けた印。お酒をオフにすると下ろす
 	const [alcoholRestricted, setAlcoholRestricted] = useState(false);
-	const [editing, setEditing] = useState<EditingField | null>(null);
-	const [topicDraft, setTopicDraft] = useState("");
-	const [budgetDraft, setBudgetDraft] = useState("");
-	const [addingConstraint, setAddingConstraint] = useState(false);
-	const [constraintDraft, setConstraintDraft] = useState("");
-	// 行内編集の入力(a11y lintのnoAutofocusを避けるため・effectでフォーカスする)
-	const editorInputRef = useRef<HTMLInputElement | null>(null);
-
-	useEffect(() => {
-		// 行内編集を開いたら入力へフォーカスする(閉じたときは何もしない)
-		if (editing === null && !addingConstraint) {
-			return;
-		}
-		editorInputRef.current?.focus();
-	}, [editing, addingConstraint]);
-
 	const rawText = initial?.raw_text ?? "";
 	const draftId = initial?.draft_id ?? null;
 	const parse: ParseIntentResponse | null = initial?.parse ?? null;
@@ -169,73 +123,32 @@ export function Confirm() {
 	/** 画面で編集中の値を組てる(送信・検証で使う) */
 	const currentValues = (): ConfirmValues => ({
 		form,
-		topic,
+		topic: facts.topic,
 		category: initialValues.category,
-		startLocal,
-		participants,
-		budget: form === "occasion" ? budget : null,
-		softConstraints,
-		alcoholInvolved: form === "occasion" ? alcoholInvolved : false,
+		startLocal: facts.startLocal,
+		participants: facts.participants,
+		budget: form === "occasion" ? facts.budget : null,
+		softConstraints: facts.softConstraints,
+		alcoholInvolved: form === "occasion" ? facts.alcoholInvolved : false,
 		expiresInDays,
 	});
 
-	/** 預け方の切替。行が替わるため行内編集は閉じる */
+	/** 預け方の切替(行が替わるため行内編集はFactsEditorが閉じる) */
 	const onFormChange = (next: ConfirmValues["form"]): void => {
 		setForm(next);
-		setEditing(null);
 		if (next === "occasion") {
 			// 機会には条件の行が無い(ボードConfirmOccasionどおり)。
 			// UIから消えた条件を送らないよう・切替時に空にする
-			setSoftConstraints([]);
+			setFacts((f) => ({ ...f, softConstraints: [] }));
 		}
 	};
 
-	const commitTopic = (): void => {
-		const trimmed = topicDraft.trim();
-		// 主題は1..40字。空と40字超(属性を迂回した入力)は確定せず前の値へ戻す
-		if (trimmed.length > 0 && trimmed.length <= LIMITS.TOPIC_MAX_LENGTH) {
-			setTopic(trimmed);
+	/** 行の確定。お酒をオフにしたら422 ALCOHOL_RESTRICTEDの印を下ろす */
+	const onFactsChange = (next: FactsValues): void => {
+		if (facts.alcoholInvolved && !next.alcoholInvolved) {
+			setAlcoholRestricted(false);
 		}
-		setEditing(null);
-	};
-
-	const commitConstraint = (): void => {
-		const trimmed = constraintDraft.trim();
-		if (
-			trimmed.length > 0 &&
-			!softConstraints.includes(trimmed) &&
-			softConstraints.length < CONSTRAINT_MAX_ITEMS
-		) {
-			setSoftConstraints([...softConstraints, trimmed]);
-		}
-		setConstraintDraft("");
-		setAddingConstraint(false);
-	};
-
-	const setMin = (next: number): void =>
-		setParticipants((p) => ({
-			...p,
-			min: Math.min(Math.max(next, PARTICIPANTS_MIN), p.max),
-		}));
-
-	const setMax = (next: number): void =>
-		setParticipants((p) => ({
-			...p,
-			max: Math.min(Math.max(next, p.min), PARTICIPANTS_MAX),
-		}));
-
-	const commitBudget = (): void => {
-		const amount = Number(budgetDraft);
-		if (Number.isFinite(amount) && amount >= 0) {
-			const max = Math.min(Math.round(amount), BUDGET_MAX);
-			// 予算は「〜円以内」(上限)で編集する。下限が上限を超えないように丸める
-			setBudget((p) => ({
-				min: Math.min(p?.min ?? 0, max),
-				max,
-				currency: "JPY",
-			}));
-		}
-		setEditing(null);
+		setFacts(next);
 	};
 
 	/** 「預ける」。新規はPOST・下書き再開はPATCHでactive化する */
@@ -331,315 +244,11 @@ export function Confirm() {
 		return null;
 	}
 
-	const startIso = form === "occasion" ? isoFromLocalInput(startLocal) : null;
-	const startText = formatStartJst(startLocal);
-
-	const topicRow = (
-		<div className="fact">
-			<dt className="fact__key">主題</dt>
-			{editing === "topic" ? (
-				<dd className="fact__val">
-					<input
-						className="fact-input"
-						ref={editorInputRef}
-						aria-label="主題"
-						maxLength={LIMITS.TOPIC_MAX_LENGTH}
-						value={topicDraft}
-						onChange={(event) => setTopicDraft(event.target.value)}
-						onBlur={commitTopic}
-						onKeyDown={(event) => {
-							if (event.key === "Enter") {
-								commitTopic();
-							}
-						}}
-					/>
-				</dd>
-			) : (
-				<>
-					<dd className={`fact__val${topic === "" ? " fact__val--muted" : ""}`}>
-						{topic === "" ? "未設定" : topic}
-					</dd>
-					<button
-						className="icon-btn"
-						type="button"
-						aria-label="主題を直す"
-						onClick={() => {
-							setTopicDraft(topic);
-							setEditing("topic");
-						}}
-					>
-						<PencilIcon />
-					</button>
-				</>
-			)}
-		</div>
-	);
-
-	const timeRow = (
-		<div className="fact">
-			<dt className="fact__key">日時</dt>
-			{editing === "time" ? (
-				<dd className="fact__val">
-					<input
-						className="fact-input"
-						ref={editorInputRef}
-						type="datetime-local"
-						aria-label="日時"
-						value={startLocal}
-						onChange={(event) => setStartLocal(event.target.value)}
-						onBlur={() => setEditing(null)}
-					/>
-				</dd>
-			) : (
-				<>
-					<dd
-						className={`fact__val${startText === null ? " fact__val--muted" : ""}`}
-					>
-						{startText ?? "未設定"}
-					</dd>
-					<button
-						className="icon-btn"
-						type="button"
-						aria-label="日時を直す"
-						onClick={() => setEditing("time")}
-					>
-						<PencilIcon />
-					</button>
-				</>
-			)}
-		</div>
-	);
-
-	/** 地域(機会では「場所」)。F2'は指定なし(全国)固定のため・編集不可の注記を添える */
-	const geoRow = (label: string) => (
-		<div className="fact">
-			<dt className="fact__key">{label}</dt>
-			<dd className="fact__val fact__val--muted">
-				指定なし(全国)
-				<span className="fact__sub">いまは指定なし(全国)のみです</span>
-			</dd>
-			<button
-				className="icon-btn"
-				type="button"
-				aria-label={`${label}を直す`}
-				disabled
-				title="地域は指定なし(全国)のみです"
-			>
-				<PencilIcon />
-			</button>
-		</div>
-	);
-
-	const chipsRow = (
-		<div className="fact fact--chips">
-			<dt className="fact__key">条件</dt>
-			<dd className="chips">
-				{softConstraints.map((constraint) => (
-					<button
-						className="chip"
-						type="button"
-						key={constraint}
-						aria-label={`${constraint}を外す`}
-						onClick={() =>
-							setSoftConstraints(
-								softConstraints.filter((item) => item !== constraint),
-							)
-						}
-					>
-						{constraint}
-						<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
-							<path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
-						</svg>
-					</button>
-				))}
-				{addingConstraint ? (
-					<input
-						className="fact-input chip-input"
-						ref={editorInputRef}
-						aria-label="条件を入力"
-						maxLength={CONSTRAINT_ITEM_MAX_LENGTH}
-						value={constraintDraft}
-						onChange={(event) => setConstraintDraft(event.target.value)}
-						onBlur={commitConstraint}
-						onKeyDown={(event) => {
-							if (event.key === "Enter") {
-								commitConstraint();
-							}
-						}}
-					/>
-				) : (
-					softConstraints.length < CONSTRAINT_MAX_ITEMS && (
-						<button
-							className="chip chip--add"
-							type="button"
-							onClick={() => {
-								setConstraintDraft("");
-								setAddingConstraint(true);
-							}}
-						>
-							<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
-								<path d="M12 5.5v13M5.5 12h13" />
-							</svg>
-							条件を足す
-						</button>
-					)
-				)}
-			</dd>
-			<span />
-		</div>
-	);
-
-	const participantsRow = (
-		<div className="fact">
-			<dt className="fact__key">人数</dt>
-			{editing === "participants" ? (
-				<dd className="fact__val">
-					<span className="fact-stepper">
-						<span className="t-caption">下限</span>
-						<button
-							className="icon-btn"
-							type="button"
-							aria-label="下限を減らす"
-							disabled={participants.min <= PARTICIPANTS_MIN}
-							onClick={() => setMin(participants.min - 1)}
-						>
-							−
-						</button>
-						<span>{participants.min}</span>
-						<button
-							className="icon-btn"
-							type="button"
-							aria-label="下限を増やす"
-							disabled={participants.min >= participants.max}
-							onClick={() => setMin(participants.min + 1)}
-						>
-							+
-						</button>
-					</span>
-					<span className="fact-stepper">
-						<span className="t-caption">上限</span>
-						<button
-							className="icon-btn"
-							type="button"
-							aria-label="上限を減らす"
-							disabled={participants.max <= participants.min}
-							onClick={() => setMax(participants.max - 1)}
-						>
-							−
-						</button>
-						<span>{participants.max}</span>
-						<button
-							className="icon-btn"
-							type="button"
-							aria-label="上限を増やす"
-							disabled={participants.max >= PARTICIPANTS_MAX}
-							onClick={() => setMax(participants.max + 1)}
-						>
-							+
-						</button>
-					</span>
-				</dd>
-			) : (
-				<>
-					<dd className="fact__val">{formatParticipants(participants)}</dd>
-					<button
-						className="icon-btn"
-						type="button"
-						aria-label="人数を直す"
-						onClick={() => setEditing("participants")}
-					>
-						<PencilIcon />
-					</button>
-				</>
-			)}
-			{editing === "participants" && (
-				<button
-					className="icon-btn"
-					type="button"
-					aria-label="人数を閉じる"
-					onClick={() => setEditing(null)}
-				>
-					<CloseIcon />
-				</button>
-			)}
-		</div>
-	);
-
-	const budgetRow = (
-		<div className="fact">
-			<dt className="fact__key">予算</dt>
-			{editing === "budget" ? (
-				<dd className="fact__val">
-					<input
-						className="fact-input fact-input--number"
-						ref={editorInputRef}
-						type="number"
-						aria-label="予算の上限(円)"
-						min={0}
-						max={BUDGET_MAX}
-						step={100}
-						value={budgetDraft}
-						onChange={(event) => setBudgetDraft(event.target.value)}
-						onBlur={commitBudget}
-						onKeyDown={(event) => {
-							if (event.key === "Enter") {
-								commitBudget();
-							}
-						}}
-					/>
-				</dd>
-			) : (
-				<>
-					<dd
-						className={`fact__val${budget === null ? " fact__val--muted" : ""}`}
-					>
-						{budget === null
-							? "未設定"
-							: `${budget.max.toLocaleString()}円以内`}
-					</dd>
-					<button
-						className="icon-btn"
-						type="button"
-						aria-label="予算を直す"
-						onClick={() => {
-							setBudgetDraft(budget === null ? "" : String(budget.max));
-							setEditing("budget");
-						}}
-					>
-						<PencilIcon />
-					</button>
-				</>
-			)}
-		</div>
-	);
-
-	const alcoholRow = (
-		<div className="fact">
-			<dt className="fact__key">お酒</dt>
-			<dd className="fact__val">
-				{alcoholInvolved ? "含む" : "含まない"}
-				<span className="fact__sub">20歳以上の方どうしでだけ届きます。</span>
-			</dd>
-			<div className="switch">
-				<input
-					type="checkbox"
-					aria-label="お酒を含む"
-					checked={alcoholInvolved}
-					onChange={(event) => {
-						setAlcoholInvolved(event.target.checked);
-						if (!event.target.checked) {
-							setAlcoholRestricted(false);
-						}
-					}}
-				/>
-				<span />
-			</div>
-		</div>
-	);
-
+	const startIso =
+		form === "occasion" ? isoFromLocalInput(facts.startLocal) : null;
 	// お酒を含む機会のままでは預けられない状態(つながりへ切り替えた場合はお酒を送らないため解除)
 	const alcoholBlocked =
-		alcoholRestricted && form === "occasion" && alcoholInvolved;
+		alcoholRestricted && form === "occasion" && facts.alcoholInvolved;
 
 	return (
 		<div className="screen confirm">
@@ -722,14 +331,12 @@ export function Confirm() {
 				<section style={{ marginTop: 30 }}>
 					<h2 className="t-label">読み解いた条件</h2>
 					<dl className="facts" style={{ marginTop: 8 }}>
-						{topicRow}
-						{form === "occasion" && timeRow}
-						{form === "occasion" && geoRow("場所")}
-						{form === "connection" && chipsRow}
-						{form === "connection" && geoRow("地域")}
-						{participantsRow}
-						{form === "occasion" && budgetRow}
-						{form === "occasion" && alcoholRow}
+						<FactsEditor
+							form={form}
+							values={facts}
+							errors={{}}
+							onChange={onFactsChange}
+						/>
 					</dl>
 					{alcoholBlocked && (
 						<p className="note note--lamp" style={{ marginTop: 14 }}>
