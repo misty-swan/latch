@@ -476,11 +476,12 @@ export const proposeSet = async (
 					.update(groupCandidates)
 					.set({ status: "proposed" })
 					.where(and(eq(groupCandidates.id, source.groupCandidateId), secured));
+	// 列順の注意: notificationsの末尾3列(intent_id, push_state, push_attempted_at)はマイグレーション0007で追加。INSERT … SELECTは位置で対応するため値の並びを揃える(F7b設計 §2)
 	const insertNotification = (userId: string) =>
 		db
 			.insert(notifications)
 			.select(
-				sql`SELECT ${newUlid()}, ${userId}, 'proposal', ${latchId}, NULL, ${nowMs} WHERE ${secured}`,
+				sql`SELECT ${newUlid()}, ${userId}, 'proposal', ${latchId}, NULL, ${nowMs}, NULL, 'pending', NULL WHERE ${secured}`,
 			);
 
 	const notifyStatements = present

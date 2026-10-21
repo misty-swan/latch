@@ -119,9 +119,28 @@ export const NOTIFICATION_TYPES = [
 	"proposal",
 	"matched",
 	"closed",
+	"intent_expired",
 	"system",
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+
+/** アプリ内通知のWeb Push送出状態(F7b設計 §2)。対象はproposal・matchedだけがpendingで始まる */
+export const PUSH_STATES = [
+	"none",
+	"pending",
+	"sent",
+	"muted",
+	"no_subscription",
+	"failed",
+] as const;
+export type PushState = (typeof PUSH_STATES)[number];
+
+/** Web Pushと通知一覧の上限値(F7b設計 §2) */
+export const PUSH_LIMITS = {
+	SUBSCRIPTIONS_PER_USER: 10,
+	ENDPOINT_MAX_LENGTH: 1024,
+	NOTIFICATIONS_PAGE_SIZE: 20,
+} as const;
 
 /** 提案への応答値。yes/no/defer(noはAPI専用・UIには置かない) */
 export const LATCH_RESPONSE_VALUES = ["yes", "no", "defer"] as const;

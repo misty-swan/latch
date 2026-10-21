@@ -5,6 +5,7 @@ import rollback0003Sql from "../migrations_rollback/0003_rollback.sql?raw";
 import rollback0004Sql from "../migrations_rollback/0004_rollback.sql?raw";
 import rollback0005Sql from "../migrations_rollback/0005_rollback.sql?raw";
 import rollback0006Sql from "../migrations_rollback/0006_rollback.sql?raw";
+import rollback0007Sql from "../migrations_rollback/0007_rollback.sql?raw";
 
 /**
  * マイグレーション適用結果の検証。
@@ -158,6 +159,7 @@ async function columnsOf(table: string) {
 	const result = await env.DB.prepare(`PRAGMA table_info(${table})`).all<{
 		name: string;
 		notnull: number;
+		dflt_value: string | null;
 	}>();
 	return result.results;
 }
@@ -320,4 +322,35 @@ it("戻しマイグレーション0006の適用でtarget・message_id列と索�
 	expect(await indexNamesOf("reports")).not.toContain(
 		"reports_reporter_latch_id_reportee_target_status_idx",
 	);
+});
+
+it("0007適用後、notificationsにintent_id・push_state(NOT NULL・既定none)・push_attempted_atと2索引がある(F7b設計 §2)", async () => {
+	const cols = await columnsOf("notifications");
+	const intentId = cols.find((c) => c.name === "intent_id");
+	expect(intentId, "intent_id 列が存在すること").toBeDefined();
+	expect(intentId?.notnull).toBe(0);
+	const pushState = cols.find((c) => c.name === "push_state");
+	expect(pushState, "push_state 列が存在すること").toBeDefined();
+	expect(pushState?.notnull).toBe(1);
+	// 既存行は既定値で none になる
+	expect(pushState?.dflt_value).toBe("'none'");
+	const attempted = cols.find((c) => c.name === "push_attempted_at");
+	expect(attempted, "push_attempted_at 列が存在すること").toBeDefined();
+	expect(attempted?.notnull).toBe(0);
+	const indexes = await indexNamesOf("notifications");
+	expect(indexes).toContain("notifications_intent_id_type_uniq");
+	expect(indexes).toContain("notifications_push_state_created_at_idx");
+});
+
+it("戻しマイグレーション0007の適用で3列と2索引が消える(docs/11 §3の対マイグレーション)", async () => {
+	for (const statement of toStatements(rollback0007Sql)) {
+		await env.DB.prepare(statement).run();
+	}
+	const names = (await columnsOf("notifications")).map((c) => c.name);
+	expect(names).not.toContain("intent_id");
+	expect(names).not.toContain("push_state");
+	expect(names).not.toContain("push_attempted_at");
+	const indexes = await indexNamesOf("notifications");
+	expect(indexes).not.toContain("notifications_intent_id_type_uniq");
+	expect(indexes).not.toContain("notifications_push_state_created_at_idx");
 });

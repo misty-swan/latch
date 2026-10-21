@@ -2,3 +2,5 @@
 
 
 0006(通報のtarget・message_id列と検索索引)の対は `0006_rollback.sql`(2026-10-21作成)です。0006はtargetをDEFAULTなしのNOT NULLで追加するため、staging・prodへ適用する前に `SELECT COUNT(*) FROM reports` が0であることを確かめてください(F7a以前は書き込みAPIが無く0のはずです。行があればALTERは止まり、データは壊れません)。
+
+0007(通知のWeb Push記録の3列と2索引)の対は `0007_rollback.sql`(2026-10-21作成)です。0007の列はすべてnull可かDEFAULT付きのため、適用前の確認は要りません。戻すと送出状態(push_state)と試行時刻、intent_expired通知の対象Intentが失われます。intent_expired通知の行自体は残るため、戻した後にそれらの行を表示する経路があれば先に止めてください。

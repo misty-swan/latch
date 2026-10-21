@@ -21,6 +21,7 @@ import type {
 	LatchStatus,
 	MatchEventType,
 	NotificationType,
+	PushState,
 } from "@latch/shared";
 import {
 	index,
@@ -510,6 +511,12 @@ export const notifications = sqliteTable(
 		latchId: text("latch_id", { length: 26 }),
 		readAt: integer("read_at", { mode: "timestamp_ms" }),
 		createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+		// 以下3列はマイグレーション0007で末尾へ追加(INSERT … SELECTの列順に影響する・F7b設計 §2)
+		/** intent_expired通知の対象Intent。他の種別はnull */
+		intentId: text("intent_id", { length: 26 }),
+		/** Web Pushの送出状態。proposal・matchedは作成時pending、他はnone */
+		pushState: text("push_state").$type<PushState>().notNull().default("none"),
+		pushAttemptedAt: integer("push_attempted_at", { mode: "timestamp_ms" }),
 	},
 	(t) => [
 		index("notifications_user_id_read_at_id_idx").on(t.userId, t.readAt, t.id),
@@ -523,6 +530,13 @@ export const notifications = sqliteTable(
 			t.latchId,
 			t.userId,
 			t.type,
+		),
+		// intent_expiredをIntentごとに1回だけ作る(intent_idがnullの行は重複扱いにならない)
+		uniqueIndex("notifications_intent_id_type_uniq").on(t.intentId, t.type),
+		// Cronによるpending回収の走査(F7b設計 §5)
+		index("notifications_push_state_created_at_idx").on(
+			t.pushState,
+			t.createdAt,
 		),
 	],
 );

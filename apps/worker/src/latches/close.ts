@@ -145,11 +145,12 @@ export const closeLatch = async (
 			? []
 			: historyStatementsOf(db, latchId, history, closed, now);
 	// UNIQUE(latch_id,user_id,type)の重複は何もしない。INSERT … SELECT のupsertはWHEREが必要(SQLiteの構文)
+	// 列順の注意: notificationsの末尾3列(intent_id, push_state, push_attempted_at)はマイグレーション0007で追加。INSERT … SELECTは位置で対応するため値の並びを揃える(F7b設計 §2)
 	const notifyStatements = members.map((m) =>
 		db
 			.insert(notifications)
 			.select(
-				sql`SELECT ${newUlid()}, ${m.userId}, 'closed', ${latchId}, NULL, ${nowMs} WHERE ${closed}`,
+				sql`SELECT ${newUlid()}, ${m.userId}, 'closed', ${latchId}, NULL, ${nowMs}, NULL, 'none', NULL WHERE ${closed}`,
 			)
 			.onConflictDoNothing(),
 	);

@@ -142,11 +142,12 @@ const promote = async (
 			.select(
 				sql`SELECT ${newUlid()}, ${latch.id}, 'candidate', 'proposed', ${nowMs} WHERE ${promoted}`,
 			),
+		// 列順の注意: notificationsの末尾3列(intent_id, push_state, push_attempted_at)はマイグレーション0007で追加。INSERT … SELECTは位置で対応するため値の並びを揃える(F7b設計 §2)
 		...userIds.map((userId) =>
 			db
 				.insert(notifications)
 				.select(
-					sql`SELECT ${newUlid()}, ${userId}, 'proposal', ${latch.id}, NULL, ${nowMs} WHERE ${promoted}`,
+					sql`SELECT ${newUlid()}, ${userId}, 'proposal', ${latch.id}, NULL, ${nowMs}, NULL, 'pending', NULL WHERE ${promoted}`,
 				)
 				.onConflictDoNothing(),
 		),

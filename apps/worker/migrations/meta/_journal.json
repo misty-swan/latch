@@ -50,6 +50,13 @@
       "when": 1792564436002,
       "tag": "0006_report_target",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1792569988431,
+      "tag": "0007_notification_push",
+      "breakpoints": true
     }
   ]
 }

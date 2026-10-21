@@ -23,11 +23,16 @@ import {
 	messageBodySchema,
 	messageDtoSchema,
 	messagePageSchema,
+	notificationDtoSchema,
+	notificationListResponseSchema,
+	notificationReadRequestSchema,
 	parseIntentRequestSchema,
 	parseResponseSchema,
 	participantsSchema,
 	patchIntentRequestSchema,
 	patchMeRequestSchema,
+	pushSubscriptionDeleteRequestSchema,
+	pushSubscriptionRequestSchema,
 	refreshRequestSchema,
 	registerUserRequestSchema,
 	reportCreateRequestSchema,
@@ -698,5 +703,96 @@ describe("blockDtoSchema / blockListResponseSchema", () => {
 		expect(blockListResponseSchema.safeParse({ blocks: [b] }).success).toBe(
 			true,
 		);
+	});
+});
+
+describe("通知のスキーマ(F7b設計)", () => {
+	const common = {
+		id: "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+		read_at: null,
+		created_at: "2026-10-21T00:00:00.000Z",
+	};
+	it("4種のnotificationDtoを受理し、一覧応答を受理する", () => {
+		const items = [
+			{
+				...common,
+				type: "proposal",
+				latch_id: common.id,
+				response_deadline: "2026-10-22T00:00:00.000Z",
+			},
+			{
+				...common,
+				type: "matched",
+				latch_id: common.id,
+				display_names: ["a", "b"],
+			},
+			{ ...common, type: "closed", latch_id: common.id },
+			{
+				...common,
+				type: "intent_expired",
+				intent: { id: common.id, raw_text: "text" },
+			},
+		];
+		for (const item of items) {
+			expect(notificationDtoSchema.safeParse(item).success).toBe(true);
+		}
+		expect(
+			notificationListResponseSchema.safeParse({
+				items,
+				next_cursor: null,
+				unread_count: 4,
+			}).success,
+		).toBe(true);
+		expect(
+			notificationDtoSchema.safeParse({ ...common, type: "system" }).success,
+		).toBe(false);
+	});
+	it("既読リクエストはup_to_id(26字)だけを受理する", () => {
+		expect(
+			notificationReadRequestSchema.safeParse({ up_to_id: common.id }).success,
+		).toBe(true);
+		expect(
+			notificationReadRequestSchema.safeParse({ up_to_id: "short" }).success,
+		).toBe(false);
+		expect(
+			notificationReadRequestSchema.safeParse({
+				up_to_id: common.id,
+				extra: 1,
+			}).success,
+		).toBe(false);
+	});
+	it("購読リクエストはendpoint 1,024字まで・未知のキーを拒否する", () => {
+		const keys = { p256dh: "p", auth: "a" };
+		const url = (n: number) => `https://fcm.googleapis.com/${"a".repeat(n)}`;
+		const base = "https://fcm.googleapis.com/".length;
+		expect(
+			pushSubscriptionRequestSchema.safeParse({
+				endpoint: url(1024 - base),
+				keys,
+			}).success,
+		).toBe(true);
+		expect(
+			pushSubscriptionRequestSchema.safeParse({
+				endpoint: url(1025 - base),
+				keys,
+			}).success,
+		).toBe(false);
+		expect(
+			pushSubscriptionRequestSchema.safeParse({
+				endpoint: url(1),
+				keys,
+				extra: 1,
+			}).success,
+		).toBe(false);
+		expect(
+			pushSubscriptionDeleteRequestSchema.safeParse({ endpoint: url(1) })
+				.success,
+		).toBe(true);
+		expect(
+			pushSubscriptionDeleteRequestSchema.safeParse({
+				endpoint: url(1),
+				extra: 1,
+			}).success,
+		).toBe(false);
 	});
 });

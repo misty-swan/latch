@@ -236,6 +236,15 @@ describe("proposeSet(1対1)", () => {
 		expect(ns.every((n) => n.type === "proposal" && n.readAt === null)).toBe(
 			true,
 		);
+		// Web Pushの対象(proposal)は作成時pending・未試行(F7b設計 §2)
+		expect(
+			ns.every(
+				(n) =>
+					n.pushState === "pending" &&
+					n.pushAttemptedAt === null &&
+					n.intentId === null,
+			),
+		).toBe(true);
 
 		const events = await db
 			.select()

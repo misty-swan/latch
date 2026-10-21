@@ -18,6 +18,7 @@ import {
 	LIMITS,
 	PARTICIPANTS_MAX,
 	PARTICIPANTS_MIN,
+	PUSH_LIMITS,
 	REPORT_REASONS,
 	REPORT_TARGETS,
 } from "./constants";
@@ -474,3 +475,74 @@ export const blockListResponseSchema = z.object({
 	blocks: z.array(blockDtoSchema),
 });
 export type BlockListResponse = z.infer<typeof blockListResponseSchema>;
+
+/** アプリ内通知の共通部分(F7b設計 §3) */
+const notificationBase = {
+	id: z.string().length(26),
+	read_at: isoDateTimeSchema.nullable(),
+	created_at: isoDateTimeSchema,
+};
+
+/** 通知1件。種別ごとに必要な項目だけを持つ(IDの載せ方はF7b設計 §3) */
+export const notificationDtoSchema = z.discriminatedUnion("type", [
+	z.object({
+		...notificationBase,
+		type: z.literal("proposal"),
+		latch_id: z.string().length(26),
+		response_deadline: isoDateTimeSchema,
+	}),
+	z.object({
+		...notificationBase,
+		type: z.literal("matched"),
+		latch_id: z.string().length(26),
+		display_names: z.array(z.string()),
+	}),
+	z.object({
+		...notificationBase,
+		type: z.literal("closed"),
+		latch_id: z.string().length(26),
+	}),
+	z.object({
+		...notificationBase,
+		type: z.literal("intent_expired"),
+		intent: z.object({ id: z.string().length(26), raw_text: z.string() }),
+	}),
+]);
+export type NotificationDTO = z.infer<typeof notificationDtoSchema>;
+
+/** GET /v1/notifications の応答 */
+export const notificationListResponseSchema = z.object({
+	items: z.array(notificationDtoSchema),
+	next_cursor: z.string().nullable(),
+	unread_count: z.number().int().min(0),
+});
+export type NotificationListResponse = z.infer<
+	typeof notificationListResponseSchema
+>;
+
+/** POST /v1/notifications/read のリクエスト */
+export const notificationReadRequestSchema = z
+	.object({ up_to_id: z.string().length(26) })
+	.strict();
+export type NotificationReadRequest = z.infer<
+	typeof notificationReadRequestSchema
+>;
+
+/** POST /v1/push-subscriptions のリクエスト。許可ホスト・鍵長の検証はWorker側(F7b設計 §4) */
+export const pushSubscriptionRequestSchema = z
+	.object({
+		endpoint: z.url().max(PUSH_LIMITS.ENDPOINT_MAX_LENGTH),
+		keys: z.object({ p256dh: z.string(), auth: z.string() }),
+	})
+	.strict();
+export type PushSubscriptionRequest = z.infer<
+	typeof pushSubscriptionRequestSchema
+>;
+
+/** DELETE /v1/push-subscriptions のリクエスト */
+export const pushSubscriptionDeleteRequestSchema = z
+	.object({ endpoint: z.url().max(PUSH_LIMITS.ENDPOINT_MAX_LENGTH) })
+	.strict();
+export type PushSubscriptionDeleteRequest = z.infer<
+	typeof pushSubscriptionDeleteRequestSchema
+>;

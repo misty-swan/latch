@@ -472,11 +472,12 @@ const onMatched = async (
 					matched,
 				),
 			),
+		// 列順の注意: notificationsの末尾3列(intent_id, push_state, push_attempted_at)はマイグレーション0007で追加。INSERT … SELECTは位置で対応するため値の並びを揃える(F7b設計 §2)
 		...members.map((userId) =>
 			db
 				.insert(notifications)
 				.select(
-					sql`SELECT ${newUlid()}, ${userId}, 'matched', ${latchId}, NULL, ${nowMs} WHERE ${matched}`,
+					sql`SELECT ${newUlid()}, ${userId}, 'matched', ${latchId}, NULL, ${nowMs}, NULL, 'pending', NULL WHERE ${matched}`,
 				)
 				.onConflictDoNothing(),
 		),

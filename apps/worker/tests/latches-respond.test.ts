@@ -232,7 +232,10 @@ describe("respond(yes)", () => {
 		});
 		expect((await latchOf(latchId))?.status).toBe("matched");
 		expect((await historyOf(latchId))?.outcome).toBe("matched");
-		expect(await notificationsOf(latchId, "matched")).toHaveLength(2);
+		const matchedNotes = await notificationsOf(latchId, "matched");
+		expect(matchedNotes).toHaveLength(2);
+		// Web Pushの対象(matched)は作成時pending(F7b設計 §2)
+		expect(matchedNotes.every((n) => n.pushState === "pending")).toBe(true);
 		const events = await eventsOf(latchId);
 		expect(events.map((e) => [e.fromStatus, e.toStatus]).sort()).toEqual([
 			["partial_accept", "matched"],
@@ -313,7 +316,10 @@ describe("respond(defer/no)", () => {
 		});
 		expect((await latchOf(latchId))?.status).toBe("rejected");
 		expect((await historyOf(latchId))?.outcome).toBe("deferred");
-		expect(await notificationsOf(latchId, "closed")).toHaveLength(2);
+		const closedNotes = await notificationsOf(latchId, "closed");
+		expect(closedNotes).toHaveLength(2);
+		// closedはWeb Pushの対象外のためnone(F7b設計 §2)
+		expect(closedNotes.every((n) => n.pushState === "none")).toBe(true);
 		const rows = await responsesOf(latchId);
 		expect(rows.map((r) => [r.userId, r.response])).toEqual([[ua, "defer"]]);
 	});
