@@ -1,0 +1,4 @@
+/* 送信中の自分の吹き出し(latch.cssはis-failedだけ持つ・F6b設計 §1.5) */
+.msg.is-sending .msg__bubble {
+	opacity: 0.55;
+}

@@ -5,7 +5,8 @@
  */
 
 import type { LatchDTO } from "@latch/shared";
-import { Fragment, useLayoutEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
 import { ApiError } from "../../api/client";
 import {
@@ -14,27 +15,44 @@ import {
 	isEndedConnection,
 } from "../../chat/format";
 import {
+	appendMessage,
 	flattenMessages,
+	newClientId,
+	postMessage,
+	refreshLatestMessages,
+	requestWsTicket,
+	useMarkRead,
 	useMeQuery,
 	useMessagesQuery,
 } from "../../chat/queries";
+import { openChatSocket } from "../../chat/socket";
 import { formatMatchedAt } from "../../latches/format";
-import { useLatchQuery } from "../../latches/queries";
+import { latchQueryKey, useLatchQuery } from "../../latches/queries";
 import { latchPath, PATHS } from "../../routes/paths";
 import { Avatar, LatchArt } from "../latch/art";
 import { LatchLoadFailed } from "../latch/LatchScreen";
 import { ScreenGrain } from "../shared";
+import "./chat.css";
+import { Composer } from "./Composer";
 import { MessageList, type PendingMessage } from "./MessageList";
 
 const TONES = ["b", "c", "d", "e"] as const;
-/** Task 6が送信中・失敗の吹き出しを渡すまでは空 */
-const NO_PENDING: PendingMessage[] = [];
-
 const isRedirectError = (error: unknown): boolean => {
 	if (!(error instanceof ApiError)) return false;
 	if (error.code === "NOT_FOUND") return true;
 	const reasons = error.details.reasons;
 	return Array.isArray(reasons) && reasons.includes("invalid_status");
+};
+
+/** 送信が「もう書けない状態」で断られたか(失敗表示ではなくLATCHの取り直しへ) */
+const isNotWritable = (error: unknown): boolean => {
+	if (!(error instanceof ApiError)) return false;
+	if (error.code === "NOT_FOUND") return true;
+	const reasons = error.details.reasons;
+	return (
+		Array.isArray(reasons) &&
+		(reasons.includes("read_only") || reasons.includes("invalid_status"))
+	);
 };
 
 function HeadIcon({ latch }: { latch: LatchDTO }) {
@@ -184,6 +202,12 @@ function ChatView({
 	const { data, hasNextPage, isFetchingNextPage, fetchNextPage } = messages;
 	const ended = isEndedConnection(latch);
 	const now = new Date();
+	const client = useQueryClient();
+	const markRead = useMarkRead(latch.id);
+	const [pending, setPending] = useState<PendingMessage[]>([]);
+	const pendingRef = useRef(pending);
+	pendingRef.current = pending;
+	const matched = latch.status === "matched";
 
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const sentinelRef = useRef<HTMLDivElement>(null);
@@ -192,6 +216,99 @@ function ChatView({
 
 	const flat = data ? flattenMessages(data.pages) : [];
 	const loaded = data !== undefined;
+	const latestId = flat[flat.length - 1]?.id ?? null;
+	// 確定済みのclient_idと一致する未確定の吹き出しは描かない(WebSocketが応答より先に届く場合)
+	const confirmedClientIds = new Set(
+		flat.flatMap((m) => (m.client_id ? [m.client_id] : [])),
+	);
+	const shownPending = pending.filter(
+		(p) => !confirmedClientIds.has(p.clientId),
+	);
+
+	const setState = (clientId: string, state: PendingMessage["state"]) =>
+		setPending((list) =>
+			list.map((p) => (p.clientId === clientId ? { ...p, state } : p)),
+		);
+	const dropPending = (clientId: string) =>
+		setPending((list) => list.filter((p) => p.clientId !== clientId));
+
+	const deliver = (clientId: string, body: string) => {
+		postMessage(latch.id, body, clientId).then(
+			(message) => {
+				appendMessage(client, latch.id, message);
+				dropPending(clientId);
+			},
+			(error: unknown) => {
+				if (isNotWritable(error)) {
+					dropPending(clientId);
+					void client.invalidateQueries({ queryKey: latchQueryKey(latch.id) });
+				} else {
+					setState(clientId, "failed");
+				}
+			},
+		);
+	};
+
+	const send = (body: string) => {
+		const clientId = newClientId();
+		setPending((list) => [...list, { clientId, body, state: "sending" }]);
+		deliver(clientId, body);
+	};
+
+	const retry = (clientId: string) => {
+		const target = pendingRef.current.find((p) => p.clientId === clientId);
+		if (!target) return;
+		setState(clientId, "sending");
+		deliver(clientId, target.body);
+	};
+
+	// 受信: 続いている間だけWebSocketをつなぐ(画面を離れる・matchedでなくなると閉じる)
+	const latchId = latch.id;
+	useEffect(() => {
+		if (!matched) return;
+		const socket = openChatSocket(
+			latchId,
+			(e) => {
+				if (e.type === "message") appendMessage(client, latchId, e.message);
+				else if (e.type === "open") {
+					void refreshLatestMessages(client, latchId).catch(() => {});
+				} else {
+					void client.invalidateQueries({ queryKey: latchQueryKey(latchId) });
+				}
+			},
+			{
+				fetchTicket: requestWsTicket,
+				createSocket: (url) => new WebSocket(url),
+				setTimeout,
+				clearTimeout,
+				setInterval,
+				clearInterval,
+			},
+		);
+		return () => socket.close();
+	}, [matched, latchId, client]);
+
+	// 画面に戻ったとき取りこぼしを埋める
+	useEffect(() => {
+		const onFocus = () => {
+			void refreshLatestMessages(client, latchId).catch(() => {});
+		};
+		window.addEventListener("focus", onFocus);
+		return () => window.removeEventListener("focus", onFocus);
+	}, [client, latchId]);
+
+	// 既読: 表示中の最新の確定メッセージ(終了後も)
+	useEffect(() => {
+		if (latestId) markRead(latestId);
+	}, [latestId, markRead]);
+
+	// 新しい発言(自分の送信中を含む)が増えたら最下部へ
+	const scrollKey = `${latestId}:${shownPending.length}`;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 末尾の変化で走らせる
+	useEffect(() => {
+		const el = scrollRef.current;
+		if (el && firstScrolled.current) el.scrollTop = el.scrollHeight;
+	}, [scrollKey]);
 
 	// 初回表示は最下部・古い頁を足した直後は見ていた位置を保つ(scrollHeightの差を足す)
 	// biome-ignore lint/correctness/useExhaustiveDependencies: 件数の変化で走らせる
@@ -273,8 +390,8 @@ function ChatView({
 							meId={me.data?.id ?? ""}
 							messages={flat}
 							now={now}
-							pending={NO_PENDING}
-							onRetry={() => {}}
+							pending={shownPending}
+							onRetry={retry}
 						/>
 					) : null}
 				</div>
@@ -287,8 +404,9 @@ function ChatView({
 					</svg>
 					このつながりは終了しました
 				</div>
-			) : null}
-			{/* 入力欄(.composer)はTask 6でここに置く */}
+			) : (
+				<Composer onSend={send} />
+			)}
 		</div>
 	);
 }

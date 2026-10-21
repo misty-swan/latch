@@ -58,21 +58,43 @@ const json = (body: unknown, status = 200): Response =>
 
 let latch: LatchDTO | "404";
 let history: Record<string, unknown>;
-const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-	const url = String(input);
-	if (url === "/v1/users/me") return json({ id: "me" });
-	if (url === "/v1/latches/L1") {
-		return latch === "404"
-			? json({ error: { code: "NOT_FOUND", message: "x" } }, 404)
-			: json(latch);
+const fetchMock = vi.fn(
+	async (input: RequestInfo | URL, _init?: RequestInit) => {
+		const url = String(input);
+		if (url === "/v1/users/me") return json({ id: "me" });
+		if (url === "/v1/latches/L1") {
+			return latch === "404"
+				? json({ error: { code: "NOT_FOUND", message: "x" } }, 404)
+				: json(latch);
+		}
+		if (url.startsWith("/v1/latches/L1/messages")) {
+			const before = new URL(url, "http://x").searchParams.get("before") ?? "";
+			return json(history[before]);
+		}
+		if (url === "/v1/latches/L1/read")
+			return new Response(null, { status: 204 });
+		if (url === "/v1/ws-ticket") return json({ ticket: "tk", expires_in: 60 });
+		throw new Error(`想定外のfetch: ${url}`);
+	},
+);
+
+class FakeSocket {
+	static all: FakeSocket[] = [];
+	onopen: (() => void) | null = null;
+	onmessage: ((e: { data: unknown }) => void) | null = null;
+	onclose: (() => void) | null = null;
+	closed = false;
+	constructor(readonly url: string) {
+		FakeSocket.all.push(this);
 	}
-	if (url.startsWith("/v1/latches/L1/messages")) {
-		const before = new URL(url, "http://x").searchParams.get("before") ?? "";
-		return json(history[before]);
+	send() {}
+	close() {
+		this.closed = true;
 	}
-	if (url === "/v1/latches/L1/read") return new Response(null, { status: 204 });
-	throw new Error(`想定外のfetch: ${url}`);
-});
+	recv(m: MessageDTO) {
+		this.onmessage?.({ data: JSON.stringify({ type: "message", ...m }) });
+	}
+}
 
 const open = () => {
 	const router = createMemoryRouter(appRoutes, {
@@ -88,6 +110,8 @@ const open = () => {
 
 beforeEach(() => {
 	vi.stubGlobal("fetch", fetchMock);
+	FakeSocket.all = [];
+	vi.stubGlobal("WebSocket", FakeSocket);
 	fetchMock.mockClear();
 	authSession.setTokens("access-chat", null);
 	latch = latchOf();
@@ -243,5 +267,190 @@ describe("Chat", () => {
 		expect(
 			screen.queryByRole("button", { name: "古いメッセージを読み込む" }),
 		).toBeNull();
+	});
+});
+
+describe("Chat の送信・受信・既読", () => {
+	const field = () => screen.getByLabelText("メッセージ");
+	const postCalls = () =>
+		fetchMock.mock.calls.filter(
+			([u, init]) =>
+				String(u) === "/v1/latches/L1/messages" &&
+				(init as RequestInit | undefined)?.method === "POST",
+		);
+	const bodyOf = (call: unknown[]) =>
+		JSON.parse(String((call[1] as RequestInit).body));
+	const baseImpl = fetchMock.getMockImplementation() as (
+		i: RequestInfo | URL,
+		init?: RequestInit,
+	) => Promise<Response>;
+	const withPost = (
+		handler: (init: RequestInit) => Promise<Response> | Response,
+	) =>
+		fetchMock.mockImplementation(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				if (
+					String(input) === "/v1/latches/L1/messages" &&
+					init?.method === "POST"
+				) {
+					return handler(init);
+				}
+				return baseImpl(input, init);
+			},
+		);
+	const type = async (text: string) => {
+		await screen.findByText("本文02");
+		fireEvent.change(field(), { target: { value: text } });
+		fireEvent.click(screen.getByRole("button", { name: "送る" }));
+	};
+	afterEach(() => fetchMock.mockImplementation(baseImpl));
+
+	it("送信で{body, client_id}をPOSTし・応答前はis-sendingの吹き出しが出る", async () => {
+		let release: (r: Response) => void = () => {};
+		withPost(() => new Promise<Response>((r) => (release = r)));
+		open();
+		await type("  こんにちは ");
+		await waitFor(() => expect(postCalls()).toHaveLength(1));
+		const sent = bodyOf(postCalls()[0] as unknown[]);
+		expect(sent.body).toBe("こんにちは");
+		expect(typeof sent.client_id).toBe("string");
+		const bubble = screen.getByText("こんにちは").closest(".msg");
+		expect(bubble?.classList.contains("is-sending")).toBe(true);
+		release(
+			json(
+				{ ...msg("03", "me"), body: "こんにちは", client_id: sent.client_id },
+				201,
+			),
+		);
+		await waitFor(() =>
+			expect(document.querySelector(".msg.is-sending")).toBeNull(),
+		);
+		expect(screen.getAllByText("こんにちは")).toHaveLength(1);
+	});
+
+	it("WebSocketで同じclient_idが先に届いても吹き出しは1つ", async () => {
+		let release: (r: Response) => void = () => {};
+		withPost(() => new Promise<Response>((r) => (release = r)));
+		open();
+		await type("やあ");
+		await waitFor(() => expect(postCalls()).toHaveLength(1));
+		const cid = bodyOf(postCalls()[0] as unknown[]).client_id;
+		await waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+		const confirmed = { ...msg("03", "me"), body: "やあ", client_id: cid };
+		FakeSocket.all[0]?.recv(confirmed);
+		await waitFor(() =>
+			expect(document.querySelector(".msg.is-sending")).toBeNull(),
+		);
+		expect(screen.getAllByText("やあ")).toHaveLength(1);
+		release(json(confirmed, 201));
+		await waitFor(() => expect(screen.getAllByText("やあ")).toHaveLength(1));
+	});
+
+	it("500で失敗表示と[もう一度送る]が出て・再送は同じclient_id", async () => {
+		let n = 0;
+		withPost((init) => {
+			n += 1;
+			if (n === 1) {
+				return json({ error: { code: "INTERNAL", message: "x" } }, 500);
+			}
+			return json(
+				{
+					...msg("03", "me"),
+					body: "失敗する",
+					client_id: JSON.parse(String(init.body)).client_id,
+				},
+				201,
+			);
+		});
+		open();
+		await type("失敗する");
+		fireEvent.click(
+			await screen.findByRole("button", { name: "もう一度送る" }),
+		);
+		expect(screen.queryByText("送信できませんでした")).toBeNull();
+		await waitFor(() => expect(postCalls()).toHaveLength(2));
+		expect(bodyOf(postCalls()[1] as unknown[]).client_id).toBe(
+			bodyOf(postCalls()[0] as unknown[]).client_id,
+		);
+		await waitFor(() =>
+			expect(
+				document.querySelector(".msg.is-failed, .msg.is-sending"),
+			).toBeNull(),
+		);
+	});
+
+	it("失敗時は「送信できませんでした」が出る", async () => {
+		withPost(() => json({ error: { code: "INTERNAL", message: "x" } }, 500));
+		open();
+		await type("だめ");
+		expect(await screen.findByText(/送信できませんでした/)).toBeTruthy();
+		expect(document.querySelector(".msg.is-failed")).not.toBeNull();
+	});
+
+	it("400 read_onlyは失敗表示を出さずLATCHを取り直す", async () => {
+		withPost(() =>
+			json(
+				{
+					error: {
+						code: "VALIDATION_FAILED",
+						message: "x",
+						details: { reasons: ["read_only"] },
+					},
+				},
+				400,
+			),
+		);
+		open();
+		await screen.findByText("本文02");
+		const before = fetchMock.mock.calls.filter(
+			([u]) => String(u) === "/v1/latches/L1",
+		).length;
+		fireEvent.change(field(), { target: { value: "終わった" } });
+		fireEvent.click(screen.getByRole("button", { name: "送る" }));
+		await waitFor(() =>
+			expect(
+				fetchMock.mock.calls.filter(([u]) => String(u) === "/v1/latches/L1")
+					.length,
+			).toBeGreaterThan(before),
+		);
+		expect(screen.queryByText(/送信できませんでした/)).toBeNull();
+		expect(screen.queryByText("終わった")).toBeNull();
+	});
+
+	it("WebSocketのmessageで相手の吹き出しが増え・既読がその最新IDで送られる", async () => {
+		open();
+		await screen.findByText("本文02");
+		await waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+		FakeSocket.all[0]?.recv(msg("09", "u2"));
+		expect(await screen.findByText("本文09")).toBeTruthy();
+		await waitFor(() => {
+			const reads = fetchMock.mock.calls.filter(
+				([u]) => String(u) === "/v1/latches/L1/read",
+			);
+			expect(
+				reads.map((c) => JSON.parse(String((c[1] as RequestInit).body))),
+			).toContainEqual({ last_read_message_id: "09" });
+		});
+	});
+
+	it("completedではWebSocketを作らない", async () => {
+		latch = latchOf({ status: "completed" });
+		open();
+		await screen.findByText("本文02");
+		expect(FakeSocket.all).toHaveLength(0);
+	});
+
+	it("windowのfocusで最新頁(before無し)を取り直す", async () => {
+		open();
+		await screen.findByText("本文02");
+		fetchMock.mockClear();
+		fireEvent.focus(window);
+		await waitFor(() =>
+			expect(
+				fetchMock.mock.calls.some(
+					([u]) => String(u) === "/v1/latches/L1/messages",
+				),
+			).toBe(true),
+		);
 	});
 });

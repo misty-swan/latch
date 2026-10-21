@@ -62,7 +62,7 @@ export function MessageList({
 			{pending.map((p) => (
 				<div
 					key={p.clientId}
-					className={`msg msg--mine${p.state === "failed" ? " is-failed" : ""}`}
+					className={`msg msg--mine${p.state === "failed" ? " is-failed" : " is-sending"}`}
 				>
 					<p className="msg__bubble">{p.body}</p>
 					{p.state === "failed" ? (
