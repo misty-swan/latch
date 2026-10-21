@@ -16,7 +16,10 @@
 		};
 	};
 
-	/** 開いているLATCHの窓があればそこで/noticesへ・無ければ新しく開く */
+	/**
+	 * 開いているLATCHの窓があれば前に出してそこで/noticesへ・無ければ新しく開く。
+	 * navigateはこのSWが制御していない窓では失敗(またはnull)になるため、そのときも新しく開く
+	 */
 	const openNotices = async (clients) => {
 		const windows = await clients.matchAll({
 			type: "window",
@@ -24,9 +27,15 @@
 		});
 		const client = windows[0];
 		if (client) {
-			await client.navigate(NOTICES_PATH);
-			await client.focus();
-			return;
+			try {
+				await client.focus();
+				const navigated = await client.navigate(NOTICES_PATH);
+				if (navigated) {
+					return;
+				}
+			} catch {
+				// 下で新しく開く
+			}
 		}
 		await clients.openWindow(NOTICES_PATH);
 	};

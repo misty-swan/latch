@@ -106,6 +106,9 @@ describe("push-sw.js", () => {
 			openWindow: vi.fn(async () => null),
 		};
 		await latchPush.openNotices(clients);
+		expect(client.focus.mock.invocationCallOrder[0]).toBeLessThan(
+			client.navigate.mock.invocationCallOrder[0] ?? 0,
+		);
 		expect(clients.matchAll).toHaveBeenCalledWith({
 			type: "window",
 			includeUncontrolled: true,
@@ -113,6 +116,36 @@ describe("push-sw.js", () => {
 		expect(client.navigate).toHaveBeenCalledWith("/notices");
 		expect(client.focus).toHaveBeenCalled();
 		expect(clients.openWindow).not.toHaveBeenCalled();
+	});
+
+	it("openNoticesはnavigateが失敗したら/noticesを新しく開く", async () => {
+		const { latchPush } = load();
+		const client = {
+			navigate: vi.fn(async () => {
+				throw new TypeError("not controlled");
+			}),
+			focus: vi.fn(async () => client),
+		};
+		const clients = {
+			matchAll: vi.fn(async () => [client]),
+			openWindow: vi.fn(async () => null),
+		};
+		await latchPush.openNotices(clients);
+		expect(clients.openWindow).toHaveBeenCalledWith("/notices");
+	});
+
+	it("openNoticesはnavigateがnullなら/noticesを新しく開く", async () => {
+		const { latchPush } = load();
+		const client = {
+			navigate: vi.fn(async () => null),
+			focus: vi.fn(async () => client),
+		};
+		const clients = {
+			matchAll: vi.fn(async () => [client]),
+			openWindow: vi.fn(async () => null),
+		};
+		await latchPush.openNotices(clients);
+		expect(clients.openWindow).toHaveBeenCalledWith("/notices");
 	});
 
 	it("openNoticesは窓が無ければ/noticesを新しく開く", async () => {

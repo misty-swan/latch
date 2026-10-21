@@ -62,6 +62,7 @@ const makeEnv = (
 		}),
 		pushManager: async () =>
 			options.noManager ? null : (manager as unknown as PushManager),
+		readyPushManager: async () => manager as unknown as PushManager,
 	};
 	return { env, manager, created };
 };
@@ -162,6 +163,52 @@ describe("enablePush", () => {
 	});
 });
 
+describe("Service Workerが有効にならないとき", () => {
+	const never = <T>(): Promise<T> => new Promise<T>(() => {});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("enablePushは5秒で区切ってoffを返し購読しない", async () => {
+		vi.useFakeTimers();
+		const { env, manager } = makeEnv();
+		env.readyPushManager = never;
+
+		const result = enablePush(env);
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(await result).toBe("off");
+		expect(manager.subscribe).not.toHaveBeenCalled();
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("pushManagerが解決しなくてもdisablePushQuietlyは終わり、ログアウトはclearまで進む", async () => {
+		vi.useFakeTimers();
+		authSession.setTokens("access-push", "refresh-push");
+		const env: PushEnv = {
+			permission: () => "granted",
+			requestPermission: async () => "granted",
+			pushManager: never,
+			readyPushManager: never,
+		};
+
+		const done = authSession.logout(() => disablePushQuietly(env));
+		await vi.advanceTimersByTimeAsync(5_000);
+		await done;
+		expect(authSession.accessToken).toBeNull();
+		expect(localStorage.getItem("latch.refresh")).toBeNull();
+	});
+
+	it("許可していなければdisablePushはpushManagerを見ない", async () => {
+		const { env } = makeEnv({ permission: "default" });
+		const lookup = vi.spyOn(env, "pushManager");
+
+		await disablePush(env);
+		expect(lookup).not.toHaveBeenCalled();
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+});
+
 describe("getPushStatus", () => {
 	it("許可済みで購読があればon・無ければoff", async () => {
 		expect(
@@ -184,11 +231,14 @@ describe("getPushStatus", () => {
 		expect(
 			await getPushStatus(makeEnv({ permission: "unsupported" }).env),
 		).toBe("unsupported");
-		expect(
-			await getPushStatus(
-				makeEnv({ permission: "granted", noManager: true }).env,
-			),
-		).toBe("unsupported");
+	});
+
+	it("Service Workerの登録が無くても待たずにoffを返す", async () => {
+		const { env } = makeEnv({ permission: "granted", noManager: true });
+		const ready = vi.spyOn(env, "readyPushManager");
+
+		expect(await getPushStatus(env)).toBe("off");
+		expect(ready).not.toHaveBeenCalled();
 	});
 });
 
@@ -220,6 +270,7 @@ describe("disablePush", () => {
 			pushManager: async () => {
 				throw new Error("boom");
 			},
+			readyPushManager: async () => null,
 		};
 		await expect(disablePushQuietly(env)).resolves.toBeUndefined();
 	});

@@ -14,11 +14,19 @@ import { apiFetch } from "../api/client";
 export type PushEnv = {
 	permission(): NotificationPermission | "unsupported";
 	requestPermission(): Promise<NotificationPermission>;
+	/** 登録済みのService WorkerのpushManager。登録が無ければ待たずにnull(状態の確認・解除用) */
 	pushManager(): Promise<PushManager | null>;
+	/** 有効なService WorkerのpushManager。有効になるまで待つ(購読の作成用・呼び出し側で時間を区切る) */
+	readyPushManager(): Promise<PushManager | null>;
 };
 
 /** unsupported=非対応・denied=ブラウザで拒否済み・off=購読なし・on=購読あり */
 export type PushStatus = "unsupported" | "denied" | "off" | "on";
+
+/** Service Workerが有効になるのを待つ上限(過ぎたら購読せずoff) */
+export const SW_READY_TIMEOUT_MS = 5_000;
+/** ログアウト時の購読の後始末の上限(過ぎたらログアウトを先へ進める) */
+export const DISABLE_TIMEOUT_MS = 5_000;
 
 const isSupported = (): boolean =>
 	typeof Notification !== "undefined" &&
@@ -34,9 +42,31 @@ export const browserPushEnv: PushEnv = {
 		if (!isSupported()) {
 			return null;
 		}
+		// readyと違い・登録が無ければすぐundefinedで解決する
+		const registration = await navigator.serviceWorker.getRegistration();
+		return registration?.pushManager ?? null;
+	},
+	readyPushManager: async () => {
+		if (!isSupported()) {
+			return null;
+		}
 		const registration = await navigator.serviceWorker.ready;
 		return registration.pushManager ?? null;
 	},
+};
+
+const TIMED_OUT = Symbol("timed-out");
+
+/** promiseをmsで区切る。過ぎたらTIMED_OUTで解決する */
+const withTimeout = <T>(
+	promise: Promise<T>,
+	ms: number,
+): Promise<T | typeof TIMED_OUT> => {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+		timer = setTimeout(() => resolve(TIMED_OUT), ms);
+	});
+	return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 };
 
 /** base64urlの公開鍵をsubscribeへ渡すバイト列へ変える */
@@ -62,9 +92,10 @@ export const getPushStatus = async (
 	if (permission === "default") {
 		return "off";
 	}
+	// 許可済みでもService Workerの登録が無ければ購読も無い(対応ブラウザなのでoff)
 	const manager = await env.pushManager();
 	if (manager === null) {
-		return "unsupported";
+		return "off";
 	}
 	return (await manager.getSubscription()) ? "on" : "off";
 };
@@ -85,9 +116,13 @@ export const enablePush = async (
 		if (permission !== "granted") {
 			return "off";
 		}
-		const manager = await env.pushManager();
-		if (manager === null) {
-			return "unsupported";
+		// 購読の作成だけは有効なService Workerが要る。来なければoff(非対応ではない)
+		const manager = await withTimeout(
+			env.readyPushManager(),
+			SW_READY_TIMEOUT_MS,
+		);
+		if (manager === TIMED_OUT || manager === null) {
+			return "off";
 		}
 		const { public_key } = await apiFetch<{ public_key: string }>(
 			"/push/vapid-public-key",
@@ -116,7 +151,8 @@ export const enablePush = async (
 export const disablePush = async (
 	env: PushEnv = browserPushEnv,
 ): Promise<void> => {
-	if (env.permission() === "unsupported") {
+	// 許可していなければ購読は作れていない
+	if (env.permission() !== "granted") {
 		return;
 	}
 	const manager = await env.pushManager();
@@ -135,15 +171,14 @@ export const disablePush = async (
 	}
 };
 
-/** ログアウト用。失敗を飲む(トークンの破棄を止めない) */
+/** ログアウト用。失敗を飲み・時間も区切る(トークンの破棄を止めない) */
 export const disablePushQuietly = async (
 	env: PushEnv = browserPushEnv,
 ): Promise<void> => {
-	try {
-		await disablePush(env);
-	} catch {
-		// 何もしない
-	}
+	await withTimeout(
+		disablePush(env).catch(() => undefined),
+		DISABLE_TIMEOUT_MS,
+	);
 };
 
 /** 通知の状態のキャッシュのキー(有効化・無効化の後はsetQueryDataで結果を入れる) */
