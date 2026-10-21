@@ -36,6 +36,8 @@ export const openChatSocket = (
 	onEvent: (e: ChatSocketEvent) => void,
 	deps: ChatSocketDeps,
 ): { close(): void } => {
+	// ブラウザのタイマーはthisがwindow以外だとIllegal invocationになるため、deps経由のメソッド呼び出しを避けて取り出す
+	const { setTimeout, clearTimeout, setInterval, clearInterval } = deps;
 	let stopped = false; // close()・closedフレーム・stopped のいずれかで以後何もしない
 	let delay = RECONNECT_BASE_MS;
 	let socket: WebSocket | null = null;
@@ -43,7 +45,7 @@ export const openChatSocket = (
 	let pingTimer: ReturnType<typeof setInterval> | null = null;
 
 	const stopPing = () => {
-		if (pingTimer !== null) deps.clearInterval(pingTimer);
+		if (pingTimer !== null) clearInterval(pingTimer);
 		pingTimer = null;
 	};
 
@@ -51,7 +53,7 @@ export const openChatSocket = (
 		if (stopped) return;
 		const wait = delay;
 		delay = Math.min(delay * 2, RECONNECT_MAX_MS);
-		retryTimer = deps.setTimeout(() => {
+		retryTimer = setTimeout(() => {
 			retryTimer = null;
 			void connect();
 		}, wait);
@@ -83,7 +85,7 @@ export const openChatSocket = (
 			if (stopped || socket !== ws) return;
 			delay = RECONNECT_BASE_MS;
 			stopPing();
-			pingTimer = deps.setInterval(() => ws.send("ping"), PING_INTERVAL_MS);
+			pingTimer = setInterval(() => ws.send("ping"), PING_INTERVAL_MS);
 			onEvent({ type: "open" });
 		};
 		ws.onmessage = (ev) => {
@@ -121,7 +123,7 @@ export const openChatSocket = (
 	return {
 		close() {
 			stopped = true;
-			if (retryTimer !== null) deps.clearTimeout(retryTimer);
+			if (retryTimer !== null) clearTimeout(retryTimer);
 			retryTimer = null;
 			stopPing();
 			const ws = socket;

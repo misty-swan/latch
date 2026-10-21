@@ -191,4 +191,30 @@ describe("openChatSocket", () => {
 		await vi.advanceTimersByTimeAsync(5000);
 		expect(FakeSocket.all.length).toBe(0);
 	});
+
+	it("タイマー関数はthisなしで呼ばれる(ブラウザのIllegal invocation対策)", async () => {
+		const guard = <F extends (...a: never[]) => unknown>(f: F): F =>
+			function (this: unknown, ...a: Parameters<F>) {
+				if (this !== undefined && this !== globalThis) {
+					throw new TypeError("Illegal invocation");
+				}
+				return f(...a);
+			} as unknown as F;
+		const events: ChatSocketEvent[] = [];
+		openChatSocket("L1", (e) => events.push(e), {
+			fetchTicket: vi.fn().mockResolvedValue("tk"),
+			createSocket: (url) => new FakeSocket(url) as unknown as WebSocket,
+			setTimeout: guard(setTimeout),
+			clearTimeout: guard(clearTimeout),
+			setInterval: guard(setInterval),
+			clearInterval: guard(clearInterval),
+		});
+		await flush();
+		last().open();
+		await vi.advanceTimersByTimeAsync(PING_INTERVAL_MS);
+		expect(last().sent).toEqual(["ping"]);
+		last().drop();
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(FakeSocket.all.length).toBe(2);
+	});
 });
