@@ -1,7 +1,7 @@
 /**
  * LATCHの表示範囲(F4a設計 §4.5・docs/01 §10)。
  * 成立前は相手の情報・proposalを一切含めない(キー自体を出さない・#20)。
- * 成立後(matched・およびmatched経由のcancelled)のみproposalと自分を除くmembersを含める
+ * 成立後(matched・completed・およびmatched経由のcancelled)のみproposalと自分を除くmembersを含める
  */
 import {
 	type LatchDTO,

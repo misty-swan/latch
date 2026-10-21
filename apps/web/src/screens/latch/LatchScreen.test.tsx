@@ -157,6 +157,14 @@ describe("selectLatchView", () => {
 			},
 			"ended",
 		],
+		[
+			{
+				status: "completed",
+				my_response: "yes",
+				proposal: matchedLatch().proposal,
+			},
+			"ended",
+		],
 	] as Array<[Partial<LatchDTO>, string]>)("%o → %s", (over, expected) => {
 		expect(selectLatchView(latchOf(over))).toBe(expected);
 	});

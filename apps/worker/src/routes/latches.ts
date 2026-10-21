@@ -1,7 +1,7 @@
 /**
  * LATCH(提案)APIルート(F4a設計 §4.1・docs/05 §3.2)。
  * - GET /v1/latches?type=proposals|matched: 自分が参加する提案(proposed/partial_accept)・
- *   成立(matched)の一覧。id降順・cursor/limitはintents一覧と同方式。保留(candidate)は含めない
+ *   成立(matched・completed・F5設計 §3)の一覧。id降順・cursor/limitはintents一覧と同方式。保留(candidate)は含めない
  * - GET /v1/latches/{id}: 単一取得。参加しない・存在しない・保留中(candidate)は一律404
  *   (成立後に個別に離脱した参加者は一覧・単一取得・各操作とも非参加と同じ扱い・F4b設計 §3.4)
  * - POST /{id}/response・/response/retract・/leave・/defer-reason: 成功は操作後のLatchDTO(200)。
@@ -88,7 +88,7 @@ const decodeCursor = (cursor: string): string | null => {
 
 /**
  * 自分が参加するLATCHをLatchDTOにして返す。参加しない・存在しない・candidateはnull。
- * 成立後(matched・matched経由のcancelled)のみ自分を除くmembersとproposalを含める(§4.5)。
+ * 成立後(matched・completed・matched経由のcancelled)のみ自分を除くmembersとproposalを含める(§4.5)。
  * 離脱済み(left_atあり)の参加者は非参加と同じ扱いで、members・participants_countからも除く
  * (F4b設計 §3.4)。includeLeftは離脱操作そのものの応答に限り、離脱した本人へ返すために使う
  */
@@ -144,9 +144,13 @@ const loadLatchDto = async (
 					)
 					.limit(1);
 	// Intent削除後もintent_idsは残る(FKなし)ため、見つからなくても404にせずnullで返す
-	// 成立時刻: to=matchedの状態記録のcreated_at。matched・matched経由のcancelled(leave等)にある
+	// 成立時刻: to=matchedの状態記録のcreated_at。matched・completed・matched経由のcancelled(leave等)にある
 	let matchedAt: Date | null = null;
-	if (latch.status === "matched" || latch.status === "cancelled") {
+	if (
+		latch.status === "matched" ||
+		latch.status === "completed" ||
+		latch.status === "cancelled"
+	) {
 		const [ev] = await db
 			.select({ createdAt: latchStatusEvents.createdAt })
 			.from(latchStatusEvents)
@@ -234,7 +238,9 @@ latchRoutes.get("/", requireRegistered, async (c) => {
 	const conditions = [
 		inArray(
 			latches.status,
-			type === "proposals" ? ["proposed", "partial_accept"] : ["matched"],
+			type === "proposals"
+				? ["proposed", "partial_accept"]
+				: ["matched", "completed"],
 		),
 	];
 	if (cursorId !== undefined) {

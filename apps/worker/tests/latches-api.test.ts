@@ -376,6 +376,44 @@ describe("GET /v1/latches/:id の表示範囲", () => {
 		expect(body.members).toHaveLength(1);
 	});
 
+	it("completedはproposal・members・matched_atを含む(docs/02 D-08)", async () => {
+		const { a, b, id } = await setup("proposed");
+		await yes(id, a.token);
+		await yes(id, b.token);
+		await db
+			.update(latches)
+			.set({ status: "completed" })
+			.where(eq(latches.id, id));
+		const body = (await (
+			await call("GET", `/v1/latches/${id}`, a.token)
+		).json()) as {
+			status: string;
+			proposal?: unknown;
+			members?: unknown[];
+			matched_at: string | null;
+		};
+		expect(body.status).toBe("completed");
+		expect(body.proposal).toBeDefined();
+		expect(body.members).toHaveLength(1);
+		expect(body.matched_at).not.toBeNull();
+	});
+
+	it("completedへのleaveは400 invalid_status", async () => {
+		const { a, b, id } = await setup("proposed");
+		await yes(id, a.token);
+		await yes(id, b.token);
+		await db
+			.update(latches)
+			.set({ status: "completed" })
+			.where(eq(latches.id, id));
+		const res = await call("POST", `/v1/latches/${id}/leave`, a.token);
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as {
+			error: { details: { reasons: string[] } };
+		};
+		expect(body.error.details.reasons).toEqual(["invalid_status"]);
+	});
+
 	it("matchedを経ないcancelledはproposal・membersを含まない", async () => {
 		const { a, id } = await setup("proposed");
 		await db
@@ -534,6 +572,27 @@ describe("GET /v1/latches 一覧", () => {
 		).json()) as { items: { id: string; members: unknown[] }[] };
 		expect(listM.items.map((i) => i.id)).toEqual([m.id]);
 		expect(listM.items[0]?.members).toHaveLength(1);
+	});
+
+	it("type=matchedの一覧はcompletedを含み、proposed・cancelledは含まない", async () => {
+		const a = await registerUser("己");
+		const ids: Record<string, string> = {};
+		for (const status of ["matched", "completed", "proposed", "cancelled"]) {
+			const b = await registerUser(`相手${status}`);
+			ids[status] = await seedLatch(a, b, "proposed", false);
+			await db
+				.update(latches)
+				.set({ status: status as "matched" })
+				.where(eq(latches.id, ids[status]));
+		}
+		const list = (await (
+			await call("GET", "/v1/latches?type=matched", a.token)
+		).json()) as { items: { id: string }[] };
+		const listed = list.items.map((i) => i.id);
+		expect(listed).toContain(ids.matched);
+		expect(listed).toContain(ids.completed);
+		expect(listed).not.toContain(ids.proposed);
+		expect(listed).not.toContain(ids.cancelled);
 	});
 
 	it("id降順でcursor/limitによりページングできる", async () => {

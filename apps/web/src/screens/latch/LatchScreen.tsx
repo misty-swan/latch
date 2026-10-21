@@ -51,7 +51,11 @@ export function selectLatchView(latch: LatchDTO): LatchView {
 		if (latch.my_response === "yes") return "awaiting";
 	}
 	if (latch.status === "matched") return "matched";
-	if (latch.status === "cancelled" && latch.proposal !== undefined) {
+	// 成立を経て終わったもの(離脱等のcancelled・completed)は「このつながりは終了しました」
+	if (
+		(latch.status === "cancelled" || latch.status === "completed") &&
+		latch.proposal !== undefined
+	) {
 		return "ended";
 	}
 	return "closed";
