@@ -6,7 +6,7 @@ import { env, SELF } from "cloudflare:test";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { importJWK, SignJWT } from "jose";
-import { ulid } from "ulid";
+import { monotonicFactory, ulid } from "ulid";
 import { describe, expect, it } from "vitest";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
 import { markRead } from "../src/chat/messages";
@@ -711,8 +711,10 @@ describe("グループの成立後の離脱(F4b設計 §3.4・オーナー裁定
 });
 
 describe("成立後のLatchDTOの最終メッセージ・未読数と一覧の範囲(F6a設計 §2.3・§3.2・§3.3)", () => {
+	// 同じミリ秒内の連続送信でもIDの順=送信の順になるよう単調増加で採番する(未読数の比較がIDの順による)
+	const nextMessageId = monotonicFactory();
 	const sendMessage = async (latchId: string, userId: string, body: string) => {
-		const id = ulid();
+		const id = nextMessageId();
 		await db.insert(messages).values({
 			id,
 			latchId,
@@ -778,15 +780,80 @@ describe("成立後のLatchDTOの最終メッセージ・未読数と一覧の�
 		const item = listB.items.find((i) => i.id === id);
 		expect(item?.status).toBe("cancelled");
 		expect(item?.unread_count).toBe(0);
-		// 本人の側はDELETE(表示から消す)がleaveに加えて記録するhidden_atで一覧から消える(POST /leave単独は本人のleft_atを記録しない1対1の既存挙動)
-		await db
-			.update(latchMembers)
-			.set({ hiddenAt: new Date() })
-			.where(and(eq(latchMembers.latchId, id), eq(latchMembers.userId, a.id)));
+		// 下限割れで全体を取り消した離脱でも本人のleft_atが記録され、本人の一覧から消える(docs/05 §3.3)
 		const listA = (await (
 			await call("GET", "/v1/latches?type=matched", a.token)
 		).json()) as { items: { id: string }[] };
 		expect(listA.items.map((i) => i.id)).not.toContain(id);
+	});
+
+	it("1対1のPOST /leaveで本人のleft_atが記録され、本人のGETは404・一覧から消え、相手の一覧ではcancelled", async () => {
+		const { a, b, id } = await setup("proposed");
+		expect((await yes(id, a.token)).status).toBe(200);
+		expect((await yes(id, b.token)).status).toBe(200);
+		expect(
+			(await call("POST", `/v1/latches/${id}/leave`, a.token)).status,
+		).toBe(200);
+		const [me] = await db
+			.select({ leftAt: latchMembers.leftAt })
+			.from(latchMembers)
+			.where(and(eq(latchMembers.latchId, id), eq(latchMembers.userId, a.id)));
+		expect(me?.leftAt).not.toBeNull();
+		expect((await call("GET", `/v1/latches/${id}`, a.token)).status).toBe(404);
+		// 取り消した後の再試行は継続側の離脱と同じく非参加の404
+		expect(
+			(await call("POST", `/v1/latches/${id}/leave`, a.token)).status,
+		).toBe(404);
+		const listA = (await (
+			await call("GET", "/v1/latches?type=matched", a.token)
+		).json()) as { items: { id: string }[] };
+		expect(listA.items.map((i) => i.id)).not.toContain(id);
+		const listB = (await (
+			await call("GET", "/v1/latches?type=matched", b.token)
+		).json()) as { items: (ChatDto & { id: string })[] };
+		const item = listB.items.find((i) => i.id === id);
+		expect(item?.status).toBe("cancelled");
+		expect(item?.participants_count).toBe(1);
+	});
+
+	it("hidden_atを持つ本人のPOST /leaveは404で、離脱応答(includeLeft)でも本人へ返さない", async () => {
+		const { a, id } = await setup("matched");
+		await db
+			.update(latchMembers)
+			.set({ hiddenAt: new Date() })
+			.where(and(eq(latchMembers.latchId, id), eq(latchMembers.userId, a.id)));
+		expect(
+			(await call("POST", `/v1/latches/${id}/leave`, a.token)).status,
+		).toBe(404);
+		// 非参加の扱いのため離脱は実行されない(left_at・状態は不変)
+		const [me] = await db
+			.select({ leftAt: latchMembers.leftAt })
+			.from(latchMembers)
+			.where(and(eq(latchMembers.latchId, id), eq(latchMembers.userId, a.id)));
+		expect(me?.leftAt).toBeNull();
+		const [row] = await db
+			.select({ status: latches.status })
+			.from(latches)
+			.where(eq(latches.id, id));
+		expect(row?.status).toBe("matched");
+	});
+
+	it("matched経由のcancelledでもhidden_atを持つ本人の一覧には出ない", async () => {
+		const { a, b, id } = await setup("proposed");
+		expect((await yes(id, a.token)).status).toBe(200);
+		expect((await yes(id, b.token)).status).toBe(200);
+		expect(
+			(await call("POST", `/v1/latches/${id}/leave`, a.token)).status,
+		).toBe(200);
+		await db
+			.update(latchMembers)
+			.set({ hiddenAt: new Date() })
+			.where(and(eq(latchMembers.latchId, id), eq(latchMembers.userId, b.id)));
+		const listB = (await (
+			await call("GET", "/v1/latches?type=matched", b.token)
+		).json()) as { items: { id: string }[] };
+		expect(listB.items.map((i) => i.id)).not.toContain(id);
+		expect((await call("GET", `/v1/latches/${id}`, b.token)).status).toBe(404);
 	});
 
 	it("matchedを経ないcancelledはtype=matchedに出ない", async () => {

@@ -566,6 +566,11 @@ describe("leave", () => {
 			ok: false,
 			reason: "invalid_status",
 		});
+		// 取り消した離脱者はleft_atを持ち、以降は非参加(Ruling 5・docs/05 §3.3)
+		expect(await leave(db, latchId, ub, t2)).toEqual({
+			ok: false,
+			reason: "not_found",
+		});
 	});
 
 	it("leaveではclosed通知を作らない(closedは不成立の総称で成立後の離脱を含まない・05 §2.2)", async () => {

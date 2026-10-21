@@ -768,6 +768,10 @@ describe("成立後の離脱(F4b設計 §3.4・オーナー裁定3)", () => {
 			latchId,
 		});
 		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		// 下限割れで取り消した離脱者もleft_atを持つ(Ruling 5・docs/05 §3.3)
+		expect((await leftAtOf(latchId)).get(b)?.getTime()).toBe(
+			later(MIN).getTime(),
+		);
 		expect(await closedNotificationCount(latchId)).toBe(0);
 		// 離脱者を含む提案履歴はmatchedのまま
 		expect((await historyOf(a, b))?.outcome).toBe("matched");
@@ -783,10 +787,14 @@ describe("成立後の離脱(F4b設計 §3.4・オーナー裁定3)", () => {
 		]);
 		expect(results.some((r) => r.ok)).toBe(true);
 		expect((await latchOf(latchId))?.status).toBe("cancelled");
-		const leftCount = [...(await leftAtOf(latchId)).values()].filter(
-			(v) => v !== null,
-		).length;
-		expect(leftCount).toBe(0);
+		// 取り消しを成功として受け取った離脱者はleft_atを持つ(Ruling 5・docs/05 §3.3)。
+		// 同じnowの並行した取り消しはcloseLatchが双方に成功を返し得るため、件数は1か2になる
+		const left = await leftAtOf(latchId);
+		const [rb, rc] = results;
+		if (rb?.ok) expect(left.get(b)).not.toBeNull();
+		if (rc?.ok) expect(left.get(c)).not.toBeNull();
+		const leftCount = [...left.values()].filter((v) => v !== null).length;
+		expect(leftCount).toBe(results.filter((r) => r.ok).length);
 		expect(await closedNotificationCount(latchId)).toBe(0);
 	});
 
@@ -819,10 +827,11 @@ describe("成立後の離脱(F4b設計 §3.4・オーナー裁定3)", () => {
 			{ ok: true, latchId },
 		]);
 		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		// 継続側の離脱者と、下限割れで取り消した離脱者の両方がleft_atを持つ(Ruling 5)
 		const leftCount = [...(await leftAtOf(latchId)).values()].filter(
 			(v) => v !== null,
 		).length;
-		expect(leftCount).toBe(1);
+		expect(leftCount).toBe(2);
 	});
 });
 

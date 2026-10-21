@@ -6,6 +6,8 @@
  *   (成立後に個別に離脱した参加者は一覧・単一取得・各操作とも非参加と同じ扱い・F4b設計 §3.4)
  * - POST /{id}/response・/response/retract・/leave・/defer-reason: 成功は操作後のLatchDTO(200)。
  *   RespondFailureの写像: not_found→404・その他→400 VALIDATION_FAILED(details.reasons=[reason])
+ * - DELETE /{id}: 表示から消す(F6a設計 §2.3)。成功は204・失敗の写像はRespondFailureと同じ
+ * - /leave・DELETEの成功後はチャットの接続へclosedを知らせる(F6a設計 §2.4・最善努力)
  * 時刻の規律(docs/04 §4): ルートは合成の起点のためsystemClockを使う
  */
 
@@ -31,6 +33,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { type AppEnv, requireRegistered } from "../auth/middleware";
 import { chatSummary } from "../chat/messages";
+import { notifyClosed } from "../chat/notify";
 import { systemClock } from "../clock/clock";
 import {
 	intents,
@@ -42,6 +45,7 @@ import {
 } from "../db/schema";
 import type { Env } from "../env";
 import { errorJson } from "../http/errors";
+import { closedTargetsAfterLeave, hideLatch } from "../latches/hide";
 import {
 	leave,
 	type RespondResult,
@@ -368,14 +372,31 @@ latchRoutes.post("/:id/leave", requireRegistered, async (c) => {
 		const r = unauthorized();
 		return c.json(r.body, r.status);
 	}
-	const result = await leave(
-		dbOf(c.env),
-		c.req.param("id"),
-		sub,
-		systemClock.now(),
-	);
+	const db = dbOf(c.env);
+	const id = c.req.param("id");
+	const result = await leave(db, id, sub, systemClock.now());
+	if (result.ok) {
+		// 取り消しなら全員・本人だけが抜けたなら本人の接続へclosed(F6a設計 §2.4)
+		await notifyClosed(c.env, id, await closedTargetsAfterLeave(db, id, sub));
+	}
 	// 個別に離脱した本人は以降非参加の扱いだが、この操作の応答だけは操作後の状態を返す(F4b設計 §3.4)
 	return respondResultToResponse(c, result, sub, { includeLeft: true });
+});
+
+latchRoutes.delete("/:id", requireRegistered, async (c) => {
+	const sub = c.var.auth.sub;
+	if (sub === undefined) {
+		const r = unauthorized();
+		return c.json(r.body, r.status);
+	}
+	const id = c.req.param("id");
+	const result = await hideLatch(dbOf(c.env), id, sub, systemClock.now());
+	if (!result.ok) return respondResultToResponse(c, result, sub);
+	// 取り消しなら全員・本人だけが抜けたなら本人の接続へclosed。表示を隠すだけなら知らせない(F6a設計 §2.4)
+	if (result.closedFor !== "none") {
+		await notifyClosed(c.env, id, result.closedFor === "all" ? null : [sub]);
+	}
+	return c.body(null, 204);
 });
 
 latchRoutes.post("/:id/defer-reason", requireRegistered, async (c) => {

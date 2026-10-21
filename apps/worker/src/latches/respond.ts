@@ -55,8 +55,8 @@ const closedReason = (latch: LatchRow, now: Date): RespondFailure | null => {
 };
 
 /**
- * 参加者から見たLATCHと自分の回答。不在・非参加・離脱済み・保留(candidate)はnull
- * (一律404・docs/05 §3.1・離脱者は非参加と同じ扱い・F4b設計 §3.4)
+ * 参加者から見たLATCHと自分の回答。不在・非参加・離脱済み・表示から消した本人・保留(candidate)はnull
+ * (一律404・docs/05 §3.1・離脱者は非参加と同じ扱い・F4b設計 §3.4・hidden_atも同じ扱い・F6a設計 §2.3)
  */
 const loadForMember = async (
 	db: DrizzleD1Database,
@@ -76,6 +76,7 @@ const loadForMember = async (
 				eq(latchMembers.latchId, latchId),
 				eq(latchMembers.userId, userId),
 				isNull(latchMembers.leftAt),
+				isNull(latchMembers.hiddenAt),
 			),
 		);
 	if (member === undefined) return null;
@@ -353,7 +354,7 @@ export const retract = async (
 /**
  * 成立後の離脱(matchedのみ・F4b設計 §3.4・オーナー裁定3)。本人以外の残り人数(left_atがnull)が
  * proposal.participants.min以上なら本人のleft_atだけを記録してmatchedのまま続け、下限を割るなら
- * LATCH全体をcancelledにする(1対1は常に後者)。判定と記録は1文の条件付きUPDATEで行うため、
+ * LATCH全体をcancelledにし、取り消した本人のleft_atも記録する(1対1は常に後者)。判定と記録は1文の条件付きUPDATEで行うため、
  * 並行した離脱もD1の直列化で順に数えられ、下限未満の人数でmatchedのまま残ることはない。
  * proposal_historyはmatchedのまま(履歴規則null)
  */
@@ -402,6 +403,18 @@ export const leave = async (
 		{ notify: false },
 	);
 	if (!closed) return fail("invalid_status");
+	// 取り消しを確定させた本人もleft_atを記録し、以降は非参加と同じ扱いにする(docs/05 §3.3・
+	// F6a設計 §0.3の2)。残った参加者のmembers・participants_countからも外れる
+	await db
+		.update(latchMembers)
+		.set({ leftAt: now })
+		.where(
+			and(
+				eq(latchMembers.latchId, latchId),
+				eq(latchMembers.userId, userId),
+				isNull(latchMembers.leftAt),
+			),
+		);
 	// 閉じたグループとして評価済みの次の集合を提案する(F4b設計 §3.5の閉じ方にcancelledを含む)。
 	// 保留の解放は不要(matchedは提示の上限の進行中に数えないため、取り消しで枠は空かない)
 	await proposeNextGroupAfterClose(db, latchId, now);
