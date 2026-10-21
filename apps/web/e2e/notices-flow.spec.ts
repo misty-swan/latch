@@ -90,12 +90,28 @@ test("提案がお知らせに届き、そこから回答でき、成立もお�
 		a.page.getByRole("textbox", { name: "メッセージ" }),
 	).toBeVisible();
 
-	// ホームのベルは未読なし
+	// ホームのベルは未読なし。未読の取得(GET /v1/notifications)の応答を待ってから確かめる
+	// (応答前の初期表示も「お知らせ」のため、待たないと確認が空振りする)
+	const unreadLoaded = a.page.waitForResponse(
+		(r) =>
+			new URL(r.url()).pathname === "/v1/notifications" &&
+			r.request().method() === "GET" &&
+			r.status() === 200,
+	);
 	await a.page.goto("/home");
+	await unreadLoaded;
 	await expect(
 		a.page.getByRole("link", { name: "お知らせ", exact: true }),
 	).toBeVisible();
 	await expect(a.page.getByRole("link", { name: /未読\d+件/ })).toHaveCount(0);
+	// APIでも未読0件
+	const listRes = await a.page.request.get("/v1/notifications", {
+		headers: { authorization: `Bearer ${a.token}` },
+	});
+	expect(listRes.status(), "GET /v1/notifications").toBe(200);
+	expect(
+		((await listRes.json()) as { unread_count: number }).unread_count,
+	).toBe(0);
 });
 
 test("提案とチャットの相手の発言を通報すると、記録に残る", async ({
@@ -151,19 +167,30 @@ test("提案とチャットの相手の発言を通報すると、記録に残�
 	await a.page.getByRole("button", { name: "通報する" }).click();
 	await expect(a.page.getByText("通報を受け付けました。")).toBeVisible();
 
-	// 記録: 提案の通報(target=proposal)と発言の通報(target=message・message_id一致)
+	// 記録: 提案の通報(target=proposal・対象者=B)と発言の通報(target=message・message_id一致)
+	const meRes = await b.page.request.get("/v1/users/me", {
+		headers: { authorization: `Bearer ${b.token}` },
+	});
+	expect(meRes.status(), "GET /v1/users/me").toBe(200);
+	const bUserId = ((await meRes.json()) as { id: string }).id;
 	const reports = (await fetchDevReports(a.page, a.token)).filter(
 		(r) => r.latch_id === latchId,
 	);
 	expect(
-		reports.filter((r) => r.target === "proposal" && r.reason === "spam"),
+		reports.filter(
+			(r) =>
+				r.target === "proposal" &&
+				r.reason === "spam" &&
+				r.reportee === bUserId,
+		),
 	).toHaveLength(1);
 	expect(
 		reports.filter(
 			(r) =>
 				r.target === "message" &&
 				r.reason === "harassment" &&
-				r.message_id === sent.id,
+				r.message_id === sent.id &&
+				r.reportee === bUserId,
 		),
 	).toHaveLength(1);
 });

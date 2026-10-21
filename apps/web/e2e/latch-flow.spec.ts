@@ -82,12 +82,14 @@ test("2人が画面から参加すると成立し、待っていた側も切り�
 	const { a, b, intentId } = await setUpProposal(browser, 40);
 
 	// A: 到着カード→提案画面。回答のボタンは2択だけ(noは画面に置かない)。
-	// 右上の「この提案について」(F7cの通報の入口)は回答ではないため、回答欄(下部)に絞って数える
+	// 画面全体のボタンは、右上の「この提案について」(F7cの通報の入口・回答ではない)を
+	// 唯一の例外として、DOM順に[この提案について, 参加する, 今回は見送る]の3つだけ
 	await openArrival(a.page);
-	await expect(a.page.locator(".screen__foot").getByRole("button")).toHaveText([
-		"参加する",
-		"今回は見送る",
-	]);
+	const buttons = a.page.getByRole("button");
+	await expect(buttons).toHaveCount(3);
+	await expect(buttons.nth(0)).toHaveAccessibleName("この提案について");
+	await expect(buttons.nth(1)).toHaveAccessibleName("参加する");
+	await expect(buttons.nth(2)).toHaveAccessibleName("今回は見送る");
 	await a.page.getByRole("button", { name: "参加する" }).click();
 	await expect(
 		a.page.getByRole("heading", { name: AWAITING_HEADING }),
