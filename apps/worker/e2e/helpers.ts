@@ -251,3 +251,70 @@ export const backdate = async (
 	});
 	expect(res.status(), "POST /v1/dev/latches/{id}/backdate").toBe(200);
 };
+
+/** チャットWebSocketの受信フレーム(F6a設計 §2のサーバー→クライアント) */
+export interface ChatFrame {
+	type: string;
+	[key: string]: unknown;
+}
+
+/** 受信フレームを溜めて型指定で取り出せる接続(試験終了時にclose()する) */
+export interface ChatSocket {
+	frames: ChatFrame[];
+	send: (frame: Record<string, unknown>) => void;
+	close: () => void;
+}
+
+/** ws-ticketを発行してチャットWebSocketへ接続し、openを待って返す */
+export const connectChat = async (
+	request: APIRequestContext,
+	baseURL: string,
+	accessToken: string,
+	latchId: string,
+): Promise<ChatSocket> => {
+	const ticketRes = await request.post("/v1/ws-ticket", {
+		data: { scope: "chat", latch_id: latchId },
+		headers: bearer(accessToken),
+	});
+	expect(ticketRes.status(), "POST /v1/ws-ticket").toBe(200);
+	const { ticket } = (await ticketRes.json()) as { ticket: string };
+	const url = `${baseURL.replace(/^http/, "ws")}/v1/latches/${latchId}/ws?ticket=${ticket}`;
+	const ws = new WebSocket(url);
+	const frames: ChatFrame[] = [];
+	ws.addEventListener("message", (event) => {
+		frames.push(JSON.parse(String(event.data)) as ChatFrame);
+	});
+	await new Promise<void>((resolve, reject) => {
+		ws.addEventListener("open", () => resolve(), { once: true });
+		ws.addEventListener("error", () => reject(new Error("WebSocket接続失敗")), {
+			once: true,
+		});
+	});
+	return {
+		frames,
+		send: (frame) => ws.send(JSON.stringify(frame)),
+		close: () => ws.close(),
+	};
+};
+
+/** 指定typeのフレームが届くまで待って返す(届いたフレームは消費する) */
+export const nextFrame = async (
+	socket: ChatSocket,
+	type: string,
+	timeout = 10_000,
+): Promise<ChatFrame> => {
+	let found: ChatFrame | undefined;
+	await waitFor(
+		async () => {
+			const index = socket.frames.findIndex((f) => f.type === type);
+			if (index < 0) {
+				return false;
+			}
+			found = socket.frames.splice(index, 1)[0];
+			return true;
+		},
+		timeout,
+		50,
+	);
+	return found as ChatFrame;
+};
