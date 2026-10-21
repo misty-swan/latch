@@ -72,7 +72,14 @@ export function ChatMenu({ latch, onClose, onLeft, onHidden }: ChatMenuProps) {
 
 	return (
 		<>
-			<div className="backdrop" aria-hidden="true" onClick={onClose} />
+			{/* 送信中に閉じると成功後の遷移が走らないため・その間は背景で閉じない */}
+			<div
+				className="backdrop"
+				aria-hidden="true"
+				onClick={() => {
+					if (!busy) onClose();
+				}}
+			/>
 			<div
 				className="sheet-layer"
 				role="dialog"

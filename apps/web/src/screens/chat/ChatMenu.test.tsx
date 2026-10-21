@@ -109,9 +109,10 @@ const mount = (l: LatchDTO) => {
 	return { onLeft, onHidden, onClose };
 };
 
-const openChat = () => {
+const openChat = (initialEntries = ["/latches/L1/chat"]) => {
 	const router = createMemoryRouter(appRoutes, {
-		initialEntries: ["/latches/L1/chat"],
+		initialEntries,
+		initialIndex: initialEntries.length - 1,
 	});
 	render(
 		<QueryClientProvider client={createTestQueryClient()}>
@@ -225,6 +226,27 @@ describe("ChatMenu 確認と操作", () => {
 		).toBe(true);
 	});
 
+	it("送信中は背景を押してもシートを閉じない", async () => {
+		pendingLeave = true;
+		const { onClose } = mount(latchOf());
+		fireEvent.click(screen.getByText("参加を取り消す"));
+		fireEvent.click(screen.getByRole("button", { name: "取り消す" }));
+		await waitFor(() =>
+			expect(
+				(screen.getByRole("button", { name: "取り消す" }) as HTMLButtonElement)
+					.disabled,
+			).toBe(true),
+		);
+		fireEvent.click(document.querySelector(".backdrop") as Element);
+		expect(onClose).not.toHaveBeenCalled();
+	});
+
+	it("送信中でなければ背景を押すとonCloseが呼ばれる", () => {
+		const { onClose } = mount(latchOf());
+		fireEvent.click(document.querySelector(".backdrop") as Element);
+		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
 	it("leaveが400なら「この操作は、いまはできません。」を出しLATCHを取り直す", async () => {
 		leaveResponse = () =>
 			json(
@@ -314,8 +336,8 @@ describe("Chat 経由の遷移とトースト", () => {
 		).toHaveLength(0);
 	});
 
-	it("表示から消す→/connectionsに「一覧から消しました。」", async () => {
-		const router = openChat();
+	it("表示から消す→/connectionsに「一覧から消しました。」(replaceで戻るで消したチャットへ戻らない)", async () => {
+		const router = openChat(["/connections", "/latches/L1/chat"]);
 		fireEvent.click(await screen.findByLabelText("このつながりについて"));
 		fireEvent.click(await screen.findByText("表示から消す"));
 		fireEvent.click(screen.getByRole("button", { name: "消す" }));
@@ -323,5 +345,7 @@ describe("Chat 経由の遷移とトースト", () => {
 			expect(router.state.location.pathname).toBe("/connections"),
 		);
 		expect(await screen.findByText("一覧から消しました。")).toBeTruthy();
+		await router.navigate(-1);
+		expect(router.state.location.pathname).not.toBe("/latches/L1/chat");
 	});
 });

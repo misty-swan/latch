@@ -16,6 +16,7 @@ import {
 } from "../../chat/format";
 import {
 	appendMessage,
+	CONNECTIONS_QUERY_KEY,
 	flattenMessages,
 	newClientId,
 	postMessage,
@@ -237,8 +238,10 @@ function ChatView({
 			navigate(PATHS.connections, { replace: true, state: { toast: message } });
 		}
 	};
+	// 消したチャットへ「戻る」で戻らないよう置き換えで移る
 	const onHidden = () =>
 		navigate(PATHS.connections, {
+			replace: true,
 			state: { toast: "一覧から消しました。" },
 		});
 
@@ -270,6 +273,9 @@ function ChatView({
 			(message) => {
 				appendMessage(client, latch.id, message);
 				dropPending(clientId);
+				// 一覧の最終メッセージ・LATCHの表示を取り直す(F6b設計 §2.5)
+				void client.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY });
+				void client.invalidateQueries({ queryKey: latchQueryKey(latch.id) });
 			},
 			(error: unknown) => {
 				if (isNotWritable(error)) {
@@ -331,9 +337,17 @@ function ChatView({
 		return () => window.removeEventListener("focus", onFocus);
 	}, [client, latchId]);
 
-	// 既読: 表示中の最新の確定メッセージ(終了後も)
+	// 既読: 表示中の最新の確定メッセージ(終了後も)。画面が見えている間だけ送り・
+	// 隠れていた間に届いた分は見える状態へ戻ったときに送る(F6b設計 §2.2・§2.4)
 	useEffect(() => {
-		if (latestId) markRead(latestId);
+		const mark = () => {
+			if (latestId && document.visibilityState === "visible") {
+				markRead(latestId);
+			}
+		};
+		mark();
+		document.addEventListener("visibilitychange", mark);
+		return () => document.removeEventListener("visibilitychange", mark);
 	}, [latestId, markRead]);
 
 	// 自分の送信では必ず最下部へ・他の変化は末尾近く(80px以内)を見ていたときだけ追う
@@ -408,7 +422,8 @@ function ChatView({
 						el.scrollHeight - el.scrollTop - el.clientHeight <= 80;
 				}}
 			>
-				<div className="chat">
+				{/* 届いたメッセージを支援技術へ控えめに知らせる */}
+				<div className="chat" role="log">
 					<div ref={sentinelRef} />
 					{hasNextPage && !hasIntersectionObserver() ? (
 						<button
@@ -421,7 +436,10 @@ function ChatView({
 							古いメッセージを読み込む
 						</button>
 					) : null}
-					<Origin latch={latch} matchedAt={matchedAt} />
+					{/* 冒頭は最も古い頁まで読み込んでから出す(古い履歴の上に出さない) */}
+					{loaded && !hasNextPage ? (
+						<Origin latch={latch} matchedAt={matchedAt} />
+					) : null}
 					{messages.isError && !loaded ? (
 						<div style={{ alignSelf: "center", textAlign: "center" }}>
 							<p className="t-caption">履歴を読み込めませんでした。</p>

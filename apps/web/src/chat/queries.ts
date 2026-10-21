@@ -8,6 +8,7 @@ import type { LatchDTO, MessageDTO, MessagePage, UserDTO } from "@latch/shared";
 import {
 	type InfiniteData,
 	type QueryClient,
+	replaceEqualDeep,
 	useInfiniteQuery,
 	useMutation,
 	useQuery,
@@ -19,6 +20,7 @@ import {
 	LATCHES_QUERY_KEY,
 	type LatchListResponse,
 	latchQueryKey,
+	shouldRetry,
 } from "../latches/queries";
 
 /** つながり一覧(LATCHES_QUERY_KEY配下なので既存の無効化で取り直される) */
@@ -52,15 +54,51 @@ export const useConnectionsQuery = () =>
 const messagesPath = (id: string, before?: string) =>
 	`/latches/${id}/messages${before ? `?before=${encodeURIComponent(before)}` : ""}`;
 
-/** 履歴。pages[0]が最新頁で・fetchNextPageは古い頁を取る */
-export const useMessagesQuery = (id: string) =>
-	useInfiniteQuery({
+/**
+ * 取得結果をキャッシュへ置くとき・取得中に足された(取得結果より新しい)メッセージを
+ * pages[0]の末尾へ残す。取得の応答が受信・送信の成功より古い一覧で上書きして消すのを防ぐ
+ */
+export const keepAppended = (
+	prev: MessagesData | undefined,
+	next: MessagesData,
+): MessagesData => {
+	const [first, ...rest] = next.pages;
+	if (!prev || !first) return next;
+	const known = new Set(next.pages.flatMap((p) => p.items.map((m) => m.id)));
+	const newest = flattenMessages(next.pages).at(-1)?.id ?? "";
+	const extra = flattenMessages(prev.pages).filter(
+		(m) => !known.has(m.id) && m.id > newest,
+	);
+	if (extra.length === 0) return next;
+	return {
+		...next,
+		pages: [{ ...first, items: [...first.items, ...extra] }, ...rest],
+	};
+};
+
+/**
+ * 履歴。pages[0]が最新頁で・fetchNextPageは古い頁を取る。
+ * フォーカスでの全頁の取り直しはしない(画面側がフォーカス・再接続で最新頁だけを取り直す)。
+ * 404・400 invalid_statusは再試行せず・すぐ振り分けへ進める
+ */
+export const useMessagesQuery = (id: string) => {
+	const client = useQueryClient();
+	const base = client.getDefaultOptions().queries?.retry;
+	return useInfiniteQuery({
 		queryKey: messagesQueryKey(id),
 		initialPageParam: undefined as string | undefined,
 		queryFn: ({ pageParam }) =>
 			apiFetch<MessagePage>(messagesPath(id, pageParam)),
 		getNextPageParam: (last) => last.next_before ?? undefined,
+		retry: (failureCount, error) => shouldRetry(base, failureCount, error),
+		refetchOnWindowFocus: false,
+		structuralSharing: (prev, next) =>
+			replaceEqualDeep(
+				prev,
+				keepAppended(prev as MessagesData | undefined, next as MessagesData),
+			),
 	});
+};
 
 /** 全頁をID昇順に並べ・同じIDは1つにする */
 export const flattenMessages = (pages: MessagePage[]): MessageDTO[] => {

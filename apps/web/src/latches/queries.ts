@@ -34,13 +34,28 @@ export const useProposalsQuery = () =>
 /** 再試行の上限(QueryClientが既定を持たないときのTanStack Queryの既定と同じ3回) */
 const MAX_RETRIES = 3;
 
-/** QueryClientの既定の再試行(試験ではfalse)に従うか。404(NOT_FOUND)だけは常に再試行しない */
-const shouldRetry = (
+/** 再試行しても結果が変わらない失敗か(404・400 invalid_status) */
+const isPermanentError = (error: Error): boolean => {
+	if (!(error instanceof ApiError)) return false;
+	if (error.code === "NOT_FOUND") return true;
+	const reasons = error.details.reasons;
+	return (
+		error.code === "VALIDATION_FAILED" &&
+		Array.isArray(reasons) &&
+		reasons.includes("invalid_status")
+	);
+};
+
+/**
+ * QueryClientの既定の再試行(試験ではfalse)に従うか。
+ * 404(NOT_FOUND)・400 invalid_statusは常に再試行しない(すぐ振り分けへ進める)
+ */
+export const shouldRetry = (
 	base: unknown,
 	failureCount: number,
 	error: Error,
 ): boolean => {
-	if (error instanceof ApiError && error.code === "NOT_FOUND") return false;
+	if (isPermanentError(error)) return false;
 	if (typeof base === "function") return Boolean(base(failureCount, error));
 	if (typeof base === "boolean") return base;
 	if (typeof base === "number") return failureCount < base;

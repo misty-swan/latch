@@ -1,6 +1,10 @@
 import type { LatchDTO, MessageDTO, MessagePage } from "@latch/shared";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import {
+	focusManager,
+	QueryClient,
+	QueryClientProvider,
+} from "@tanstack/react-query";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../auth/session";
@@ -86,6 +90,71 @@ describe("useMessagesQuery", () => {
 		expect(fetchMock.mock.calls[1]?.[0]).toBe(
 			"/v1/latches/L1/messages?before=M2",
 		);
+	});
+});
+
+describe("useMessagesQuery の再試行と再取得", () => {
+	/** 本番と同じ既定(再試行あり)のQueryClient。待ちだけ0にする */
+	const prodLike = () => {
+		const client = new QueryClient({
+			defaultOptions: { queries: { retryDelay: 0 } },
+		});
+		return ({ children }: { children: ReactNode }) => (
+			<QueryClientProvider client={client}>{children}</QueryClientProvider>
+		);
+	};
+	const errorResponse = (
+		status: number,
+		code: string,
+		details?: Record<string, unknown>,
+	) =>
+		json(
+			{ error: { code, message: "x", ...(details ? { details } : {}) } },
+			status,
+		);
+	afterEach(() => {
+		cleanup();
+		focusManager.setFocused(undefined);
+	});
+
+	it("404(NOT_FOUND)は再試行せず1回で失敗にする", async () => {
+		fetchMock.mockImplementation(async () => errorResponse(404, "NOT_FOUND"));
+		const { result } = renderHook(() => useMessagesQuery("L1"), {
+			wrapper: prodLike(),
+		});
+		await waitFor(() => expect(result.current.isError).toBe(true));
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("400 invalid_statusは再試行せず1回で失敗にする", async () => {
+		fetchMock.mockImplementation(async () =>
+			errorResponse(400, "VALIDATION_FAILED", { reasons: ["invalid_status"] }),
+		);
+		const { result } = renderHook(() => useMessagesQuery("L1"), {
+			wrapper: prodLike(),
+		});
+		await waitFor(() => expect(result.current.isError).toBe(true));
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("その他の失敗は既定どおり3回まで再試行する", async () => {
+		fetchMock.mockImplementation(async () => errorResponse(500, "INTERNAL"));
+		const { result } = renderHook(() => useMessagesQuery("L1"), {
+			wrapper: prodLike(),
+		});
+		await waitFor(() => expect(result.current.isError).toBe(true));
+		expect(fetchMock).toHaveBeenCalledTimes(4);
+	});
+
+	it("画面のフォーカスでは全頁を取り直さない(取りこぼしは画面側が最新頁で埋める)", async () => {
+		fetchMock.mockImplementation(async () => json(page(["M1"], null)));
+		const { wrapper } = setup();
+		const { result } = renderHook(() => useMessagesQuery("L1"), { wrapper });
+		await waitFor(() => expect(result.current.data).toBeDefined());
+		focusManager.setFocused(false);
+		focusManager.setFocused(true);
+		await new Promise((r) => setTimeout(r, 30));
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 });
 

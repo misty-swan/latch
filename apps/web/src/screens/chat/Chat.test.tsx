@@ -15,6 +15,7 @@ import {
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../../auth/session";
+import { CONNECTIONS_QUERY_KEY, messagesQueryKey } from "../../chat/queries";
 import { appRoutes } from "../../router";
 import { createTestQueryClient } from "../../test/helpers";
 
@@ -96,12 +97,12 @@ class FakeSocket {
 	}
 }
 
-const open = () => {
+const open = (client = createTestQueryClient()) => {
 	const router = createMemoryRouter(appRoutes, {
 		initialEntries: ["/latches/L1/chat"],
 	});
 	render(
-		<QueryClientProvider client={createTestQueryClient()}>
+		<QueryClientProvider client={client}>
 			<RouterProvider router={router} />
 		</QueryClientProvider>,
 	);
@@ -130,8 +131,10 @@ describe("Chat", () => {
 		expect(document.querySelector(".chat-head__sub")?.textContent).toBe(
 			"絵を見せ合う·つながり",
 		);
-		expect(screen.getByText("10月10日 17:40 につながりました")).toBeTruthy();
 		expect(await screen.findByText("本文02")).toBeTruthy();
+		expect(screen.getByText("10月10日 17:40 につながりました")).toBeTruthy();
+		// 届いたメッセージを読み上げる領域(polite)
+		expect(screen.getByRole("log").textContent).toContain("本文02");
 		expect(screen.getByLabelText("このつながりについて")).toBeTruthy();
 		expect(screen.getByLabelText("戻る").getAttribute("href")).toBe(
 			"/connections",
@@ -251,6 +254,8 @@ describe("Chat", () => {
 		vi.stubGlobal("IntersectionObserver", undefined);
 		open();
 		await screen.findByText("本文05");
+		// 古い頁が残っている間は冒頭(つながりました)を出さない
+		expect(screen.queryByText(/につながりました/)).toBeNull();
 		fireEvent.click(
 			await screen.findByRole("button", { name: "古いメッセージを読み込む" }),
 		);
@@ -264,6 +269,7 @@ describe("Chat", () => {
 			(e) => e.textContent,
 		);
 		expect(bodies).toEqual(["本文03", "本文05"]);
+		expect(screen.getByText("10月10日 17:40 につながりました")).toBeTruthy();
 		expect(
 			screen.queryByRole("button", { name: "古いメッセージを読み込む" }),
 		).toBeNull();
@@ -501,5 +507,132 @@ describe("Chat の送信・受信・既読", () => {
 		fireEvent.click(screen.getByRole("button", { name: "送る" }));
 		await screen.findByText("送るよ");
 		expect(el.scrollTop).toBe(1000);
+	});
+
+	it("履歴の取り直し中に送信が成功しても・古い一覧で上書きされず吹き出しが残る", async () => {
+		const client = createTestQueryClient();
+		let hold: ((r: Response) => void) | null = null;
+		let armed = false;
+		fetchMock.mockImplementation(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = String(input);
+				if (url === "/v1/latches/L1/messages" && init?.method === "POST") {
+					const cid = JSON.parse(String(init.body)).client_id;
+					return json(
+						{ ...msg("03", "me"), body: "途中で送る", client_id: cid },
+						201,
+					);
+				}
+				if (url === "/v1/latches/L1/messages" && hold === null && armed) {
+					// 取り直しの応答を止めておき・後から古い一覧で返す
+					return new Promise<Response>((r) => (hold = r));
+				}
+				return baseImpl(input, init);
+			},
+		);
+		open(client);
+		await screen.findByText("本文02");
+		armed = true;
+		void client.refetchQueries({ queryKey: messagesQueryKey("L1") });
+		await waitFor(() => expect(hold).not.toBeNull());
+		fireEvent.change(field(), { target: { value: "途中で送る" } });
+		fireEvent.click(screen.getByRole("button", { name: "送る" }));
+		await waitFor(() =>
+			expect(document.querySelector(".msg.is-sending")).toBeNull(),
+		);
+		expect(screen.getByText("途中で送る")).toBeTruthy();
+		(hold as ((r: Response) => void) | null)?.(
+			json({ items: [msg("02", "me")], next_before: null }),
+		);
+		await waitFor(() => expect(client.isFetching()).toBe(0));
+		expect(screen.getByText("途中で送る")).toBeTruthy();
+		expect(screen.getByText("本文02")).toBeTruthy();
+	});
+
+	it("送信の成功後につながり一覧とLATCHを無効化する", async () => {
+		const client = createTestQueryClient();
+		withPost((init) =>
+			json(
+				{
+					...msg("03", "me"),
+					body: "一覧も",
+					client_id: JSON.parse(String(init.body)).client_id,
+				},
+				201,
+			),
+		);
+		const invalidate = vi.spyOn(client, "invalidateQueries");
+		const invalidated = (key: readonly unknown[]) =>
+			invalidate.mock.calls.some(
+				([f]) => JSON.stringify(f?.queryKey) === JSON.stringify(key),
+			);
+		open(client);
+		await screen.findByText("本文02");
+		const latchGets = () =>
+			fetchMock.mock.calls.filter(
+				([u, i]) =>
+					String(u) === "/v1/latches/L1" &&
+					((i as RequestInit | undefined)?.method ?? "GET") === "GET",
+			).length;
+		const before = latchGets();
+		expect(invalidated(CONNECTIONS_QUERY_KEY)).toBe(false);
+		fireEvent.change(field(), { target: { value: "一覧も" } });
+		fireEvent.click(screen.getByRole("button", { name: "送る" }));
+		await waitFor(() => expect(invalidated(CONNECTIONS_QUERY_KEY)).toBe(true));
+		await waitFor(() => expect(latchGets()).toBeGreaterThan(before));
+	});
+});
+
+describe("Chat の既読と画面の表示状態", () => {
+	let visibility: DocumentVisibilityState = "visible";
+	beforeEach(() => {
+		visibility = "visible";
+		Object.defineProperty(document, "visibilityState", {
+			configurable: true,
+			get: () => visibility,
+		});
+	});
+	afterEach(() => {
+		// 上書きを外して既定の値へ戻す
+		delete (document as unknown as Record<string, unknown>).visibilityState;
+	});
+	const reads = () =>
+		fetchMock.mock.calls
+			.filter(([u]) => String(u) === "/v1/latches/L1/read")
+			.map((c) => JSON.parse(String((c[1] as RequestInit).body)));
+	const show = () => {
+		visibility = "visible";
+		document.dispatchEvent(new Event("visibilitychange"));
+	};
+
+	it("画面が隠れている間は既読を送らず・表示に戻ったら送る", async () => {
+		visibility = "hidden";
+		open();
+		await screen.findByText("本文02");
+		await new Promise((r) => setTimeout(r, 30));
+		expect(reads()).toHaveLength(0);
+		show();
+		await waitFor(() =>
+			expect(reads()).toContainEqual({ last_read_message_id: "02" }),
+		);
+	});
+
+	it("隠れている間に届いたmessageは・表示に戻ったときその最新IDで既読を送る", async () => {
+		open();
+		await screen.findByText("本文02");
+		await waitFor(() =>
+			expect(reads()).toContainEqual({ last_read_message_id: "02" }),
+		);
+		await waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+		visibility = "hidden";
+		document.dispatchEvent(new Event("visibilitychange"));
+		FakeSocket.all[0]?.recv(msg("09", "u2"));
+		await screen.findByText("本文09");
+		await new Promise((r) => setTimeout(r, 30));
+		expect(reads()).not.toContainEqual({ last_read_message_id: "09" });
+		show();
+		await waitFor(() =>
+			expect(reads()).toContainEqual({ last_read_message_id: "09" }),
+		);
 	});
 });
