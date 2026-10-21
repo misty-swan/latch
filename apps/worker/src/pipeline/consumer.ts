@@ -370,7 +370,7 @@ export const handleQueueBatch = async (
 		ctx.waitUntil(
 			(async () => {
 				try {
-					await flushPush(drizzle(env.DB), pushSenderOf(env), clock.now(), {
+					await flushPush(drizzle(env.DB), pushSenderOf(env), clock, {
 						minAgeMs: 0,
 					});
 				} catch (error) {

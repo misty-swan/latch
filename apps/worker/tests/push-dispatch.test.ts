@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
 import { beforeEach, describe, expect, it } from "vitest";
+import { type Clock, fixedClock } from "../src/clock/clock";
 import {
 	intents,
 	latches,
@@ -26,6 +27,7 @@ import type {
 
 const db = drizzle((env as unknown as WorkerEnv).DB);
 const NOW = new Date("2026-06-01T03:00:00Z");
+const CLOCK = fixedClock(NOW);
 const SEC = 1000;
 const MIN = 60 * SEC;
 const HOUR = 60 * MIN;
@@ -217,7 +219,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		const { ua, na } = await setup();
 		const ep = await insertSub(ua);
 		const { sender, calls } = recorder();
-		await dispatchPush(db, sender, NOW, [na]);
+		await dispatchPush(db, sender, CLOCK, [na]);
 		expect((await notifOf(na)).pushState).toBe("sent");
 		expect((await subOf(ep)).lastSuccessAt?.getTime()).toBe(NOW.getTime());
 		expect(calls).toHaveLength(1);
@@ -237,7 +239,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		const n = await insertNotif(ua, latchId, { type: "matched" });
 		await insertSub(ua);
 		const { sender, calls } = recorder();
-		await dispatchPush(db, sender, NOW, [n]);
+		await dispatchPush(db, sender, CLOCK, [n]);
 		expect(calls[0].opts.ttl).toBe(86_400);
 		expect(JSON.parse(calls[0].payload).type).toBe("matched");
 	});
@@ -247,7 +249,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		await insertSub(ua);
 		await insertSub(ub);
 		const { sender, calls } = recorder();
-		await dispatchPush(db, sender, NOW, [na, nb]);
+		await dispatchPush(db, sender, CLOCK, [na, nb]);
 		expect((await notifOf(na)).pushState).toBe("muted");
 		expect((await notifOf(nb)).pushState).toBe("sent");
 		expect(calls).toHaveLength(1);
@@ -256,7 +258,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 	it("③購読なしはno_subscription", async () => {
 		const { na } = await setup();
 		const { sender, calls } = recorder();
-		await dispatchPush(db, sender, NOW, [na]);
+		await dispatchPush(db, sender, CLOCK, [na]);
 		expect((await notifOf(na)).pushState).toBe("no_subscription");
 		expect(calls).toHaveLength(0);
 	});
@@ -265,7 +267,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		const { ua, na } = await setup();
 		await insertSub(ua, "failed");
 		const { sender, calls } = recorder();
-		await dispatchPush(db, sender, NOW, [na]);
+		await dispatchPush(db, sender, CLOCK, [na]);
 		expect((await notifOf(na)).pushState).toBe("no_subscription");
 		expect(calls).toHaveLength(0);
 	});
@@ -274,7 +276,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		const { ua, na } = await setup();
 		await insertSub(ua);
 		const { sender } = recorder(() => ({ kind: "retry", status: 503 }));
-		await dispatchPush(db, sender, NOW, [na]);
+		await dispatchPush(db, sender, CLOCK, [na]);
 		const row = await notifOf(na);
 		expect(row.pushState).toBe("pending");
 		expect(row.pushAttemptedAt?.getTime()).toBe(NOW.getTime());
@@ -287,7 +289,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		const { sender } = recorder((t) =>
 			t.endpoint === gone ? { kind: "gone" } : { kind: "ok" },
 		);
-		await dispatchPush(db, sender, NOW, [na]);
+		await dispatchPush(db, sender, CLOCK, [na]);
 		expect((await notifOf(na)).pushState).toBe("sent");
 		expect((await subOf(gone)).status).toBe("failed");
 		expect((await subOf(ok)).status).toBe("active");
@@ -297,7 +299,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		const { ua, na } = await setup();
 		const ep = await insertSub(ua);
 		const { sender } = recorder(() => ({ kind: "rejected", status: 400 }));
-		await dispatchPush(db, sender, NOW, [na]);
+		await dispatchPush(db, sender, CLOCK, [na]);
 		expect((await notifOf(na)).pushState).toBe("failed");
 		expect((await subOf(ep)).status).toBe("active");
 	});
@@ -306,7 +308,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		const { ua, na } = await setup();
 		await insertSub(ua);
 		const { sender } = recorder(() => ({ kind: "gone" }));
-		await dispatchPush(db, sender, NOW, [na]);
+		await dispatchPush(db, sender, CLOCK, [na]);
 		expect((await notifOf(na)).pushState).toBe("failed");
 	});
 
@@ -315,8 +317,8 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		await insertSub(ua);
 		const { sender, calls } = recorder();
 		await Promise.all([
-			dispatchPush(db, sender, NOW, [na]),
-			dispatchPush(db, sender, NOW, [na]),
+			dispatchPush(db, sender, CLOCK, [na]),
+			dispatchPush(db, sender, CLOCK, [na]),
 		]);
 		expect(calls).toHaveLength(1);
 	});
@@ -328,9 +330,36 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 			pushState: "none",
 		});
 		const { sender, calls } = recorder();
-		await dispatchPush(db, sender, NOW, [n]);
+		await dispatchPush(db, sender, CLOCK, [n]);
 		expect((await notifOf(n)).pushState).toBe("none");
 		expect(calls).toHaveLength(0);
+	});
+
+	it("遅れて戻った先行の試行は、順番を取り直した後続の試行の結果を上書きしない", async () => {
+		const { ua, na } = await setup();
+		await insertSub(ua);
+		// 先行の試行(NOW)の送信中に、61秒後の後続の試行が順番を取り直し、一時失敗で
+		// pendingのまま残す。その後に先行の試行が恒久失敗で戻っても、failedへ倒さない
+		const laterClock = fixedClock(later(61 * SEC));
+		let nested = false;
+		const sender: PushSender = {
+			async send() {
+				if (!nested) {
+					nested = true;
+					await dispatchPush(
+						db,
+						{ send: async () => ({ kind: "retry", status: 503 }) },
+						laterClock,
+						[na],
+					);
+				}
+				return { kind: "rejected", status: 400 };
+			},
+		};
+		await dispatchPush(db, sender, CLOCK, [na]);
+		const row = await notifOf(na);
+		expect(row.pushState).toBe("pending");
+		expect(row.pushAttemptedAt?.getTime()).toBe(later(61 * SEC).getTime());
 	});
 });
 
@@ -362,7 +391,7 @@ describe("flushPush(F7b設計 §5.6)", () => {
 			pushState: "none",
 		});
 		const { sender } = recorder();
-		const count = await flushPush(db, sender, NOW, { minAgeMs: 30 * SEC });
+		const count = await flushPush(db, sender, CLOCK, { minAgeMs: 30 * SEC });
 		expect(count).toBe(1);
 		expect((await notifOf(old)).pushState).toBe("no_subscription");
 		expect((await notifOf(young)).pushState).toBe("pending");
@@ -378,7 +407,38 @@ describe("flushPush(F7b設計 §5.6)", () => {
 			attemptedAt: ago(61 * SEC),
 		});
 		const { sender } = recorder();
-		await flushPush(db, sender, NOW, { minAgeMs: 0 });
+		await flushPush(db, sender, CLOCK, { minAgeMs: 0 });
 		expect((await notifOf(n)).pushState).toBe("no_subscription");
+	});
+
+	it("開始から45秒を過ぎたら新しい行の順番を取らない(順番取りの時刻は行ごと)", async () => {
+		const ua = await insertUser();
+		await insertSub(ua);
+		const ids: string[] = [];
+		for (let i = 0; i < 3; i++) {
+			ids.push(
+				await insertNotif(ua, await freshLatch(ua), {
+					createdAt: ago(2 * MIN),
+				}),
+			);
+		}
+		ids.sort();
+		// 送信1件ごとに30秒進む時計: 1行目=NOW・2行目=NOW+30秒で取り、3行目の前に60秒経過
+		let t = NOW.getTime();
+		const clock: Clock = { now: () => new Date(t) };
+		const { sender, calls } = recorder(() => {
+			t += 30 * SEC;
+			return { kind: "ok" };
+		});
+		const count = await flushPush(db, sender, clock, { minAgeMs: 0 });
+		expect(count).toBe(2);
+		expect(calls).toHaveLength(2);
+		const [r1, r2, r3] = await Promise.all(ids.map(notifOf));
+		expect(r1.pushState).toBe("sent");
+		expect(r1.pushAttemptedAt?.getTime()).toBe(NOW.getTime());
+		expect(r2.pushState).toBe("sent");
+		expect(r2.pushAttemptedAt?.getTime()).toBe(later(30 * SEC).getTime());
+		expect(r3.pushState).toBe("pending");
+		expect(r3.pushAttemptedAt).toBeNull();
 	});
 });

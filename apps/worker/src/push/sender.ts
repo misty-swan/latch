@@ -37,9 +37,14 @@ export const stubPushSender: PushSender = {
 const fromBase64Url = (s: string): Uint8Array =>
 	new Uint8Array(Buffer.from(s, "base64url"));
 
+/** 送信1件の時間制限。応答しないPushサービスで送出・Cronを止めない */
+const SEND_TIMEOUT_MS = 10_000;
+
 /** F7b設計 §5.2の応答の写像 */
 const classify = (status: number): PushSendResult => {
 	if (status >= 200 && status < 300) return { kind: "ok" };
+	// リダイレクトは追わずに恒久失敗とする(許可ホスト以外へ送らない)
+	if (status >= 300 && status < 400) return { kind: "rejected", status };
 	if (status === 404 || status === 410) return { kind: "gone" };
 	if (status === 400 || status === 403 || status === 413) {
 		return { kind: "rejected", status };
@@ -73,10 +78,12 @@ export const realPushSender = (
 					Authorization: authorization,
 				},
 				body,
+				redirect: "manual",
+				signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
 			});
 			return classify(res.status);
 		} catch {
-			// ネットワーク例外・暗号化の失敗は一時失敗として回収に任せる(§5.2)
+			// ネットワーク例外・時間切れ(abort)・暗号化の失敗は一時失敗として回収に任せる(§5.2)
 			return { kind: "retry", status: null };
 		}
 	},

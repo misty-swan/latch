@@ -1,6 +1,6 @@
 /**
- * 通報のAPI(POST /v1/reports)の統合試験(F7a設計 §0.3の4・§3)。
- * 登録は実フロー、LATCH・members・messagesは直接INSERTで配置する。
+ * アプリ内通知のAPI(GET /v1/notifications・POST /v1/notifications/read)の統合試験(F7b設計 §3)。
+ * 登録は実フロー、LATCH・members・intents・notificationsは直接INSERTで配置する。
  */
 import { env, SELF } from "cloudflare:test";
 import { notificationListResponseSchema } from "@latch/shared";

@@ -99,7 +99,7 @@ notificationsへ次の3列を追加する(戻すマイグレーションと対�
 ### 5.1 流れ(オーナー裁定2)
 
 1. 通知行を書く処理(提案化・保留の解放・成立)はproposal・matchedを`push_state='pending'`で書く
-2. 通知行を書き得る入口(LATCH・Intent・安全のAPIの変更系(POST・PATCH・DELETE)の成功応答の後と、キューのバッチの後)で`flushPush`を`waitUntil`で呼ぶ(APIの応答・キューの消費を待たせない)。flushPushは作成から10分以内の未試行の`pending`行(上限100件)を照会して`dispatchPush`へ渡す。通知行は条件付きの1文で書かれ、書いた関数はDBだけを受け取るため、書けた行を入口で照会する形にする(実装計画の調査で確定)。Cron(§5.6)はawaitする
+2. 通知行を書き得る入口(LATCH・Intent・安全のAPIの変更系(POST・PATCH・DELETE)の成功応答の後と、キューのバッチの後)で`flushPush`を`waitUntil`で呼ぶ(APIの応答・キューの消費を待たせない)。flushPushは作成から10分以内で未試行または試行から60秒以上たった`pending`行(上限100件)を照会して`dispatchPush`へ渡す。通知行は条件付きの1文で書かれ、書いた関数はDBだけを受け取るため、書けた行を入口で照会する形にする(実装計画の調査で確定)。Cron(§5.6)はawaitする
 3. dispatchPushは行ごとに順番を取る: `UPDATE … SET push_attempted_at=now WHERE id=? AND push_state='pending' AND (push_attempted_at IS NULL OR push_attempted_at≤now−60秒)`が1行を更新したときだけ送る。直後の送信とCronの回収が同時に拾っても片方だけが送る
 4. 判断の順:
    - 本人の当該LATCHでの参加Intent(latches.intent_idsのうち本人が所有するもの)のnotification_levelがmuted → `muted`(送らない・オーナー裁定1)

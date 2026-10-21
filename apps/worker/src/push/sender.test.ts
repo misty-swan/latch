@@ -53,6 +53,9 @@ describe("realPushSender", () => {
 		expect(
 			(seen?.init.body as Uint8Array | undefined)?.byteLength,
 		).toBeGreaterThan(86);
+		// リダイレクトを追わず、時間制限のsignalを付ける
+		expect(seen?.init.redirect).toBe("manual");
+		expect(seen?.init.signal).toBeInstanceOf(AbortSignal);
 	});
 
 	it.each([
@@ -60,6 +63,8 @@ describe("realPushSender", () => {
 		[201, { kind: "ok" }],
 		[404, { kind: "gone" }],
 		[410, { kind: "gone" }],
+		[301, { kind: "rejected", status: 301 }],
+		[302, { kind: "rejected", status: 302 }],
 		[400, { kind: "rejected", status: 400 }],
 		[403, { kind: "rejected", status: 403 }],
 		[413, { kind: "rejected", status: 413 }],
@@ -81,6 +86,26 @@ describe("realPushSender", () => {
 		const target = await makeTarget();
 		const sender = realPushSender(keys, (async () => {
 			throw new Error("network");
+		}) as typeof fetch);
+		expect(
+			await sender.send(target, "x", { ttl: 60, urgency: "high" }),
+		).toEqual({ kind: "retry", status: null });
+	});
+
+	it("時間切れ(abort)はretry(status null)", async () => {
+		const target = await makeTarget();
+		const sender = realPushSender(keys, (async () => {
+			throw new DOMException("The operation timed out.", "TimeoutError");
+		}) as typeof fetch);
+		expect(
+			await sender.send(target, "x", { ttl: 60, urgency: "high" }),
+		).toEqual({ kind: "retry", status: null });
+	});
+
+	it("中断されたfetch(AbortError)もretry", async () => {
+		const target = await makeTarget();
+		const sender = realPushSender(keys, (async () => {
+			throw new DOMException("The operation was aborted.", "AbortError");
 		}) as typeof fetch);
 		expect(
 			await sender.send(target, "x", { ttl: 60, urgency: "high" }),

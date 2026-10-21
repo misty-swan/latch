@@ -183,16 +183,6 @@ const runCatchUpSweep = async (env: Env, clock: Clock): Promise<void> => {
 };
 
 /**
- * (c) 期限切れ2窓走査(docs/05 §2.6)。索引(status, expires_at)で
- * 第1窓「expired化対象(expires_at≤now)」と第2窓「ベクトル削除対象
- * (expires_at≤now−7日・vector_deleted_at IS NULL)」を走査する。
- * 第1窓: 候補クローズ→expired化→ベクトルmetadata.statusの同期(best-effort)。
- * 候補クローズを先に行うのは、途中失敗でexpired化だけが先行した場合に
- * 残った候補行のクローズが再試行できなくなるため(次回のCronで収束する)。
- * 第2窓: ベクトル削除を先に実行し、成功後にvector_deleted_atへ記録する
- * (記録が先行すると削除済みでも再試行できなくなるため)
- */
-/**
  * intent_expiredのアプリ内通知を1件書く文(F7b設計 §5.7)。IDはULIDをJS側で採番するため
  * Intent1件につき1文。status=expiredのIntentだけを選び、UNIQUE(intent_id, type)の
  * 競合は無視する(再実行・再走査で二重に作らない)。列順はnotificationsの定義順
@@ -229,9 +219,19 @@ export const runPushSweep = async (env: Env, clock: Clock): Promise<void> => {
 				lt(notifications.createdAt, new Date(now.getTime() - 10 * 60_000)),
 			),
 		);
-	await flushPush(db, pushSenderOf(env), now, { minAgeMs: 30_000 });
+	await flushPush(db, pushSenderOf(env), clock, { minAgeMs: 30_000 });
 };
 
+/**
+ * (c) 期限切れ2窓走査(docs/05 §2.6)。索引(status, expires_at)で
+ * 第1窓「expired化対象(expires_at≤now)」と第2窓「ベクトル削除対象
+ * (expires_at≤now−7日・vector_deleted_at IS NULL)」を走査する。
+ * 第1窓: 候補クローズ→expired化→ベクトルmetadata.statusの同期(best-effort)。
+ * 候補クローズを先に行うのは、途中失敗でexpired化だけが先行した場合に
+ * 残った候補行のクローズが再試行できなくなるため(次回のCronで収束する)。
+ * 第2窓: ベクトル削除を先に実行し、成功後にvector_deleted_atへ記録する
+ * (記録が先行すると削除済みでも再試行できなくなるため)
+ */
 const runExpiryWindows = async (env: Env, clock: Clock): Promise<void> => {
 	const db = drizzle(env.DB);
 	const nowMs = clock.now().getTime();
@@ -852,8 +852,9 @@ export const runScheduledPipeline = async (
 	);
 	await runIsolated("budget_alert", () => runBudgetAlert(env, clock));
 	await runIsolated("pending", () => runPendingSweep(env, clock));
-	await runIsolated("push", () => runPushSweep(env, clock));
 	await runIsolated("completion", async () => {
 		await completeDueLatches(drizzle(env.DB), clock.now());
 	});
+	// Pushの回収は外部への送信を含み時間がかかり得るので最後に置く(completed判定を遅らせない)
+	await runIsolated("push", () => runPushSweep(env, clock));
 };

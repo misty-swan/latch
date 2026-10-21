@@ -31,12 +31,9 @@ export const pushFlushAfterWrite: MiddlewareHandler<AppEnv> = async (
 		c.executionCtx.waitUntil(
 			(async () => {
 				try {
-					await flushPush(
-						drizzle(env.DB),
-						pushSenderOf(env),
-						systemClock.now(),
-						{ minAgeMs: 0 },
-					);
+					await flushPush(drizzle(env.DB), pushSenderOf(env), systemClock, {
+						minAgeMs: 0,
+					});
 				} catch (error) {
 					logger.warn("push.flush.failed", {
 						error_code: errorCodeOf(error, "PUSH_FLUSH_FAILED"),
