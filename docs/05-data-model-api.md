@@ -1,9 +1,9 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.14
+- 文書バージョン: v0.15
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.14更新: 2026-10-20)
+- 作成日: 2026-10-17(v0.15更新: 2026-10-21)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
@@ -17,7 +17,8 @@
 - v0.12の変更点: オーナー裁定(2026-10-20・01冒頭の決定記録)に伴い§2.2のproposal_historyへ未提示・システムの都合で閉じた提案は履歴を消費しない規定(新規確保の行は削除・再提案で確保した既存行はexpiredへ戻す)を、intents.last_evaluated_atへ意味フィールドの更新で解除する旨を、§2.5の削除表へIntent削除で取り消した提案の履歴の解放を、§3.2・§3.3のPATCHへ取り消し時の履歴の解放と30分再評価抑制の解除を追記。前提文書欄の版数を更新
 - v0.13の変更点: F4b(グループLATCH)実装に伴い§2.2のlatch_membersへleft_at(成立後の離脱時刻・マイグレーション0004と戻す手順)を、group_candidatesへdedup_keyと保存・状態の規則(全ペアのjev_resultが揃った集合だけを保存・衝突時はaggregate_scoreのみ更新・提案でproposed・prev_aggregate_score)を、proposal_historyの「履歴を消費しない閉じ方」へグループ提案のペア別の記録規則(オーナー裁定 2026-10-20・01冒頭の決定記録)を追記。§3.3へ成立後の離脱(本人だけを外して継続・下限割れで全体cancelled・離脱者は非参加扱い・成功応答・二重の離脱の冪等)と、members・participants_countは離脱していない参加者だけを数える旨を追記。前提文書欄の版数を更新
 - v0.14の変更点: F4c(提案〜成立の画面)に伴い§3.3のLatchDTOへmy_intent_id(自分側の参加Intent・全状態で含む・削除済みならnull)とmatched_at(成立時刻・成立を経ていなければnull)を追記
-- 前提文書: 01 要件定義書 v0.12 / 02 スコープ・受け入れ条件合意書 v0.6 / 04 アーキテクチャ設計書 v0.14
+- v0.15の変更点: F5(つながりの性質)実装とオーナー裁定(2026-10-21・01冒頭の決定記録)に伴い、§2.2のlatchesのlast_message_at(成立時に成立時刻を入れる)・completed_at(機会は対象時刻から3時間)、§2.6のcompleted判定(機会LATCHを追加)、§3.3のGET /v1/latches?type=matched(completedを含む)とLatchDTOの成立後の開示範囲(completedを含む)を改めた。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.13 / 02 スコープ・受け入れ条件合意書 v0.7 / 04 アーキテクチャ設計書 v0.15
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -203,8 +204,8 @@ status:             candidate | proposed | partial_accept | matched |
 response_deadline:  datetime
 proposed_at:        datetime | null  # 提示(proposed化)した時刻。保留中(candidate)はnull。不成立の通知(closed)は提示済みの提案に限る
 expires_at:         datetime      # 参加Intent期限の最小値
-last_message_at:    datetime      # 非正規化。メッセージ書き込み時に更新(90日判定の索引)
-completed_at:       datetime | null  # 機会=対象時刻経過 / つながり=最終メッセージ(0件ならmatched時刻)から90日経過
+last_message_at:    datetime      # 非正規化。成立時に成立時刻を入れ、メッセージ書き込み時に更新(90日判定の索引・F5実装確定)
+completed_at:       datetime | null  # 機会=対象時刻(proposal.time_window.start)から3時間経過 / つながり=最終メッセージ(0件ならmatched時刻)から90日経過
 created_at / updated_at
 ```
 
@@ -308,7 +309,7 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 
 - match_candidates / group_candidates: 評価確定から30日で削除(01 §21)
 - 期限切れIntentの埋め込み: 期限+7日でVectorizeから削除
-- つながりLATCHのcompleted判定: 最終メッセージ(0件ならmatched時刻)から90日経過でCronがcompletedへ(01 §8)。latches(status, form, last_message_at)の索引で走査
+- LATCHのcompleted判定(F5実装確定): matchedのつながりLATCHは最終メッセージ(0件ならmatched時刻)から90日経過、matchedの機会LATCHは対象時刻(proposal.time_window.start)から3時間経過でCronがcompletedへ(01 §8・06 §2の(d))。latches(status, form, last_message_at)の索引で走査し、機会の対象時刻はproposalのJSONから読む(matchedの機会LATCHは対象時刻が7日以内のものに限られ件数が小さいため列を設けない)。completedでIntentの状態とproposal_historyは変えない
 - intentsの期限切れバッチ: (status, expires_at)索引で「expired化対象(now超過)」と「ベクトル削除対象(now-7日超過・vector_deleted_at IS NULL)」の2窓を走査。削除実行時にvector_deleted_atへ記録
 - KVチケット: TTL 60秒で自動消滅
 
@@ -403,9 +404,9 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 
 **POST /v1/intents/{id}/pause・resume** — 200 IntentDTO(version+1)。pauseはactiveのみ実行可(他は400 invalid_status)・status=paused・期限は不変。resumeはpausedのみ実行可(他は400 invalid_status)・期限切れ(expires_at<=now)は400(理由コードexpired)・status=active・期限は据え置き(再計算しない)。参加中active数の上限5件は作成・draft→active化・resumeの3経路で検証し、超過は422 ACTIVE_INTENT_LIMIT(§3.1)
 
-**LatchDTO(LATCH系API共通の応答形状・F4a実装確定)** — `{id, form, status, response_deadline, participants_count, my_response: yes|no|defer|null, score, my_intent_id, matched_at}`。my_intent_idはlatches.intent_idsのうちintents.user_idが呼び出し本人のIntentのID(全状態で含む。Intent削除済みで見つからなければnull)、matched_atは成立時刻(latch_status_eventsのto_status=matchedのcreated_atをISO 8601で返す。成立前など成立を経ていなければnull、matched経由のcancelledは成立時刻を返す)。scoreは応答に含むがUIでは表示しない(01 §10の裁定)。**成立後(matched、およびmatched経由のcancelled)に限り** `proposal:{form, topic, time_window, region_name, participants, budget}` と `members:[{user_id, display_name, bio, has_icon}]`(自分と離脱者を除く参加者)を含める。participants_countは離脱していない参加者(latch_members.left_atがnull)の数とする(成立前は全員が該当する・F4b実装確定)。成立前はproposal・membersの**キー自体を出さない**(空値でも出さない・visibility単値化・01 §21)。matched経由のcancelledはlatch_status_eventsにto_status=matchedの記録があることで判定する。保留中(candidate)のLATCHは一覧にも単一取得にも出さない(単一取得は404)。
+**LatchDTO(LATCH系API共通の応答形状・F4a実装確定)** — `{id, form, status, response_deadline, participants_count, my_response: yes|no|defer|null, score, my_intent_id, matched_at}`。my_intent_idはlatches.intent_idsのうちintents.user_idが呼び出し本人のIntentのID(全状態で含む。Intent削除済みで見つからなければnull)、matched_atは成立時刻(latch_status_eventsのto_status=matchedのcreated_atをISO 8601で返す。成立前など成立を経ていなければnull、matched経由のcancelled・completedは成立時刻を返す)。scoreは応答に含むがUIでは表示しない(01 §10の裁定)。**成立後(matched・completed、およびmatched経由のcancelled)に限り** `proposal:{form, topic, time_window, region_name, participants, budget}` と `members:[{user_id, display_name, bio, has_icon}]`(自分と離脱者を除く参加者)を含める。participants_countは離脱していない参加者(latch_members.left_atがnull)の数とする(成立前は全員が該当する・F4b実装確定)。成立前はproposal・membersの**キー自体を出さない**(空値でも出さない・visibility単値化・01 §21)。matched経由のcancelledはlatch_status_eventsにto_status=matchedの記録があることで判定する。保留中(candidate)のLATCHは一覧にも単一取得にも出さない(単一取得は404)。
 
-**GET /v1/latches** — 200 `{items: LatchDTO[], next_cursor: string|null}`。自分が参加するもののみ・id降順。type=proposalsはstatusがproposed・partial_accept、type=matchedはmatchedを返す(typeの欠落・不明な値は400)。limit・cursorはIntent一覧と同一の規則(§3.1)。**GET /v1/latches/{id}** — 200 LatchDTO。参加しない・存在しない・保留中は一律404。
+**GET /v1/latches** — 200 `{items: LatchDTO[], next_cursor: string|null}`。自分が参加するもののみ・id降順。type=proposalsはstatusがproposed・partial_accept、type=matchedはmatched・completedを返す(completed後も閲覧できる・02 D-08・F5実装確定。typeの欠落・不明な値は400)。limit・cursorはIntent一覧と同一の規則(§3.1)。**GET /v1/latches/{id}** — 200 LatchDTO。参加しない・存在しない・保留中は一律404。
 
 **POST /v1/latches/{id}/response** — 200 状態遷移後のLatchDTO。全員YESで matched + チャット解放対象となり、双方の詳細情報(表示名・アイコン・プロフィール)が以降のGETに含まれる(01 §8)。回答系(response・response/retract・leave・defer-reason)の失敗は、参加しない・存在しないは一律404、それ以外は400 VALIDATION_FAILEDのdetails.reasonsに理由コードを返す: invalid_status(その状態では実行できない) / deadline_passed(回答期限経過) / already_responded(回答済み・見送り理由の保存済み) / not_deferred(defer-reasonで本人の有効な回答がdeferでない)。
 

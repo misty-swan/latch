@@ -1,9 +1,9 @@
 # LATCH マッチングパイプライン設計書
 
-- 文書バージョン: v0.13
+- 文書バージョン: v0.14
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.13更新: 2026-10-20)
+- 作成日: 2026-10-17(v0.14更新: 2026-10-21)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。実行順(候補検索→硬絞り)の確定と取り出し幅の上限100件化・つながりIntentの取りこぼし回収と保留解放のトリガー追加・提案化の直列化と再提案規則(01裁定)の反映・グループ期限切れと予算不足の挙動を確定
 - v0.3の変更点: 前提文書欄の版数同期(F1実装に伴う04/05/10改版への追従)
 - v0.4の変更点: 前提文書欄の版数同期(F2実装に伴う05改版への追従)
@@ -16,7 +16,8 @@
 - v0.11の変更点: F4aの最終レビューの修正に伴い§2へ保留走査の実行順(全体の期限切れ→全体の解放)・関係ユーザー対象の解放の範囲内の期限処理とチャンク分割・追加4走査の相互隔離と1件ごとの失敗の続行を、§3のLayer 4へ提案履歴で提案できない相手の事前除外(l4_skipped_history)とJev呼び出しの例外の扱いを、§5へcircuit breakerのKV書き込み方針を、§7へl4_skipped_historyを追記。前提文書欄の版数を更新
 - v0.12の変更点: オーナー裁定(2026-10-20・01冒頭の決定記録)に伴い§3のLayer 4と§6へ30分再評価抑制は意味フィールドの更新で解除する旨を、§4の提案履歴と再提案へ未提示・システムの都合で閉じた提案は履歴を消費しない規定を追記。前提文書欄の版数を更新
 - v0.13の変更点: F4b(グループLATCH)実装に伴い§2へグループの次集合の評価(クローズ時の呼び出し点・機会の排他によるcancelledを含む・新たなJevを使わない・照会の順序と上限)を、§3のLayer 4へ人数の条件(1対1を含む)とJev 8回の配分(1対1への最低4回保証・重なるペアの共用・枠に収まらない集合の保留・他人どうしのペアの保存と再利用)を、Layer 5へPool・Pool内のHard判定・集合の列挙と順位・aggregateと選択順・1回の評価で1集合・提案直前の再検証(versionの照合)の実装確定を追記。§4のグループの履歴規則をオーナー裁定(2026-10-20・01冒頭の決定記録)へ書き換え、§7へグループの計測項目を追記。前提文書欄の版数を更新
-- 前提文書: 01 要件定義書 v0.12 / 02 スコープ・受け入れ条件合意書 v0.6 / 04 アーキテクチャ設計書 v0.14 / 05 データモデル・API仕様書 v0.14
+- v0.14の変更点: F5(つながりの性質)実装とオーナー裁定(2026-10-21・01冒頭の決定記録)に伴い、§2のCron (d)を機会LATCHのcompleted判定(対象時刻から3時間)まで広げ、実装確定(F5)を追記した。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.13 / 02 スコープ・受け入れ条件合意書 v0.7 / 04 アーキテクチャ設計書 v0.15 / 05 データモデル・API仕様書 v0.15
 - 本書の位置づけ: 01第11〜16節(マッチングシステム)の実装仕様を確定する。5層の絞り込み・イベント駆動・提案化・失敗と縮退を、04のCloudflare構成(Queues・Vectorize・Cron)と05のテーブルの上に定める。LLM呼び出しの内容は07が担い、本書は「いつ・何回・どの層で呼ぶか」を定める
 
 ## 1. 全体像
@@ -51,13 +52,15 @@ Cron(毎分) → 機会: bucket到来・catch-up / 全Intent: 期限切れ /
 
 **冪等性。** match_eventsのUNIQUE(event_type, source_intent_id, version)が二重投入を許さない。処理済みイベントの再消費はstatus=processedを確認してスキップする。
 
-**Cron(毎分・04 §4)。** (a)機会Intentのbucket到来(starts_atが属する30分Bucket到達の未評価Intent)の再評価、(b)catch-up(expires_atまで2時間以内かつlast_evaluated_atから30分以上経過のactiveな機会Intent)、(c)全active Intentの期限切れバッチ(expired化+ベクトル削除予約)、(d)つながりLATCHのcompleted判定(matchedで最終メッセージ(0件ならmatched時刻)から90日経過)、(e)埋め込み未完了のIntentのバックフィル再試行、(f)usage_counters集計とJev予算アラート(80%)、(g)**埋め込み済みかつ未評価(embedded_at NOT NULL かつ last_evaluated_at NULL)のactive Intentの回収再評価**(キュー消失の安全網)、(h)**active化後10分経過のつながりIntentの1回きり遅延再評価**(upsert反映遅延による相互取りこぼしの安全網)、(i)**提案クローズ後続処理**(下記)。
+**Cron(毎分・04 §4)。** (a)機会Intentのbucket到来(starts_atが属する30分Bucket到達の未評価Intent)の再評価、(b)catch-up(expires_atまで2時間以内かつlast_evaluated_atから30分以上経過のactiveな機会Intent)、(c)全active Intentの期限切れバッチ(expired化+ベクトル削除予約)、(d)LATCHのcompleted判定(matchedのつながりLATCHは最終メッセージ(0件ならmatched時刻)から90日経過・matchedの機会LATCHは対象時刻から3時間経過・01 §8)、(e)埋め込み未完了のIntentのバックフィル再試行、(f)usage_counters集計とJev予算アラート(80%)、(g)**埋め込み済みかつ未評価(embedded_at NOT NULL かつ last_evaluated_at NULL)のactive Intentの回収再評価**(キュー消失の安全網)、(h)**active化後10分経過のつながりIntentの1回きり遅延再評価**(upsert反映遅延による相互取りこぼしの安全網)、(i)**提案クローズ後続処理**(下記)。
 
 **提案クローズ後続処理。** 提案がクローズ(matched / expired / rejected / cancelled)した時点で、当該ユーザー(機会Intentは当該Intent)の保留candidateを提示順(機会=対象時刻の近い順/つながり=LATCH Score降順)で通知上限までproposedへ昇格し、回答期限を再計算して通知する。グループの「次集合の評価」もこのトリガーで実行する。
 
-**実装確定(F3)。** Cron走査のうち(a)(b)(c)(e)(g)(h)と保持期間削除(05 §2.6の30日定期削除)を毎分Cronで実装する。各走査は評価本体(evaluateIntent)と第1段(Embedding処理)の**直接呼び出し**で完結し、Cronからは新たな起点イベントを発行しない(走査結果をイベント経由にすると再びキューに滞留するため)。走査は1回あたりの処理件数を上限500で頭打ちにし、(status, starts_at)・(status, expires_at)等の索引で対象を最小化する(04 §4)。match_eventsのイベント型のうちintent_expired・intent_deleted・bucket_arrivedはF3では不使用(将来のために予約)。(f)予算アラート・(i)提案クローズ後続処理はF4aで実装済み(次段落)であり、**(d)つながりLATCHのcompleted判定はF5で計上する(12)。**
+**実装確定(F3)。** Cron走査のうち(a)(b)(c)(e)(g)(h)と保持期間削除(05 §2.6の30日定期削除)を毎分Cronで実装する。各走査は評価本体(evaluateIntent)と第1段(Embedding処理)の**直接呼び出し**で完結し、Cronからは新たな起点イベントを発行しない(走査結果をイベント経由にすると再びキューに滞留するため)。走査は1回あたりの処理件数を上限500で頭打ちにし、(status, starts_at)・(status, expires_at)等の索引で対象を最小化する(04 §4)。match_eventsのイベント型のうちintent_expired・intent_deleted・bucket_arrivedはF3では不使用(将来のために予約)。(f)予算アラート・(i)提案クローズ後続処理はF4aで実装済み(次段落)であり、(d)LATCHのcompleted判定はF5で実装済み(下記の実装確定(F5))。
 
 **実装確定(F4a)。** 毎分Cronに次を追加する(いずれも評価本体等の直接呼び出しで、起点イベントは発行しない)。(i)提案クローズ後続処理=回答期限切れ(proposed・partial_acceptでresponse_deadlineを過ぎたLATCHをexpiredで閉じ、有効なYESを無効化する。参加者の保留は直後の保留走査が全体で解放する)と、保留の期限切れ(保留中に参加Intentの期限を過ぎたもの・機会で対象時刻まで75分を切ったものは提示せずexpiredで閉じる)・保留の解放(通知上限の範囲で提示順にproposedへ昇格する)。提案がクローズする回答(defer・no)・成立(機会の排他によるcancelledを含む)・Intent削除・active Intentの意味フィールドの更新(05 §3.2)の時点でも、関係ユーザーを対象に同じ解放を実行する。保留走査は全体の期限切れ→全体の解放の順に実行する。関係ユーザーを対象とする解放は全体の期限切れを走らせず、対象範囲内の保留に限って期限到達・機会で対象時刻まで75分未満のものを昇格させずexpiredで閉じる(関係ユーザーの照会は50件のチャンクに分割する・D1の1文あたりバインド上限100)。(f)予算アラート=全体の1日・1か月の実行回数が上限の80%に達したら、同一period(日・月)につき1回だけ警報する(送信済みの印はKV・04 §4)。保持期間削除にusage_countersの90日削除(05 §2.2)を加える。pending残留の掃査=status=pendingのままcreated_atから10分を超えたmatch_events行をfailedへ倒す(評価失敗による残留の可視化。評価の回収は(e)(g)が担う)。(e)のバックフィルはembedding_completedを発行せずに評価本体を直接呼び出し(二重評価の解消)、Embeddingの失敗が連続5件に達したら当回の走査を打ち切る(全断時のCron時間膨張の防止)。F4aで追加した4走査(回答期限切れ・保留・予算アラート・pending残留)は互いに隔離し、1走査の失敗はログ(cron.sweep.failed・layer=走査名・error_code)を出して次の走査へ進む。保留の解放の1件ごと(昇格・閉鎖)の失敗もログ(cron.item.failed・latch_id・error_code)を出して続行する。既存の走査((a)(b)(c)(e)(g)(h)・保持期間削除)はクエリの失敗を呼び出し元へ伝播させる方針のままとする。
+
+**実装確定(F5)。** 毎分Cronに(d)LATCHのcompleted判定を追加する(評価本体等は呼ばず、起点イベントも発行しない)。対象はstatus=matchedで、つながりLATCHは`last_message_at + 90日 ≤ now`(last_message_atは成立時に成立時刻を入れ、F6でメッセージ書き込み時に更新する・05 §2.2)、機会LATCHは`proposal.time_window.start + 3時間 ≤ now`(対象時刻・グループは全員のstarts_atの最大値。2026-10-21オーナー裁定・01冒頭の決定記録)とする。照会はつながりをlast_message_atの古い順・機会を対象時刻の古い順に、合計500件(CRON_BATCH_LIMIT)で頭打ちにする。1件ごとに状態の記録(latch_status_events: matched→completed)と状態の更新(status=completed・completed_at=now)を1バッチで書き、どちらも「今もmatchedで境界を過ぎている」で条件付ける(並行したleave・メッセージによるlast_message_atの更新と競合しても誤って閉じない・重複実行は冪等)。Intentの状態(つながり=active・機会=matched)とproposal_history(matched)は変えず、通知も作らない。走査はF4aの4走査と同じく隔離し(cron.sweep.failed・layer=completion)、1件の失敗はcron.item.failed(latch_id・error_code)を出して続行する。完了件数はform別にcron.completion.done(layer=connection|occasion・count)へ出す
 
 **実装確定(F4b)。** グループの次集合の評価は、グループ提案がクローズ(matched / rejected / expired / cancelled。機会の成立に伴う排他でcancelledになったグループ提案を含む)した各呼び出し点(回答・Intent削除・意味フィールドの更新・回答期限切れの走査の1件ごと)で、保留の解放の直後に行う。そのLATCHの参加Intentを含むgroup_candidatesのうちstatus=candidate・aggregate>0.60のものを、aggregate降順・id昇順で最大500件に絞って照会し(json配列の走査を有界にする)、dedup_keyのversionが全員の現行versionと一致する集合だけを§3の選択順で見て、全メンバーのHを再検証したうえで1集合だけ提案化する(新たなJevは使わない)。毎分Cronの全体走査では次集合の評価を行わない(クローズ時の呼び出しと次のイベントの評価で回収する)。失敗はログ(latches.next_group.failed)に出し、成功済みのクローズ処理を壊さない。
 
