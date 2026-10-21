@@ -13,10 +13,9 @@
 
 import { type Browser, expect, type Page, test } from "@playwright/test";
 import {
-	captureAccessToken,
 	createConnectionIntent,
 	expireLeftoverE2eIntents,
-	signInAndRegister,
+	setUpUser,
 	waitForDevLatch,
 } from "./helpers";
 
@@ -25,19 +24,6 @@ const NAME_B = "E2Eゆうひ";
 
 /** 見出しの改行(<br>)はアクセシブルネームで空白になるため、空白の有無を問わず照合する */
 const AWAITING_HEADING = /相手の回答を\s*待っています。/;
-
-/** 1人分のcontextを作り・UIで登録し・アクセストークンを取る */
-const setUpUser = async (
-	browser: Browser,
-	displayName: string,
-): Promise<{ page: Page; token: string }> => {
-	const context = await browser.newContext();
-	const page = await context.newPage();
-	await signInAndRegister(page, displayName);
-	const tokenPromise = captureAccessToken(page);
-	await page.reload();
-	return { page, token: await tokenPromise };
-};
 
 /** 2人を登録し・同じtopic・同じ地域のつながりIntentを投入して提案まで待つ */
 const setUpProposal = async (

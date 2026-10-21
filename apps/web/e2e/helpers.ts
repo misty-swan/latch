@@ -9,7 +9,12 @@
 
 import { execSync } from "node:child_process";
 import path from "node:path";
-import { expect, type Locator, type Page } from "@playwright/test";
+import {
+	type Browser,
+	expect,
+	type Locator,
+	type Page,
+} from "@playwright/test";
 
 /** JST(+9)の壁時計でnow+hours時間のdatetime-local値を作る(starts_atの動生成) */
 export const jstLocalInputPlusHours = (hours: number): string => {
@@ -212,4 +217,61 @@ export const expireLeftoverE2eIntents = (): void => {
 		cwd: path.join(import.meta.dirname, "../../worker"),
 		stdio: "ignore",
 	});
+};
+
+/** 1人分のcontextを作り・UIで登録し・アクセストークンを取る(両specで共有) */
+export const setUpUser = async (
+	browser: Browser,
+	displayName: string,
+): Promise<{ page: Page; token: string }> => {
+	const context = await browser.newContext();
+	const page = await context.newPage();
+	await signInAndRegister(page, displayName);
+	const tokenPromise = captureAccessToken(page);
+	await page.reload();
+	return { page, token: await tokenPromise };
+};
+
+/**
+ * 2人を登録し・同じtopic・同じ地域のつながりIntentを投入して提案を待ち・
+ * 回答の画面はlatch-flow.spec.tsで証明済みのためAPIで2人ともyesにして成立(matched)まで進める
+ */
+export const establishLatch = async (
+	browser: Browser,
+	site: number,
+	names: [string, string],
+): Promise<{
+	a: { page: Page; token: string };
+	b: { page: Page; token: string };
+	latchId: string;
+}> => {
+	const a = await setUpUser(browser, names[0]);
+	const b = await setUpUser(browser, names[1]);
+	// topicは40文字上限のため、UUIDの先頭8桁で一意にする
+	const topic = `e2e-web-chat-${crypto.randomUUID().slice(0, 8)}`;
+	const intentA = await createConnectionIntent(a.page, a.token, topic, site);
+	await createConnectionIntent(b.page, b.token, topic, site);
+	const proposed = await waitForDevLatch(
+		a.page,
+		a.token,
+		intentA.id,
+		(item) => item.status === "proposed",
+	);
+	for (const user of [a, b]) {
+		const res = await user.page.request.post(
+			`/v1/latches/${proposed.id}/response`,
+			{
+				data: { response: "yes" },
+				headers: { authorization: `Bearer ${user.token}` },
+			},
+		);
+		expect(res.status(), "POST /v1/latches/{id}/response").toBe(200);
+	}
+	await waitForDevLatch(
+		a.page,
+		a.token,
+		intentA.id,
+		(item) => item.status === "matched",
+	);
+	return { a, b, latchId: proposed.id };
 };
