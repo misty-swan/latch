@@ -3,6 +3,7 @@
  * assertEnvSafetyはfetchの先頭でisolateごとに1回だけ呼ぶ(Workersに起動フックはないため)。
  */
 import type { MatchQueueMessage } from "@latch/shared";
+import type { VapidKeys } from "./push/vapid";
 
 /**
  * 開発/テスト専用のJWT署名鍵フォールバック(wrangler dev・単体/統合テスト用)。
@@ -10,6 +11,13 @@ import type { MatchQueueMessage } from "@latch/shared";
  */
 export const DEV_FALLBACK_JWT_SECRET =
 	"latch-dev-fallback-jwt-secret-0123456789abcdef";
+
+/**
+ * テスト専用VAPID公開鍵(tests/fixtures/test-vapid.jsonのpublicKeyと同値・env.test.tsで一致を確認)。
+ * prodでこの鍵が設定されていたら起動を拒否する(F7b設計 §5.5・docs/10 §2のテスト鍵ガード)
+ */
+export const TEST_VAPID_PUBLIC_KEY =
+	"BLJmICs7vvlwpXh8sEtokHetiJR7lGLHYnKZp2_DCOcWDiQdnR_-jWxp9OwI2vs8zWVLnF8A9QitEquRXZ_FYro";
 
 /**
  * WorkerのEnv(バインディング=docs/04 §3.1・実行環境の値=docs/10 §1)。
@@ -56,6 +64,14 @@ export interface Env {
 	 * (docs/10 §2のテスト鍵ガードと同じ二重防御)
 	 */
 	TEST_QUEUES_DISABLED?: string;
+	/** Web Pushの送り手(既定stub・push/sender.ts)。prodはreal必須(F7b設計 §5.5) */
+	LATCH_PUSH_MODE?: string;
+	/** VAPID公開鍵(base64url・非圧縮P-256点)。stubでも公開鍵APIが返す */
+	VAPID_PUBLIC_KEY?: string;
+	/** VAPID秘密鍵(JWKのJSON文字列) */
+	VAPID_PRIVATE_KEY?: string;
+	/** VAPIDのsub(mailto:) */
+	VAPID_SUBJECT?: string;
 	GOOGLE_CLIENT_ID?: string;
 	APPLE_CLIENT_ID?: string;
 }
@@ -76,11 +92,31 @@ export const jwtSecret = (env: Env): string => {
 	return env.JWT_SECRET ?? DEV_FALLBACK_JWT_SECRET;
 };
 
+/** 環境変数からVAPID鍵一式を作る(未設定は例外・F7b設計 §5.5) */
+export const vapidKeysOf = (env: Env): VapidKeys => {
+	if (
+		env.VAPID_PUBLIC_KEY === undefined ||
+		env.VAPID_PRIVATE_KEY === undefined ||
+		env.VAPID_SUBJECT === undefined
+	) {
+		throw new Error(
+			"ENV_MISSING_VAPID: VAPID_PUBLIC_KEY・VAPID_PRIVATE_KEY・VAPID_SUBJECTが必要(F7b設計 §5.5)",
+		);
+	}
+	return {
+		publicKey: env.VAPID_PUBLIC_KEY,
+		privateJwk: JSON.parse(env.VAPID_PRIVATE_KEY) as JsonWebKey,
+		subject: env.VAPID_SUBJECT,
+	};
+};
+
 /**
  * prod起動ガード(docs/04 §4・docs/10 §2)。fetchの先頭で呼ぶことを想定する。
  * - prodでテスト鍵(LATCH_TEST_IDP_JWKS・LATCH_TEST_IDP_PRIVATE_JWKS)が残存 →
  *   例外(テスト鍵でprodを起動させない。秘密鍵はdevサインイン用のF2'計画Task 2)
  * - prodでJWT_SECRETが未設定・32字未満 → 例外
+ * - prodでLATCH_PUSH_MODEがreal以外 → 例外(ENV_UNSAFE_PUSH)・VAPID_*の欠落 → 例外
+ *   (ENV_MISSING_VAPID)・VAPID公開鍵がテスト鍵 → 例外(ENV_UNSAFE_TEST_KEY)(F7b設計 §5.5)
  * prod以外(LATCH_ENVがproduction以外)は何もしない
  */
 export const assertEnvSafety = (env: Env): void => {
@@ -106,6 +142,25 @@ export const assertEnvSafety = (env: Env): void => {
 	if (env.JWT_SECRET === undefined || env.JWT_SECRET.length < 32) {
 		throw new Error(
 			"ENV_UNSAFE_JWT_SECRET: prod環境では32字以上のJWT_SECRETが必須(docs/04 §4)",
+		);
+	}
+	if (env.LATCH_PUSH_MODE !== "real") {
+		throw new Error(
+			"ENV_UNSAFE_PUSH: prod環境ではLATCH_PUSH_MODE=realが必須(F7b設計 §5.5)",
+		);
+	}
+	if (
+		env.VAPID_PUBLIC_KEY === undefined ||
+		env.VAPID_PRIVATE_KEY === undefined ||
+		env.VAPID_SUBJECT === undefined
+	) {
+		throw new Error(
+			"ENV_MISSING_VAPID: prod環境ではVAPID_PUBLIC_KEY・VAPID_PRIVATE_KEY・VAPID_SUBJECTが必須(F7b設計 §5.5)",
+		);
+	}
+	if (env.VAPID_PUBLIC_KEY === TEST_VAPID_PUBLIC_KEY) {
+		throw new Error(
+			"ENV_UNSAFE_TEST_KEY: prod環境でテスト用VAPID鍵が設定されている(docs/10 §2)",
 		);
 	}
 };

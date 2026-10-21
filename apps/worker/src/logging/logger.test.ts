@@ -100,7 +100,7 @@ describe("createLogger(08 §6: 許可リスト方式の構造化ログ)", () => 
 		expect(Object.keys(parsed).sort()).toEqual(["event", "level"]);
 	});
 
-	it("許可リストは08 §6の8フィールドと完全一致する", () => {
+	it("許可リストは08 §6の8フィールドとF7b設計 §5.8のPush結果3フィールドと完全一致する", () => {
 		expect([...LOG_FIELD_ALLOWLIST]).toEqual([
 			"intent_id",
 			"latch_id",
@@ -110,10 +110,13 @@ describe("createLogger(08 §6: 許可リスト方式の構造化ログ)", () => 
 			"layer",
 			"count",
 			"latency",
+			"notification_id",
+			"http_status",
+			"push_result",
 		]);
 	});
 
-	it("8フィールドすべてが実際に出力できる", () => {
+	it("全フィールドが実際に出力できる", () => {
 		const { lines, sink } = captureSink();
 		const logger = createLogger(sink);
 		logger.debug("layer2_retrieval", {
@@ -125,6 +128,9 @@ describe("createLogger(08 §6: 許可リスト方式の構造化ログ)", () => 
 			layer: "layer2",
 			count: 12,
 			latency: 42,
+			notification_id: "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+			http_status: 410,
+			push_result: "gone",
 		});
 		const parsed = parseSingleLine(lines);
 		const fieldKeys = Object.keys(parsed)

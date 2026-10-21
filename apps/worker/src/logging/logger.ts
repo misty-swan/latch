@@ -15,6 +15,10 @@ export const LOG_FIELD_ALLOWLIST = [
 	"layer",
 	"count",
 	"latency",
+	// Web Pushの結果記録(F7b設計 §5.8)。endpoint・鍵・本文は許可しない
+	"notification_id",
+	"http_status",
+	"push_result",
 ] as const;
 
 export type LogField = (typeof LOG_FIELD_ALLOWLIST)[number];

@@ -11,3 +11,9 @@ declare module "*.sql?raw" {
 	const value: string;
 	export default value;
 }
+
+// テストがテスト用VAPID鍵のfixtureをviteの?rawで文字列として読むための宣言
+declare module "*.json?raw" {
+	const value: string;
+	export default value;
+}

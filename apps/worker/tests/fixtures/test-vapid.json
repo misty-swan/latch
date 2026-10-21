@@ -1,0 +1,12 @@
+{
+	"publicKey": "BLJmICs7vvlwpXh8sEtokHetiJR7lGLHYnKZp2_DCOcWDiQdnR_-jWxp9OwI2vs8zWVLnF8A9QitEquRXZ_FYro",
+	"privateJwk": {
+		"key_ops": ["sign"],
+		"ext": true,
+		"kty": "EC",
+		"x": "smYgKzu--XCleHywS2iQd62IlHuUYsdicpmnb8MI5xY",
+		"y": "DiQdnR_-jWxp9OwI2vs8zWVLnF8A9QitEquRXZ_FYro",
+		"crv": "P-256",
+		"d": "4hVW5-ePO385L5WoVFapRHKqs_YvRe-CoVUyPLOxTYM"
+	}
+}

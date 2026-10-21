@@ -9,6 +9,9 @@
  * - LATCH_TEST_IDP_PRIVATE_JWKS: 同じくコミット済みテスト鍵の秘密JWKを1行JSON化
  *   (F2'計画Task 2)。devサインイン(POST /v1/dev/idp-token)のRS256署名に使い、
  *   prodではassertEnvSafetyが設定自体を拒否する(起動ガードと404の二重防御)
+ * - VAPID_PUBLIC_KEY・VAPID_PRIVATE_KEY・VAPID_SUBJECT: コミット済みテスト用VAPID鍵
+ *   (tests/fixtures/test-vapid.json・F7b設計 §5.5)。prodではassertEnvSafetyが
+ *   テスト公開鍵を拒否する
  * 生成は決定的(同じ入力から常に同じ内容)で、実行のたびに上書きする。
  * .dev.varsはgitignore済みの生成物として扱う
  */
@@ -34,6 +37,11 @@ const privateJwkOneLine = oneLineJson(
 	path.join(workerDir, "tests/fixtures/test-idp-private.jwk"),
 );
 
+/** テスト用VAPID鍵(公開鍵とJWK) */
+const testVapid = JSON.parse(
+	readFileSync(path.join(workerDir, "tests/fixtures/test-vapid.json"), "utf8"),
+);
+
 /** E2E専用の固定JWT署名鍵(32字以上・docs/10 §1の開発/テスト専用値) */
 const devJwtSecret = "latch-e2e-dev-jwt-secret-0123456789abcdef0123456789";
 
@@ -46,6 +54,9 @@ const content = [
 	`JWT_SECRET=${devJwtSecret}`,
 	`LATCH_TEST_IDP_JWKS='${jwksOneLine}'`,
 	`LATCH_TEST_IDP_PRIVATE_JWKS='${privateJwkOneLine}'`,
+	`VAPID_PUBLIC_KEY=${testVapid.publicKey}`,
+	`VAPID_PRIVATE_KEY='${JSON.stringify(testVapid.privateJwk)}'`,
+	"VAPID_SUBJECT=mailto:dev@latch.invalid",
 	"",
 ].join("\n");
 

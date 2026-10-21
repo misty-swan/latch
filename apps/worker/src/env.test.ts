@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import testVapidText from "../tests/fixtures/test-vapid.json?raw";
 import {
 	assertEnvSafety,
 	DEV_FALLBACK_JWT_SECRET,
 	type Env,
 	jwtSecret,
+	TEST_VAPID_PUBLIC_KEY,
+	vapidKeysOf,
 } from "./env";
 
 // assertEnvSafety/jwtSecretはバインディング(DB等)を参照しないため、変数のみ与えるヘルパー
@@ -12,13 +15,84 @@ const makeEnv = (overrides: Partial<Env> = {}): Env =>
 
 const SECRET_32 = "a".repeat(32);
 
+// prodの正常系に必要なWeb Push設定(F7b設計 §5.5)。公開鍵はテスト鍵と異なる値
+const PUSH_OK = {
+	LATCH_PUSH_MODE: "real",
+	VAPID_PUBLIC_KEY: "B".repeat(87),
+	VAPID_PRIVATE_KEY: "{}",
+	VAPID_SUBJECT: "mailto:ops@example.com",
+} satisfies Partial<Env>;
+
 describe("assertEnvSafety(docs/04 §4・docs/10 §2: prodテスト鍵起動ガード)", () => {
 	it("prod+32字のJWT_SECRETは通る", () => {
 		expect(() =>
 			assertEnvSafety(
-				makeEnv({ LATCH_ENV: "production", JWT_SECRET: SECRET_32 }),
+				makeEnv({
+					LATCH_ENV: "production",
+					JWT_SECRET: SECRET_32,
+					...PUSH_OK,
+				}),
 			),
 		).not.toThrow();
+	});
+
+	it("prodでLATCH_PUSH_MODEがreal以外は例外(ENV_UNSAFE_PUSH)", () => {
+		expect(() =>
+			assertEnvSafety(
+				makeEnv({
+					LATCH_ENV: "production",
+					JWT_SECRET: SECRET_32,
+					...PUSH_OK,
+					LATCH_PUSH_MODE: "stub",
+				}),
+			),
+		).toThrow("ENV_UNSAFE_PUSH");
+	});
+
+	it.each(["VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT"] as const)(
+		"prodで%sが欠けると例外(ENV_MISSING_VAPID)",
+		(key) => {
+			const env = makeEnv({
+				LATCH_ENV: "production",
+				JWT_SECRET: SECRET_32,
+				...PUSH_OK,
+			});
+			delete env[key];
+			expect(() => assertEnvSafety(env)).toThrow("ENV_MISSING_VAPID");
+		},
+	);
+
+	it("prodでVAPID_PUBLIC_KEYがテスト鍵だと例外(ENV_UNSAFE_TEST_KEY)", () => {
+		expect(() =>
+			assertEnvSafety(
+				makeEnv({
+					LATCH_ENV: "production",
+					JWT_SECRET: SECRET_32,
+					...PUSH_OK,
+					VAPID_PUBLIC_KEY: TEST_VAPID_PUBLIC_KEY,
+				}),
+			),
+		).toThrow("ENV_UNSAFE_TEST_KEY");
+	});
+
+	it("env.tsのテスト公開鍵定数はfixtureの公開鍵と一致する", () => {
+		expect(TEST_VAPID_PUBLIC_KEY).toBe(JSON.parse(testVapidText).publicKey);
+	});
+
+	it("vapidKeysOfは環境変数からVapidKeysを作る(未設定は例外)", () => {
+		const keys = vapidKeysOf(
+			makeEnv({
+				VAPID_PUBLIC_KEY: "pub",
+				VAPID_PRIVATE_KEY: '{"kty":"EC"}',
+				VAPID_SUBJECT: "mailto:a@b.c",
+			}),
+		);
+		expect(keys).toEqual({
+			publicKey: "pub",
+			privateJwk: { kty: "EC" },
+			subject: "mailto:a@b.c",
+		});
+		expect(() => vapidKeysOf(makeEnv({}))).toThrow("ENV_MISSING_VAPID");
 	});
 
 	it("prodでテスト鍵(LATCH_TEST_IDP_JWKS)が残存すると例外", () => {

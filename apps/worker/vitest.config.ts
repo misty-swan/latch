@@ -26,6 +26,14 @@ export default defineConfig(async () => {
 		"utf8",
 	);
 
+	// テスト専用VAPID鍵(F7b設計 §5.5)。公開鍵とJWKをバインディングへ渡す
+	const testVapid = JSON.parse(
+		fs.readFileSync(
+			path.join(import.meta.dirname, "tests/fixtures/test-vapid.json"),
+			"utf8",
+		),
+	) as { publicKey: string; privateJwk: unknown };
+
 	return {
 		plugins: [
 			cloudflareTest({
@@ -41,6 +49,9 @@ export default defineConfig(async () => {
 						JWT_SECRET: "unit-test-jwt-secret-0123456789ab",
 						LATCH_TEST_IDP_JWKS: testIdpJwks,
 						LATCH_TEST_IDP_PRIVATE_JWKS: testIdpPrivateJwk,
+						VAPID_PUBLIC_KEY: testVapid.publicKey,
+						VAPID_PRIVATE_KEY: JSON.stringify(testVapid.privateJwk),
+						VAPID_SUBJECT: "mailto:dev@latch.invalid",
 						// キューの自動消費を止める印(src/env.ts・index.tsのqueueハンドラ参照)。
 						// テストがsendしたメッセージの消費による副作用を防ぎ、消費の試験は
 						// createMessageBatchでhandleQueueBatchを直接呼んで行う
