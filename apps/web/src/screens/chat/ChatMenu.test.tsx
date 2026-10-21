@@ -52,6 +52,7 @@ const json = (body: unknown, status = 200): Response =>
 let latch: LatchDTO;
 let leaveResponse: () => Response;
 let pendingLeave = false;
+let latch404 = false;
 const fetchMock = vi.fn(
 	async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
@@ -63,7 +64,10 @@ const fetchMock = vi.fn(
 		}
 		if (url === "/v1/latches/L1" && method === "DELETE")
 			return new Response(null, { status: 204 });
-		if (url === "/v1/latches/L1") return json(latch);
+		if (url === "/v1/latches/L1")
+			return latch404
+				? json({ error: { code: "NOT_FOUND", message: "x" } }, 404)
+				: json(latch);
 		if (url.startsWith("/v1/latches/L1/messages"))
 			return json({ items: [], next_before: null });
 		if (url === "/v1/latches/L1/read")
@@ -124,6 +128,7 @@ beforeEach(() => {
 	authSession.setTokens("access-menu", null);
 	latch = latchOf();
 	pendingLeave = false;
+	latch404 = false;
 	leaveResponse = () => json(latchOf({ status: "cancelled" }));
 });
 afterEach(() => {
@@ -274,6 +279,42 @@ describe("Chat 経由の遷移とトースト", () => {
 			toast: "参加を取り消しました。",
 		});
 		expect(await screen.findByText("参加を取り消しました。")).toBeTruthy();
+	});
+
+	it("グループ: 抜けた後の/latches/L1が404でも/connectionsに留まり・取り直しの要求を送らない", async () => {
+		latch = latchOf({ participants_count: 3 });
+		leaveResponse = () => {
+			// 本人は抜けたので以後の取得は404
+			latch404 = true;
+			return json(latchOf({ participants_count: 3 }));
+		};
+		const router = openChat();
+		const paths: string[] = [];
+		router.subscribe((st) => paths.push(st.location.pathname));
+		fireEvent.click(await screen.findByLabelText("このつながりについて"));
+		fireEvent.click(await screen.findByText("参加を取り消す"));
+		const before = fetchMock.mock.calls.length;
+		fireEvent.click(screen.getByRole("button", { name: "取り消す" }));
+		await waitFor(() =>
+			expect(router.state.location.pathname).toBe("/connections"),
+		);
+		expect(await screen.findByText("参加を取り消しました。")).toBeTruthy();
+		await new Promise((r) => setTimeout(r, 50));
+		expect(router.state.location.pathname).toBe("/connections");
+		expect(paths).not.toContain("/latches/L1");
+		const after = fetchMock.mock.calls.slice(before);
+		const leaveAt = after.findIndex(
+			([u, i]) => String(u) === "/v1/latches/L1/leave" && i?.method === "POST",
+		);
+		expect(leaveAt).toBeGreaterThanOrEqual(0);
+		expect(
+			after
+				.slice(leaveAt + 1)
+				.filter(
+					([u, i]) =>
+						String(u) === "/v1/latches/L1" && (i?.method ?? "GET") === "GET",
+				),
+		).toHaveLength(0);
 	});
 
 	it("表示から消す→/connectionsに「一覧から消しました。」", async () => {

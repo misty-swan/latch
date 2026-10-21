@@ -145,7 +145,13 @@ export const useLeaveMutation = (id: string) => {
 		mutationFn: () =>
 			apiFetch<LatchDTO>(`/latches/${id}/leave`, { method: "POST" }),
 		onSuccess: (data) => {
-			client.setQueryData(latchQueryKey(id), data);
+			if (data.status === "cancelled") {
+				client.setQueryData(latchQueryKey(id), data);
+			} else {
+				// 本人だけが抜けた: 以後このLATCHは読めない(404)ので・取り直さず捨ててから一覧だけ無効化する
+				client.removeQueries({ queryKey: latchQueryKey(id) });
+				client.removeQueries({ queryKey: messagesQueryKey(id) });
+			}
 			void client.invalidateQueries({ queryKey: LATCHES_QUERY_KEY });
 		},
 	});
