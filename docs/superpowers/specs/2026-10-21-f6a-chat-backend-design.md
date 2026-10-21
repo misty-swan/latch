@@ -57,6 +57,7 @@ DOはLATCHごとに1つ(`CHAT_DO.idFromName(latch_id)`)。ルートからDOへ�
 
 - WebSocket: `webSocketMessage`でフレームを検証し、`messages.send`(§2.1)を呼ぶ。成功は接続中の全員へ`message`を配信、失敗は送信者だけに`error`を返す
 - REST: ルートが認証(requireRegistered)と要求の検証を行い、DOの内部`/send`へ転送する。DOは同じ`messages.send`→配信を行い、結果をルートへ返す
+- 配信の前に、DOはD1で現在の参加者(left_at・hidden_atがnull)のユーザーIDを1回照会し、その集合に含まれる接続にだけ配信する。含まれない接続(離脱・削除の`closed`の知らせが届かなかった場合)には`closed`を送って閉じる(§2.4の知らせが最善努力であることの補い)
 - 送信がすべてDOを通るため、1つのLATCHの送信は直列に処理される。メッセージIDはDO内で単調増加のULIDを採番し、IDの順=保存の順=配信の順になる
 - 時刻はDOとルートの合成の起点で`systemClock`を使い、`messages.*`はnowを引数で受け取る(04 §4の時刻の規律)
 
@@ -71,7 +72,7 @@ DOはLATCHごとに1つ(`CHAT_DO.idFromName(latch_id)`)。ルートからDOへ�
 
 挿入されなかった場合は次の順で判定する: 同じclient_idの保存済み行があればそれを成功として返す(再送の冪等)/本人が参加者でない(行が無い・left_atまたはhidden_atがある)なら`not_found`/それ以外は`read_only`。終了・離脱と送信が並行しても、条件はD1の直列化で評価されるため、終了後のメッセージは保存されない。
 
-本文は前後の空白を除いて1〜2,000字(05 §2.2)。除いた後に空なら`invalid_message`。保存する本文は送られたまま(空白の除去は検証のみ)。
+本文は前後の空白を除いて1〜2,000字(05 §2.2)。除いた後に空・2,000字超なら`invalid_message`。保存する本文は前後の空白を除いた形とする(表示名等の既存の入力検証(zodの`trim()`)と同じ扱い)。
 
 ### 2.2 読める人と書ける人
 
@@ -135,12 +136,16 @@ DOはLATCHごとに1つ(`CHAT_DO.idFromName(latch_id)`)。ルートからDOへ�
 
 一覧は1頁最大50件のため、LATCHごとの副問い合わせ(INDEX(latch_id, id)を使う)で求める。
 
-### 3.3 WebSocket
+### 3.3 成立一覧にmatched経由のcancelledを含める
+
+`GET /v1/latches?type=matched`は従来matched・completedだけを返し、成立後にcancelledとなったLATCH(相手の離脱・削除)が残された側の一覧から消えていた。§0.3の2(相手の側に「このつながりは終了しました」と履歴を残す)と02 D-08の「相手側の表示は残る」を満たすため、type=matchedの条件に「status=cancelledかつlatch_status_eventsにto_status=matchedの記録がある」を加える(id降順・cursor・limitは不変)。離脱・削除した本人はleft_at・hidden_atにより従来どおり出ない。
+
+### 3.4 WebSocket
 
 ```text
 接続: GET /v1/latches/{latch_id}/ws?ticket=<署名チケット>
       チケット不正・期限切れ・使用済み・latch_id不一致・参加の再検証の失敗 → 401
-      Upgrade: websocket でない要求 → 426
+      Upgrade: websocket でない要求 → 426(エラーコードUPGRADE_REQUIRED を05 §3.1の表に追加)
 クライアント→サーバ: {"type":"message","body","client_id"}
 サーバ→クライアント: {"type":"message","id","user_id","body","created_at","client_id"}
                       (client_idは送信者の接続にだけ値を入れ、他の接続はnull)
@@ -152,7 +157,7 @@ ping → pong: DOの自動応答(setWebSocketAutoResponse)
 
 不正なJSON・未知のtypeは`invalid_message`(client_idが読めなければnull)。`not_found`(接続中に本人が抜けた等)は`closed`を送って閉じる。
 
-### 3.4 チケット
+### 3.5 チケット
 
 - joseのHS256・JWT_SECRETで署名。クレームは`sub`(user_id)・`latch_id`・`jti`(ULID)・`exp`(発行から60秒)・`typ:"ws_ticket"`。アクセストークンの検証はtypを持つトークンを拒否し、チケットの検証はtyp一致を必須とする(用途の取り違えを防ぐ)
 - KVは使わない(05 §2.3のとおり)。1回限りはDOのストレージで担う(§1.1)
@@ -187,7 +192,7 @@ ping → pong: DOの自動応答(setWebSocketAutoResponse)
 ### 6.2 統合試験(vitest・miniflare)
 
 - `tests/chat-messages.test.ts`: 条件付き保存(matched以外・離脱者・hidden_atは保存されない)・last_message_atの更新・client_idの冪等・本文の検証・履歴の頁送り(50件・next_before)・既読の前進のみ
-- `tests/chat-api.test.ts`: §2.2の表の各行・チケット(期限・typ・latch_id不一致・再使用)・LatchDTOの`last_message`/`unread_count`と成立前にキーが無いこと
+- `tests/chat-api.test.ts`: §2.2の表の各行・成立一覧にmatched経由のcancelledが残された側にだけ出ること・チケット(期限・typ・latch_id不一致・再使用)・LatchDTOの`last_message`/`unread_count`と成立前にキーが無いこと
 - `tests/chat-do.test.ts`: WebSocket接続(SELF.fetchのUpgrade)・全員への配信・RESTの転送の配信・`closed`の配信と切断(全員/本人だけ)・pingの自動応答
 - `tests/latches-delete.test.ts`: matchedの1対1(全体cancelled)・グループ(本人だけ・下限割れでcancelled)・completedとmatched経由のcancelled(hidden_atのみ・相手のDTO不変)・成立前400・非参加404・再試行204・hidden_atの本人の一覧と単一取得からの除外
 - `tests/migration.test.ts`: 0005の列と索引・戻す手順
@@ -199,7 +204,7 @@ ping → pong: DOの自動応答(setWebSocketAutoResponse)
 
 - 12: F6をF6a/F6bに分ける決定記録(§0.3の1)・F6aの完了の記録
 - 01冒頭の決定記録・02 D-08: §0.3の2(続いているLATCHの削除=本人の離脱)
-- 05: §2.2(latch_members.hidden_at・messages.client_id)・§3.2(ws-ticketの応答・DELETEの挙動)・§3.3(LatchDTOのlast_message・unread_count・MessageDTO)・§3.4(チケットの検証はWorker・1回限り・`retract`を`closed`へ改める・フレームのclient_id)
+- 05: §2.2(latch_members.hidden_at・messages.client_id)・§3.2(ws-ticketの応答・DELETEの挙動)・§3.3(LatchDTOのlast_message・unread_count・MessageDTO・成立一覧のmatched経由のcancelled)・§3.1(UPGRADE_REQUIRED=426)・§3.4(チケットの検証はWorker・1回限り・`retract`を`closed`へ改める・フレームのclient_id)
 - 04 §4: チケットの検証場所(WorkerのルートとDOの使用済み記録)
 - 08 §11: チケットの1回限りと参加の再検証の位置
 - 10 §4: #25をworker E2E(chat.spec.ts)で証明する対応
