@@ -768,17 +768,16 @@ describe("成立後の離脱(F4b設計 §3.4・オーナー裁定3)", () => {
 			latchId,
 		});
 		expect((await latchOf(latchId))?.status).toBe("cancelled");
-		// 下限割れで取り消した離脱者もleft_atを持つ(Ruling 5・docs/05 §3.3)
-		expect((await leftAtOf(latchId)).get(b)?.getTime()).toBe(
-			later(MIN).getTime(),
-		);
+		// 下限割れで全体を取り消した離脱者はleft_atを持たず、取り消し済みLATCHの参加者として残る
+		// (読み取り専用で履歴を読める・2026-10-21オーナー裁定・docs/01 §10)
+		expect((await leftAtOf(latchId)).get(b)).toBeNull();
 		expect(await closedNotificationCount(latchId)).toBe(0);
 		// 離脱者を含む提案履歴はmatchedのまま
 		expect((await historyOf(a, b))?.outcome).toBe("matched");
 		expect((await historyOf(c, d))?.outcome).toBe("matched");
 	});
 
-	it("3人(min=3)で2人が並行してleave → cancelledで、matchedのままleft_atが2件ある状態にならない(Review Focus 4)", async () => {
+	it("3人(min=3)で2人が並行してleave → cancelledで、取り消した離脱者はleft_atを持たない(matchedのまま2人抜けた状態にならない・Review Focus 4)", async () => {
 		const { latchId, members } = await setupMatchedGroup(3);
 		const [, b, c] = members as [string, string, string];
 		const results = await Promise.all([
@@ -787,14 +786,11 @@ describe("成立後の離脱(F4b設計 §3.4・オーナー裁定3)", () => {
 		]);
 		expect(results.some((r) => r.ok)).toBe(true);
 		expect((await latchOf(latchId))?.status).toBe("cancelled");
-		// 取り消しを成功として受け取った離脱者はleft_atを持つ(Ruling 5・docs/05 §3.3)。
-		// 同じnowの並行した取り消しはcloseLatchが双方に成功を返し得るため、件数は1か2になる
-		const left = await leftAtOf(latchId);
-		const [rb, rc] = results;
-		if (rb?.ok) expect(left.get(b)).not.toBeNull();
-		if (rc?.ok) expect(left.get(c)).not.toBeNull();
-		const leftCount = [...left.values()].filter((v) => v !== null).length;
-		expect(leftCount).toBe(results.filter((r) => r.ok).length);
+		// 下限割れの取り消しは離脱者のleft_atを記録しない(2026-10-21オーナー裁定・docs/01 §10)
+		const leftCount = [...(await leftAtOf(latchId)).values()].filter(
+			(v) => v !== null,
+		).length;
+		expect(leftCount).toBe(0);
 		expect(await closedNotificationCount(latchId)).toBe(0);
 	});
 
@@ -815,7 +811,7 @@ describe("成立後の離脱(F4b設計 §3.4・オーナー裁定3)", () => {
 		expect(left.get(a)?.getTime()).toBe(NOW.getTime());
 	});
 
-	it("4人(min=3)で2人が並行してleave → 1人だけ記録され、もう1人で下限割れとなりcancelled(Review Focus 4)", async () => {
+	it("4人(min=3)で2人が並行してleave → 先の1人だけleft_atが記録され、もう1人で下限割れとなりcancelled(その1人は参加者のまま・Review Focus 4)", async () => {
 		const { latchId, members } = await setupMatchedGroup(4);
 		const [, b, c] = members as [string, string, string];
 		const results = await Promise.all([
@@ -827,11 +823,12 @@ describe("成立後の離脱(F4b設計 §3.4・オーナー裁定3)", () => {
 			{ ok: true, latchId },
 		]);
 		expect((await latchOf(latchId))?.status).toBe("cancelled");
-		// 継続側の離脱者と、下限割れで取り消した離脱者の両方がleft_atを持つ(Ruling 5)
+		// 継続側の離脱者だけがleft_atを持ち、下限割れで取り消した離脱者は参加者として残る
+		// (2026-10-21オーナー裁定・docs/01 §10)
 		const leftCount = [...(await leftAtOf(latchId)).values()].filter(
 			(v) => v !== null,
 		).length;
-		expect(leftCount).toBe(2);
+		expect(leftCount).toBe(1);
 	});
 });
 

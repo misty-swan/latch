@@ -566,10 +566,10 @@ describe("leave", () => {
 			ok: false,
 			reason: "invalid_status",
 		});
-		// 取り消した離脱者はleft_atを持ち、以降は非参加(Ruling 5・docs/05 §3.3)
+		// 取り消した離脱者も取り消し済みLATCHの参加者のまま(再試行はinvalid_status・2026-10-21オーナー裁定)
 		expect(await leave(db, latchId, ub, t2)).toEqual({
 			ok: false,
-			reason: "not_found",
+			reason: "invalid_status",
 		});
 	});
 

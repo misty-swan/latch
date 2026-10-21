@@ -299,14 +299,15 @@ const connect = async (latchId: string, token: string): Promise<Client> => {
 };
 
 describe("DELETE /v1/latches/:id(F6a設計 §2.3)", () => {
-	it("①1対1のmatchedを消すと204・cancelled・本人のhidden_atとleft_atを記録し、本人のGETは404", async () => {
+	it("①1対1のmatchedを消すと204・cancelled・本人のhidden_atを記録し(left_atはnullのまま)、本人のGETは404", async () => {
 		const { a, id } = await pair();
 		const res = await del(id, a.token);
 		expect(res.status).toBe(204);
 		expect(await statusOf(id)).toBe("cancelled");
 		const me = await memberOf(id, a.id);
 		expect(me?.hiddenAt).not.toBeNull();
-		expect(me?.leftAt).not.toBeNull();
+		// 全体を取り消す離脱では本人のleft_atを記録しない(2026-10-21オーナー裁定・docs/01 §10)
+		expect(me?.leftAt).toBeNull();
 		expect((await call("GET", `/v1/latches/${id}`, a.token)).status).toBe(404);
 		expect(await matchedIds(a.token)).not.toContain(id);
 	});
@@ -320,9 +321,10 @@ describe("DELETE /v1/latches/:id(F6a設計 §2.3)", () => {
 		expect(got.status).toBe(200);
 		const dto = (await got.json()) as Dto;
 		expect(dto.status).toBe("cancelled");
-		// 消した本人はleft_atを持つため相手のmembers・participants_countから外れる(Ruling 5)
-		expect(dto.members).toEqual([]);
-		expect(dto.participants_count).toBe(1);
+		// 消した本人はleft_atを持たないため、相手のmembers・participants_countには残る
+		// (2026-10-21オーナー裁定・hidden_atは本人の表示だけを変える)
+		expect(dto.members?.map((m) => m.user_id)).toEqual([a.id]);
+		expect(dto.participants_count).toBe(2);
 		expect(dto.last_message).not.toBeNull();
 		expect(dto.unread_count).toBe(1);
 
@@ -379,7 +381,9 @@ describe("DELETE /v1/latches/:id(F6a設計 §2.3)", () => {
 		expect(await statusOf(id)).toBe("cancelled");
 		const me = await memberOf(id, a.id);
 		expect(me?.hiddenAt).not.toBeNull();
-		expect(me?.leftAt).not.toBeNull();
+		// 下限割れで全体を取り消した本人のleft_atは記録しない(2026-10-21オーナー裁定)
+		expect(me?.leftAt).toBeNull();
+		expect((await call("GET", `/v1/latches/${id}`, a.token)).status).toBe(404);
 	});
 
 	it("⑤completedを消すと204・状態は不変・left_atはnullのまま・相手の人数は不変", async () => {
@@ -434,6 +438,82 @@ describe("DELETE /v1/latches/:id(F6a設計 §2.3)", () => {
 		expect(
 			(await call("POST", `/v1/latches/${id}/leave`, a.token)).status,
 		).toBe(404);
+	});
+});
+
+describe("全体を終える離脱後の読み取り専用(2026-10-21オーナー裁定・docs/01 §10)", () => {
+	const ticket = (id: string, token: string) =>
+		call("POST", "/v1/ws-ticket", token, { scope: "chat", latch_id: id });
+
+	/** 取り消し済みLATCHを読み取り専用で読めて、送信・チケットは400 read_only */
+	const expectReadOnly = async (id: string, token: string) => {
+		const list = (await (
+			await call("GET", "/v1/latches?type=matched", token)
+		).json()) as { items: Dto[] };
+		expect(list.items.find((i) => i.id === id)?.status).toBe("cancelled");
+		const got = await call("GET", `/v1/latches/${id}`, token);
+		expect(got.status).toBe(200);
+		expect(((await got.json()) as Dto).status).toBe("cancelled");
+		expect(
+			(await call("GET", `/v1/latches/${id}/messages`, token)).status,
+		).toBe(200);
+		const sent = await send(id, token, "取り消し後の送信");
+		expect(sent.status).toBe(400);
+		expect(await reasonsOf(sent)).toEqual(["read_only"]);
+		const t = await ticket(id, token);
+		expect(t.status).toBe(400);
+		expect(await reasonsOf(t)).toEqual(["read_only"]);
+	};
+
+	it("(a)1対1のPOST /leave後、離脱した本人も相手も一覧にcancelledで出て、読めるが送れない", async () => {
+		const { a, b, id } = await pair();
+		expect((await send(id, b.token, "離脱前の送信")).status).toBe(201);
+		const res = await call("POST", `/v1/latches/${id}/leave`, a.token);
+		expect(res.status).toBe(200);
+		expect(await statusOf(id)).toBe("cancelled");
+		expect((await memberOf(id, a.id))?.leftAt).toBeNull();
+		await expectReadOnly(id, a.token);
+		await expectReadOnly(id, b.token);
+		// 既読記録は読み取り専用でもできる
+		const page = (await (
+			await call("GET", `/v1/latches/${id}/messages`, a.token)
+		).json()) as { items: { id: string }[] };
+		const lastId = page.items.at(-1)?.id;
+		expect(
+			(
+				await call("POST", `/v1/latches/${id}/read`, a.token, {
+					last_read_message_id: lastId,
+				})
+			).status,
+		).toBe(204);
+		// 相手のDTOには離脱した本人がmembersに残る
+		const dto = (await (
+			await call("GET", `/v1/latches/${id}`, b.token)
+		).json()) as Dto;
+		expect(dto.members?.map((m) => m.user_id)).toEqual([a.id]);
+		expect(dto.participants_count).toBe(2);
+	});
+
+	it("(b)離脱した本人がその後DELETEすると本人は全て404になり、相手は変わらない", async () => {
+		const { a, b, id } = await pair();
+		expect(
+			(await call("POST", `/v1/latches/${id}/leave`, a.token)).status,
+		).toBe(200);
+		expect((await del(id, a.token)).status).toBe(204);
+		expect((await memberOf(id, a.id))?.hiddenAt).not.toBeNull();
+		expect(await matchedIds(a.token)).not.toContain(id);
+		expect((await call("GET", `/v1/latches/${id}`, a.token)).status).toBe(404);
+		expect(
+			(await call("GET", `/v1/latches/${id}/messages`, a.token)).status,
+		).toBe(404);
+		expect((await send(id, a.token, "消した後")).status).toBe(404);
+		expect((await ticket(id, a.token)).status).toBe(404);
+		await expectReadOnly(id, b.token);
+		const dto = (await (
+			await call("GET", `/v1/latches/${id}`, b.token)
+		).json()) as Dto;
+		expect(dto.members?.map((m) => m.user_id)).toEqual([a.id]);
+		expect(dto.participants_count).toBe(2);
 	});
 });
 

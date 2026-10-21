@@ -265,19 +265,20 @@ test("表示から消すと相手側は読み取り専用で残る", async ({
 		const hist = (await histRes.json()) as { items: MessageDTO[] };
 		expect(hist.items.map((m) => m.body)).toEqual(["消す前の発言"]);
 
-		// Bから見たLATCHはcancelled・membersなし・participants_count=1
+		// Bから見たLATCHはcancelled。消したAはleft_atを持たないためmembersに残り、participants_count=2
+		// (hidden_atは本人の表示だけを変える・2026-10-21オーナー裁定)
 		const bLatchRes = await request.get(`/v1/latches/${pair.latchId}`, {
 			headers: auth(pair.b),
 		});
 		expect(bLatchRes.status()).toBe(200);
 		const bLatch = (await bLatchRes.json()) as {
 			status: string;
-			members: unknown[];
+			members: { user_id: string }[];
 			participants_count: number;
 		};
 		expect(bLatch.status).toBe("cancelled");
-		expect(bLatch.members).toEqual([]);
-		expect(bLatch.participants_count).toBe(1);
+		expect(bLatch.members.map((m) => m.user_id)).toEqual([pair.a.user.id]);
+		expect(bLatch.participants_count).toBe(2);
 
 		// Aには404で、チケットの再発行も404
 		const getRes = await request.get(`/v1/latches/${pair.latchId}`, {

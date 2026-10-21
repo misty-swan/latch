@@ -768,7 +768,7 @@ describe("成立後のLatchDTOの最終メッセージ・未読数と一覧の�
 		expect((await getDto(id, a.token)).unread_count).toBe(0);
 	});
 
-	it("1対1をleaveでcancelledにすると、残された側のtype=matchedに出て、離脱した本人には出ない", async () => {
+	it("1対1をleaveでcancelledにすると、残された側にも離脱した本人にもtype=matchedでcancelledとして出る", async () => {
 		const { a, b, id } = await setup("proposed");
 		expect((await yes(id, a.token)).status).toBe(200);
 		expect((await yes(id, b.token)).status).toBe(200);
@@ -780,40 +780,22 @@ describe("成立後のLatchDTOの最終メッセージ・未読数と一覧の�
 		const item = listB.items.find((i) => i.id === id);
 		expect(item?.status).toBe("cancelled");
 		expect(item?.unread_count).toBe(0);
-		// 下限割れで全体を取り消した離脱でも本人のleft_atが記録され、本人の一覧から消える(docs/05 §3.3)
+		expect(item?.participants_count).toBe(2);
+		// 全体を取り消した本人はleft_atを持たず、読み取り専用の参加者として残る(2026-10-21オーナー裁定・docs/01 §10)
 		const listA = (await (
 			await call("GET", "/v1/latches?type=matched", a.token)
-		).json()) as { items: { id: string }[] };
-		expect(listA.items.map((i) => i.id)).not.toContain(id);
-	});
-
-	it("1対1のPOST /leaveで本人のleft_atが記録され、本人のGETは404・一覧から消え、相手の一覧ではcancelled", async () => {
-		const { a, b, id } = await setup("proposed");
-		expect((await yes(id, a.token)).status).toBe(200);
-		expect((await yes(id, b.token)).status).toBe(200);
-		expect(
-			(await call("POST", `/v1/latches/${id}/leave`, a.token)).status,
-		).toBe(200);
+		).json()) as { items: (ChatDto & { id: string })[] };
+		expect(listA.items.find((i) => i.id === id)?.status).toBe("cancelled");
 		const [me] = await db
 			.select({ leftAt: latchMembers.leftAt })
 			.from(latchMembers)
 			.where(and(eq(latchMembers.latchId, id), eq(latchMembers.userId, a.id)));
-		expect(me?.leftAt).not.toBeNull();
-		expect((await call("GET", `/v1/latches/${id}`, a.token)).status).toBe(404);
-		// 取り消した後の再試行は継続側の離脱と同じく非参加の404
+		expect(me?.leftAt).toBeNull();
+		expect((await call("GET", `/v1/latches/${id}`, a.token)).status).toBe(200);
+		// 取り消した後の再試行はmatchedでないため400 invalid_status
 		expect(
 			(await call("POST", `/v1/latches/${id}/leave`, a.token)).status,
-		).toBe(404);
-		const listA = (await (
-			await call("GET", "/v1/latches?type=matched", a.token)
-		).json()) as { items: { id: string }[] };
-		expect(listA.items.map((i) => i.id)).not.toContain(id);
-		const listB = (await (
-			await call("GET", "/v1/latches?type=matched", b.token)
-		).json()) as { items: (ChatDto & { id: string })[] };
-		const item = listB.items.find((i) => i.id === id);
-		expect(item?.status).toBe("cancelled");
-		expect(item?.participants_count).toBe(1);
+		).toBe(400);
 	});
 
 	it("hidden_atを持つ本人のPOST /leaveは404で、離脱応答(includeLeft)でも本人へ返さない", async () => {

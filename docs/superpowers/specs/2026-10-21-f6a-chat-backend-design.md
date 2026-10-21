@@ -17,7 +17,7 @@
 
 1. messages(id / latch_id / user_id / body / created_at・INDEX(latch_id, id))とchat_reads(PK(latch_id, user_id)・last_read_message_id)はF0の初回マイグレーションで作成済み。書き込み・読み出しのコードは無い
 2. `src/do/chat.ts`の`ChatRoomDO`は501を返す空の枠。`wrangler.jsonc`にCHAT_DOのバインディングとnew_sqlite_classesの登録は済んでいる
-3. 離脱(`leave`・`src/latches/respond.ts`)は1文の条件付きUPDATEで「本人のleft_atだけを記録する/下限割れで全体cancelled」を決める。離脱した本人は以降、一覧・単一取得・各操作で非参加と同じ扱い(一律404)
+3. 離脱(`leave`・`src/latches/respond.ts`)は1文の条件付きUPDATEで「本人のleft_atだけを記録する/下限割れで全体cancelled」を決める。left_atを記録された本人(matchedのまま続くLATCHからの離脱者)は以降、一覧・単一取得・各操作で非参加と同じ扱い(一律404)。下限割れで全体を取り消した本人のleft_atは記録しない
 4. `latches.last_message_at`は成立時刻で初期化され(F5)、Cron (d)のつながりの90日判定の起点になっている。メッセージ送信での更新はF6の担当
 5. web側にチャット画面・つながり一覧画面は無い(F6b)
 
@@ -27,6 +27,7 @@
 |---|---|---|
 | 1 | F6をF6a(バックエンド: DO・WebSocket・REST・既読・チケット・読み取り専用化・削除。#25をworker E2Eで証明)とF6b(画面: チャット・操作メニュー・送信失敗・つながり一覧・`prototype/`基準・web E2E)に2分割し、各単位で設計→計画→実装を1周する。F6bはF6aの完了後に着手する | F4の3分割と同じく、画面はAPIの上に載るため、APIを先に完成させる方が設計と検証の単位を小さく保てる |
 | 2 | matched(続いている)のLATCHを「表示から消す」(DELETE)と、本人はそのLATCHから抜けたものとして扱う(leaveと同じ処理に表示削除の印を加える)。1対1は全体がcancelledとなり、相手の側は「このつながりは終了しました」と読み取り専用の履歴になる。グループは本人だけが抜ける(下限割れで全体cancelled)。completed・matched経由のcancelledのLATCHを消したときは本人の表示から隠すだけで、相手の側の表示・人数は変えない | 消した本人に見えないメッセージが相手から届き続ける状態を作らない。相手の側に理由を区別して見せない原則(01 §10)にも合う。D-08の「相手側の表示は残る」は履歴の表示として守られる |
+| 3 | 離脱でLATCH全体が終わるとき(1対1は常に。グループは残りが下限を割ってcancelledになるとき)、離脱した本人のleft_atは記録せず、本人も取り消し済みLATCHの参加者として残る。本人は一覧(type=matched)にcancelledとして見え、単一取得・履歴・既読を使え、送信・チケットは400 read_only。残った参加者のmembers・participants_countにも本人は残る。見えなくしたいときはDELETE(hidden_at)を使う。matchedのまま続くグループからの離脱者は従来どおりleft_atを持つ非参加(404)(2026-10-21・実装後の最終レビューでのオーナー判断) | 01 §10「参加取り消し(leave)はチャットを双方読み取り専用にする」と`prototype/`の「チャットはお互いに読み取り専用になります」に合わせる。実装中の暫定の扱い(取り消した本人にもleft_atを記録して非参加にする)はこの判断で撤回した |
 
 ### 0.4 F6aで行わないこと
 
@@ -92,7 +93,8 @@ DOはLATCHごとに1つ(`CHAT_DO.idFromName(latch_id)`)。ルートからDOへ�
 - matched: 既存の`leave`を実行し、成功したら本人のhidden_atを記録する。`leave`が並行した状態変化(completed等)でinvalid_statusになった場合は、状態を読み直してcompletedまたはmatched経由のcancelledならhidden_atの記録だけを行う
 - completed・matched経由のcancelled: hidden_atの記録だけ(left_at・人数・相手の表示は変えない)
 - 上記以外の状態は400 invalid_status・非参加は404
-- 成功は204。本人のhidden_atが既にある場合も204(再試行の冪等)
+- 成功は204。判定は、本人の参加行が無い・保留中を404とした後、まず本人のhidden_atを確かめ、既にあれば状態を問わず204(再試行の冪等)とし、その後にleft_atを持つ本人を404とする
+- 1対1のmatchedを消すと全体がcancelledになるが、§0.3の3により本人のleft_atは記録しない(本人はhidden_atで見えなくなり、相手の側のmembers・participants_countには本人が残る)
 - hidden_atを持つ本人には、一覧(`GET /v1/latches`)・単一取得・回答系(response・response/retract・leave・defer-reason)・チャットの各APIで当該LATCHを出さない(left_atと同じ非参加の扱い・一律404。例外はDELETEの再試行の204のみ)。他の参加者のmembers・participants_countの数え方はleft_atだけで決め、hidden_atは影響しない
 - 成功後、ルートは§2.4の通知を行う
 
@@ -138,7 +140,7 @@ DOはLATCHごとに1つ(`CHAT_DO.idFromName(latch_id)`)。ルートからDOへ�
 
 ### 3.3 成立一覧にmatched経由のcancelledを含める
 
-`GET /v1/latches?type=matched`は従来matched・completedだけを返し、成立後にcancelledとなったLATCH(相手の離脱・削除)が残された側の一覧から消えていた。§0.3の2(相手の側に「このつながりは終了しました」と履歴を残す)と02 D-08の「相手側の表示は残る」を満たすため、type=matchedの条件に「status=cancelledかつlatch_status_eventsにto_status=matchedの記録がある」を加える(id降順・cursor・limitは不変)。離脱・削除した本人はleft_at・hidden_atにより従来どおり出ない。
+`GET /v1/latches?type=matched`は従来matched・completedだけを返し、成立後にcancelledとなったLATCH(相手の離脱・削除)が残された側の一覧から消えていた。§0.3の2(相手の側に「このつながりは終了しました」と履歴を残す)と02 D-08の「相手側の表示は残る」を満たすため、type=matchedの条件に「status=cancelledかつlatch_status_eventsにto_status=matchedの記録がある」を加える(id降順・cursor・limitは不変)。matchedのまま続くLATCHから離脱した本人(left_at)・削除した本人(hidden_at)は出ない。LATCH全体を取り消した離脱者はleft_atを持たないため、本人の一覧にもcancelledとして出る(§0.3の3)。
 
 ### 3.4 WebSocket
 
@@ -173,7 +175,7 @@ ping → pong: DOの自動応答(setWebSocketAutoResponse)
 ## 5. 他の機能との関係
 
 - LatchDTOの`members`は従来どおりleft_atで決める。終了したつながりの相手の表示名(「つながっていた相手」)は画面の責務(F6b)
-- `leave`の既存の挙動(冪等・下限割れでcancelled・次集合の提案)は変えない。DELETEはその上に載る。ただし実装中の裁定により、下限割れでLATCH全体をcancelledにしたとき(1対1は常にこれ)も取り消しを確定させた本人のleft_atを記録する(成立一覧にmatched経由のcancelledを含めたため、離脱した本人を非参加と同じに扱うのに要る。残った参加者のmembers・participants_countから離脱者は外れ、1対1はmembers=[]・participants_count=1。docs/05 §3.3)
+- `leave`の既存の挙動(冪等・下限割れでcancelled・次集合の提案)は変えない。DELETEはその上に載る。下限割れでLATCH全体をcancelledにしたとき(1対1は常にこれ)は、本人のleft_atを記録しない(§0.3の3・docs/05 §3.3)。本人も読み取り専用の参加者として残り、残った参加者のmembers・participants_countにも本人が残る(1対1はmembers=[本人]・participants_count=2)
 - Cron (d)は送信で進む`last_message_at`を起点に90日判定を行う(F5のまま)
 
 ## 6. 試験
