@@ -1,9 +1,9 @@
 # LATCH テスト環境・非機能検証計画書
 
-- 文書バージョン: v0.19
+- 文書バージョン: v0.20
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.19更新: 2026-10-21)
+- 作成日: 2026-10-17(v0.20更新: 2026-10-21)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。年齢検証のエラーcode切り分け・E2E対象の明示列挙(#22除外)・負荷試験のレート制限除外規定を追加
 - v0.3の変更点: §1環境表にLATCH_ENV変数値の対応を追記(環境名prodと変数値productionの対応の明記。設定取り違えによる起動ガードの素通しを防ぐ)。前提文書欄の09の版数をv0.3に更新(09の版上げの反映漏れ)
 - v0.4の変更点: 前提文書欄の版数同期(F2実装に伴う05・09改版への追従)
@@ -22,7 +22,8 @@
 - v0.17の変更点: F6b(チャットの画面)の完了に伴い、§4のE2E層とF6aのゲート試験の段落へ画面のweb E2E(chat-flow.spec.ts)の所在を追記した(web E2Eは12本・worker E2Eは39本)。F6bは02の番号を持たない。前提文書欄の版数を更新
 - v0.18の変更点: F7a(安全のAPI)の完了に伴い、§4へF7aのゲート試験の分担(#26〜#30をworker E2E safety.spec.tsで証明・#29の地名データの投入・統合試験の分担)を追記した(worker E2Eは44本・web E2Eは12本)。前提文書欄の版数を更新
 - v0.19の変更点: F7b(通知のAPI)の完了に伴い、§4へF7bのゲート試験の分担(#16のAPI部分をworker E2E notifications.spec.tsの3本で証明・iOS未インストール状態の確認ケースを購読の無い利用者で確かめる・統合試験の分担・実機ブラウザでの受信はF7c・F8)を追記し、§2へテスト専用VAPID鍵を追記した(worker E2Eは47本・web E2Eは12本)。前提文書欄の版数を更新
-- 前提文書: 01 要件定義書 v0.17 / 02 スコープ・受け入れ条件合意書 v0.11 / 04 アーキテクチャ設計書 v0.19 / 05 データモデル・API仕様書 v0.19 / 09 検証・評価計画書 v0.17
+- v0.20の変更点: F7c(安全と通知の画面)の完了に伴い、§4へF7cのゲート試験の分担(#16の画面部分をweb E2E notices-flow.spec.tsで証明・同じspecで通報とブロックを確かめる・プッシュの購読はE2Eに含めず単体試験で確かめる・実機ブラウザでの受信はF8)を追記し、§4の表のE2Eの行にnotices-flow.spec.tsを加えた(web E2Eは15本・worker E2Eは47本)。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.18 / 02 スコープ・受け入れ条件合意書 v0.12 / 04 アーキテクチャ設計書 v0.20 / 05 データモデル・API仕様書 v0.20 / 09 検証・評価計画書 v0.18
 - 本書の位置づけ: 02の対応表(#1〜#35)をどう試験で証明するかを確定する。環境・テストユーザー・時刻制御・試験の層・負荷試験・縮退試験の計画
 
 ## 1. 環境(04 §6準拠)
@@ -59,7 +60,7 @@ D1・Vectorize・KV・R2は環境ごとに分離。マイグレーション適�
 |---|---|---|
 | 単体 | 純関数(期限式・スコア計算・地理判定・匿名化) | vitest・毎コミット |
 | 統合 | Worker+ローカルD1/Queues/DO(API→キュー→pipeline→提案化まで) | vitest-pool-workers・毎コミット |
-| E2E | ブラウザ実操作(全画面フロー・通知・チャット) | Playwright・CI(wrangler dev)。API起点のworker E2Eと、画面フローのweb E2E(Playwright chromium・CIは別ジョブで実行)の2系統+staging手動/自動。#17のUI 2択(参加する/今回は見送る)はweb E2E(apps/web/e2e/latch-flow.spec.ts)で証明する。チャットの画面(F6b)はweb E2E(apps/web/e2e/chat-flow.spec.ts)で確かめる(§4) |
+| E2E | ブラウザ実操作(全画面フロー・通知・チャット) | Playwright・CI(wrangler dev)。API起点のworker E2Eと、画面フローのweb E2E(Playwright chromium・CIは別ジョブで実行)の2系統+staging手動/自動。#17のUI 2択(参加する/今回は見送る)はweb E2E(apps/web/e2e/latch-flow.spec.ts)で証明する。チャットの画面(F6b)はweb E2E(apps/web/e2e/chat-flow.spec.ts)で確かめる(§4)。#16の画面部分はweb E2E(apps/web/e2e/notices-flow.spec.ts)で証明する(F7c・§4) |
 | Offline精度 | Parser/Jevのゲート | CI・ゴールドセット(09 §4) |
 
 **E2Eマトリクス。** 02 §4の#1〜#35のうち、#1〜#6・#8〜#21・#23〜#31をPlaywrightで自動化し(#22は単体・統合試験で証明・§3)、#32(PWA実機)・#34(実機ブラウザ含む)は手動確認と自動の併用、#33(負荷)は§5、#35(計測)は集計クエリで証明する。#7・#35の観測系は06 §7の計測記録による。iOS Safariはホーム画面追加後でないとWeb Pushを受信できないため、「未インストール状態ではアプリ内通知のみで成立する」確認ケースを#16に含める。進捗は02の対応表に紐づけて管理する。
@@ -73,6 +74,8 @@ D1・Vectorize・KV・R2は環境ごとに分離。マイグレーション適�
 **F7a(安全のAPI)のゲート試験(F7a実装確定)。** #26〜#30はworker E2E(safety.spec.ts)の5本で証明する。#26は2人を成立させた後に一方がブロックし(201)、1対1のLATCHが相手の側でもcancelledになること、ブロック前なら一致する新しいつながりIntentを双方に置くと、それぞれの評価のmatch_events.payloadで`l1_exclusions.blocked`が1以上・提案0件となり、2人の間に新しいLATCHが作られないことを確かめる(Layer 1はブロックを提案履歴より先に判定するため、成立済みで提案履歴でも恒久排除される組でもブロックによる除外として区別して観測できる・06 §3)。#27は提示済みの提案の通報(target=proposal)と成立後の発言の通報(target=message)がともに201で、dev専用API(GET /v1/dev/reports・05 §3.3)に対象・理由・LATCH・被通報者を持つ2件が記録されていることを確かめる。#28は本文に固有の文と否定条件を持つIntentの提案を相手の側で取得し(一覧・単一取得)、応答の文字列にその文と否定条件の語が含まれず、proposal・membersのキーが無いことを確かめる。#29は地理を添付した機会Intentどうしの成立後、双方の単一取得の応答でproposal.region_nameが地域名の文字列であり、応答全体に緯度経度・半径・距離のキー(lat・lng・radius_m・distance)が無いことを確かめる。ローカルD1の地名データ(geofeatures)は空で、CIも空のD1から始まるため、#29はspecの中で`wrangler d1 execute --local`により地名を1件(固定id・INSERT OR IGNOREで冪等)入れてから試験する。#30は19歳(誕生日当日)のユーザーが飲酒を含む機会Intentをactiveで作ると422 ALCOHOL_RESTRICTED、20歳(誕生日当日)のユーザーは作成できることを確かめる(§2のbirth_date可変ユーザー)。ブロックの対象の判定・冪等・進行中の提案の取り消しと提案履歴の不消費・1対1の全体cancelled・グループで本人だけが抜けることと下限割れ・completedの不変・一覧と解除(tests/safety-block.test.ts)、評価の開始後にブロックされた組で提案が作られないこと(tests/latches-propose.test.ts)、通報の対象者・状態ごとの404・理由コード・noteの保存・通報者内の統合・被通報者の応答に現れないこと(tests/safety-report.test.ts)、飲酒年齢のactive作成とdraftからのactive化・Active Intent上限より先の判定・年齢を確かめられないときの拒否・draft保存は通ること(tests/intents-create-api.test.ts・tests/intents-crud-api.test.ts)、マイグレーション0006と戻す手順(tests/migration.test.ts)は統合試験が証明する。worker E2Eは44本となる(web E2Eは12本のまま)
 
 **F7b(通知のAPI)のゲート試験(F7b実装確定)。** #16のAPI部分はworker E2E(notifications.spec.ts)の3本で証明する。到達記録はdev専用API(GET /v1/dev/notifications・05 §3.3)の通知行とpush_stateで観測し、Web Pushの送り手はstub(§2)とする。1本目はnotification_level=proposals_onlyのIntent2件で提案が生まれると、双方にproposalのアプリ内通知の行が作られ、購読を登録した側はpush_state=sent、購読の無い側はno_subscriptionで記録され、購読の無い側も一覧(GET /v1/notifications)で提案を受け取れることを確かめる。後者がiOS未インストール状態(Web Pushを受信できない)で「アプリ内通知のみで成立する」確認ケース(§4のE2Eマトリクス)にあたる。2本目は購読を登録した側のIntentをmutedにしたとき、その人にもアプリ内通知の行は作られpush_state=mutedで送られないこと、提案がproposedで、その人が参加する(yes)と回答できることを確かめる(01冒頭の決定記録(2026-10-21・通知のAPI))。3本目は双方の参加で成立すると、matchedの行が購読のある側でsent・無い側でno_subscriptionで記録され、POST /v1/notifications/readで未読数が0になることを確かめる。RFC 8291の暗号化の試験ベクトル・VAPID署名の検証・本文とTTL・送信先ホストの許可リスト(src/push/*.test.ts)、送信の判断(muted・購読なし・成功でlast_success_at・410で購読failed・一時失敗でpendingのまま・順番の取り合いで1回だけ送る。tests/push-dispatch.test.ts)、入口とキューのバッチの後の送出と失敗の非波及(tests/push-flush.test.ts)、Cronの回収(30秒後の再送・60秒の再試行間隔・10分でfailed)とintent_expiredの作成と再実行での二重防止(tests/pipeline-cron.test.ts)、一覧の種別ごとの欄・抜けた/表示から消したLATCHの除外・頁送り・未読数・既読(tests/notifications-api.test.ts)、購読の検証・10件の上限・付け替え・解除の冪等(tests/push-api.test.ts)、Intent削除でintent_expiredの行が消えること(tests/intents-crud-api.test.ts)、マイグレーション0007と戻す手順(tests/migration.test.ts)、起動ガード(src/env.test.ts)は単体・統合試験が証明する。#16の画面部分と実機ブラウザでのWeb Pushの受信確認はF7c・F8(#32)で行う。worker E2Eは47本となる(web E2Eは12本のまま)
+
+**F7c(安全と通知の画面)のゲート試験(F7c実装確定)。** #16の画面部分はweb E2E(apps/web/e2e/notices-flow.spec.ts)の1本目で証明する。2人が一致する意思を預けて提案が生まれると、ホームのベルに未読の点が出て、アプリ内通知の一覧(画面名「お知らせ」)に提案の行が届き、そこから提案を開いて[参加する]で回答できること、相手も参加して成立すると一覧に「つながりました」の行が届き、押すとチャットが開き、未読が0になって点が消えることを確かめる(相手の投入と回答はAPIで行う)。同じspecの2本目は提案画面の「…」からの通報とチャットの相手の発言からの通報が、dev専用API(GET /v1/dev/reports・05 §3.3)にそれぞれtarget=proposal・messageで記録されることを、3本目は1対1のチャットでブロックすると、ブロックした側の「ブロックしたユーザー」に相手が出て、相手の側は「このつながりは終了しました」の読み取り専用になることを確かめる。プッシュの購読はE2Eに含めない(Chromiumの`pushManager.subscribe`は実際のプッシュサービスへ通信し、CIの環境で結果が揺れるため)。購読の手順(許可・拒否・非対応・登録失敗・解除の順)はpushManagerを差し替えた単体試験(src/push/subscription.test.ts)で、Service Workerの通知の題名・本文・タップの遷移先(src/push/push-sw.test.ts)、各画面の文言・入口・API呼び出し・失敗表示(src/screens/notices・me・safety・legal・chat等の*.test.tsx)、ログアウトでの購読の解除とトークンの破棄(src/auth/session.test.ts)、422 ALCOHOL_RESTRICTEDの表示とお酒のオフでの解除(src/screens/Confirm.test.tsx)は単体・結合試験(vitest)が証明する。実機ブラウザでのWeb Pushの購読と受信はF8(#32)、#31の法務確認はオーナー(人間領域)が行う。web E2Eは15本となる(worker E2Eは47本のまま)
 
 ## 5. 負荷試験(02 #33・公開前)
 
