@@ -22,8 +22,8 @@ type ChatMenuProps = {
 	onLeft(result: LatchDTO): void;
 	/** 表示から消すが成功した */
 	onHidden(): void;
-	/** ブロックが成功した */
-	onBlocked(): void;
+	/** ブロックが成功した。left=本人がこのLATCHから抜けた(以後このLATCHは読めない) */
+	onBlocked(left: boolean): void;
 };
 
 type Step =
@@ -69,8 +69,10 @@ export function ChatMenu({
 	const hide = useHideMutation(latch.id);
 	const continuing = latch.status === "matched";
 	const group = latch.participants_count > 2;
-	// 続いているグループのブロックは本人が抜ける(以後このLATCHは読めない)
-	const block = useBlock(latch.id, { leavesLatch: continuing && group });
+	// 続いているグループのブロックは本人が抜ける(以後このLATCHは読めない)。
+	// 終了後(completed・matched経由のcancelled)のブロックはLATCHを変えない(08 §8)
+	const leavesLatch = continuing && group;
+	const block = useBlock(latch.id, { leavesLatch });
 	const [step, setStep] = useState<Step>("menu");
 	const [failed, setFailed] = useState(false);
 	/** ブロックする相手(1対1は唯一の相手・グループは選んだ人) */
@@ -123,7 +125,7 @@ export function ChatMenu({
 		if (busy || blockee === null) return;
 		setBlockError(null);
 		block.mutate(blockee, {
-			onSuccess: () => onBlocked(),
+			onSuccess: () => onBlocked(leavesLatch),
 			onError: (error) => setBlockError(safetyErrorText(error)),
 		});
 	};
@@ -257,14 +259,18 @@ export function ChatMenu({
 								{blockeeName}さんを、ブロックしますか。
 							</h2>
 							<ul className="bullets">
-								<li>
-									<Icon d={ICON_CHECK} />
-									<span>
-										{group
-											? "このグループから抜けます。チャットは読み取り専用になります。"
-											: "このつながりのチャットは、読み取り専用になります。"}
-									</span>
-								</li>
+								{/* 1対1は全体が終わり読み取り専用・続いているグループは本人が抜ける(読めなくなる)・
+								    終了後のグループは何も変わらないので出さない */}
+								{!group || continuing ? (
+									<li>
+										<Icon d={ICON_CHECK} />
+										<span>
+											{group
+												? "このグループから抜けます。"
+												: "このつながりのチャットは、読み取り専用になります。"}
+										</span>
+									</li>
+								) : null}
 								<li>
 									<Icon d={ICON_CHECK} />
 									<span>今後、この相手との提案は届きません。</span>

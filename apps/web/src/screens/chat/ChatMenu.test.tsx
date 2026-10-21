@@ -337,6 +337,7 @@ describe("ChatMenu 通報・ブロック", () => {
 		expect(ok.className).toBe("btn btn--danger btn--block");
 		fireEvent.click(ok);
 		await waitFor(() => expect(onBlocked).toHaveBeenCalledTimes(1));
+		expect(onBlocked).toHaveBeenCalledWith(false);
 		expect(callsTo("POST", "/v1/users/u2/block")).toHaveLength(1);
 	});
 
@@ -371,11 +372,8 @@ describe("ChatMenu 通報・ブロック", () => {
 		expect((next as HTMLButtonElement).disabled).toBe(false);
 		fireEvent.click(next);
 		expect(screen.getByText("あおさんを、ブロックしますか。")).toBeTruthy();
-		expect(
-			screen.getByText(
-				"このグループから抜けます。チャットは読み取り専用になります。",
-			),
-		).toBeTruthy();
+		expect(screen.getByText("このグループから抜けます。")).toBeTruthy();
+		expect(screen.queryByText(/読み取り専用/)).toBeNull();
 		expect(
 			screen.getByText("今後、この相手との提案は届きません。"),
 		).toBeTruthy();
@@ -384,8 +382,33 @@ describe("ChatMenu 通報・ブロック", () => {
 		).toBeTruthy();
 		fireEvent.click(screen.getByRole("button", { name: "ブロックする" }));
 		await waitFor(() => expect(onBlocked).toHaveBeenCalledTimes(1));
+		// 続いているグループは本人が抜ける
+		expect(onBlocked).toHaveBeenCalledWith(true);
 		expect(callsTo("POST", "/v1/users/u3/block")).toHaveLength(1);
 		expect(callsTo("POST", "/v1/users/u2/block")).toHaveLength(0);
+	});
+
+	it("終了後のグループ(completed・matched経由のcancelled)はLATCHが変わらないので抜ける・読み取り専用の項目を出さない", async () => {
+		for (const status of ["completed", "cancelled"] as const) {
+			const { onBlocked } = mount(
+				latchOf({ status, participants_count: 3, members: GROUP_MEMBERS }),
+			);
+			fireEvent.click(screen.getByText("ブロックする"));
+			fireEvent.click(screen.getByRole("radio", { name: "ミナト" }));
+			fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+			expect(screen.getByText("ミナトさんを、ブロックしますか。")).toBeTruthy();
+			expect(screen.queryByText(/このグループから抜けます/)).toBeNull();
+			expect(screen.queryByText(/読み取り専用/)).toBeNull();
+			expect(
+				screen.getByText("今後、この相手との提案は届きません。"),
+			).toBeTruthy();
+			expect(
+				screen.getByText("ブロックしたことは、相手に通知されません。"),
+			).toBeTruthy();
+			fireEvent.click(screen.getByRole("button", { name: "ブロックする" }));
+			await waitFor(() => expect(onBlocked).toHaveBeenCalledWith(false));
+			cleanup();
+		}
 	});
 
 	it("404なら「この操作はできませんでした。」をシートに出しonBlockedを呼ばない", async () => {

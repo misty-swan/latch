@@ -242,9 +242,9 @@ function ChatView({
 	};
 	// ブロック(F7c設計 §1.8)。1対1は全体が終わりその場で読み取り専用になる(useBlockがLATCHを取り直す)。
 	// 続いているグループは本人が抜けて以後このLATCHを読めない(404)ため・一覧へ置き換えで移る
-	const onBlocked = () => {
+	const onBlocked = (left: boolean) => {
 		const message = "ブロックしました。";
-		if (latch.participants_count > 2 && latch.status === "matched") {
+		if (left) {
 			navigate(PATHS.connections, { replace: true, state: { toast: message } });
 		} else {
 			setMenuOpen(false);
