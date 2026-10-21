@@ -108,7 +108,6 @@ const unauthorizedForRegistered = () =>
 		"この操作には登録済みユーザーのアクセストークンが必要です",
 	);
 
-/** 404 NOT_FOUND。他人の・存在しないIntentは区別せず存在を隠す(docs/05 §3.1) */
 /**
  * 20歳未満の飲酒を含む機会Intentの有効化を拒む(F7a設計 §4・docs/08 §8)。
  * 拒否ならErrorResult・通すならnullを返す。上限判定より先に呼ぶ。
@@ -141,6 +140,7 @@ const rejectIfAlcoholRestricted = async (
 	return null;
 };
 
+/** 404 NOT_FOUND。他人の・存在しないIntentは区別せず存在を隠す(docs/05 §3.1) */
 const notFound = () => errorJson("NOT_FOUND", "Intentが見つかりません");
 
 /**
