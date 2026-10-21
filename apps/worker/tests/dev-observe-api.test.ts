@@ -27,6 +27,7 @@ import {
 	matchCandidates,
 	matchEvents,
 	proposalHistory,
+	reports,
 } from "../src/db/schema";
 import type { Env } from "../src/env";
 import { devRoutes } from "../src/routes/dev";
@@ -812,5 +813,57 @@ describe("GET /v1/dev/latches・GET /v1/dev/proposal-history", () => {
 			const res = await getFromDevRoutes(path, { LATCH_ENV: "production" });
 			expect(res.status, path).toBe(404);
 		}
+	});
+});
+
+describe("GET /v1/dev/reports", () => {
+	it("本人の通報だけをcreated_at降順で返す", async () => {
+		const a = await registerAccount("devrep-a");
+		const b = await registerAccount("devrep-b");
+		const t0 = Date.now();
+		const mk = (reporter: string, i: number, note: string) => ({
+			id: nextUlid(),
+			reporter,
+			reportee: b.id,
+			reason: "spam" as const,
+			target: "profile" as const,
+			latchId: nextUlid(),
+			messageId: null,
+			note,
+			status: "open" as const,
+			createdAt: new Date(t0 + i * 1000),
+		});
+		await db
+			.insert(reports)
+			.values([
+				mk(a.id, 0, "古い"),
+				mk(a.id, 1, "新しい"),
+				mk(b.id, 2, "他人"),
+			]);
+		const res = await getReq("/v1/dev/reports", a.token);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			reports: Array<{ note: string; created_at: string; reportee: string }>;
+		};
+		expect(body.reports.map((r) => r.note)).toEqual(["新しい", "古い"]);
+		expectIso(body.reports[0]?.created_at as string);
+		expect(Object.keys(body.reports[0] as object).sort()).toEqual(
+			[
+				"created_at",
+				"id",
+				"latch_id",
+				"message_id",
+				"note",
+				"reason",
+				"reportee",
+				"status",
+				"target",
+			].sort(),
+		);
+	});
+
+	it("存在隠し: production相当では404", async () => {
+		const res = await getFromDevRoutes("/reports", { LATCH_ENV: "production" });
+		expect(res.status).toBe(404);
 	});
 });

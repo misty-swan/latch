@@ -5,11 +5,16 @@
  * - DELETE /v1/users/{user_id}/block: 204(ブロックしていなくても204)
  * - GET /v1/blocks: 200 BlockListResponse(新しい順)
  * - ブロックで本人が離脱したmatchedのLATCHは、leaveと同じくチャットの接続へclosedを知らせる(F6a設計 §2.4)
+ * - POST /v1/reports: 201 {received: true}(F7a設計 §3)。形の誤りは400 VALIDATION_FAILED
+ *   (zod・details.reasonsに理由コード)・対象外/存在しないは一律404。noteと被通報者はログに出さない
  * - 応答とログにブロックの相手を記録しない(docs/08 §6)
  * 時刻の規律(docs/04 §4): ルートは合成の起点のためsystemClockを使う
  */
 
-import type { BlockListResponse } from "@latch/shared";
+import {
+	type BlockListResponse,
+	reportCreateRequestSchema,
+} from "@latch/shared";
 import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { type AppEnv, requireRegistered } from "../auth/middleware";
@@ -19,6 +24,7 @@ import type { Env } from "../env";
 import { errorJson } from "../http/errors";
 import { closedTargetsAfterLeave } from "../latches/hide";
 import { blockUser, listBlocks, unblockUser } from "../safety/block";
+import { createReport } from "../safety/report";
 
 /** 安全のAPIのサブアプリ。index.tsが /v1 にマウントする */
 export const safetyRoutes = new Hono<AppEnv>();
@@ -81,4 +87,40 @@ safetyRoutes.get("/blocks", requireRegistered, async (c) => {
 		blocks: await listBlocks(dbOf(c.env), sub),
 	};
 	return c.json(body, 200);
+});
+
+safetyRoutes.post("/reports", requireRegistered, async (c) => {
+	const sub = c.var.auth.sub;
+	if (sub === undefined) {
+		const r = unauthorized();
+		return c.json(r.body, r.status);
+	}
+	const raw: unknown = await c.req.json().catch(() => null);
+	const parsed = reportCreateRequestSchema.safeParse(raw);
+	if (!parsed.success) {
+		const r = errorJson(
+			"VALIDATION_FAILED",
+			"リクエストの形式が正しくありません",
+			{
+				reasons: parsed.error.issues.map((i) => i.path.join(".") || i.code),
+			},
+		);
+		return c.json(r.body, r.status);
+	}
+	const outcome = await createReport(
+		dbOf(c.env),
+		sub,
+		parsed.data,
+		systemClock.now(),
+	);
+	if (!outcome.ok) {
+		const r =
+			outcome.reason === "invalid"
+				? errorJson("VALIDATION_FAILED", "通報の指定が正しくありません", {
+						reasons: outcome.reasons,
+					})
+				: errorJson("NOT_FOUND", "通報の対象が見つかりません");
+		return c.json(r.body, r.status);
+	}
+	return c.json({ received: true }, 201);
 });

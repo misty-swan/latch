@@ -10,6 +10,7 @@
  *   intents一覧と同じcursor方式(limit=1..50既定20・docs/05 §3.1)。所有者に限定しない
  *   (成立候補は2ユーザーのIntentで構成されるため・E2Eユーザーが証拠を読む経路)。
  *   応答はテーブル列の範囲のみ(raw_text等は含まれない)
+ * - GET /v1/dev/reports: F7a(Task 4)。本人が出した通報の観測(reporter=本人の行・created_at降順)
  * - GET /v1/dev/latches・GET /v1/dev/proposal-history・POST /v1/dev/latches/:id/backdate:
  *   F4a(Task 17)。提案・履歴の観測と、期限経過をE2Eが時計操作なしで作る書き換え口
  * - 存在を隠す(全ルート共通): LATCH_ENV==="production"、またはテスト鍵モードの変数
@@ -41,6 +42,7 @@ import {
 	matchCandidates,
 	matchEvents,
 	proposalHistory,
+	reports,
 } from "../db/schema";
 import type { Env } from "../env";
 import { type ErrorResult, errorJson } from "../http/errors";
@@ -548,3 +550,35 @@ devRoutes.post(
 		return c.json({ ok: true }, 200);
 	},
 );
+
+/**
+ * GET /v1/dev/reports(F7a設計 §3.3)。本人が出した通報だけをcreated_at降順で返す
+ * (通報は被通報者に見えない仕様のため、本人以外の行は返さない)
+ */
+devRoutes.get("/reports", hideWhenDisabled, requireRegistered, async (c) => {
+	const sub = c.var.auth.sub;
+	if (sub === undefined) {
+		return notFound(c);
+	}
+	const rows = await dbOf(c.env)
+		.select()
+		.from(reports)
+		.where(eq(reports.reporter, sub))
+		.orderBy(desc(reports.createdAt), desc(reports.id));
+	return c.json(
+		{
+			reports: rows.map((r) => ({
+				id: r.id,
+				reportee: r.reportee,
+				latch_id: r.latchId,
+				target: r.target,
+				reason: r.reason,
+				note: r.note,
+				message_id: r.messageId,
+				status: r.status,
+				created_at: r.createdAt.toISOString(),
+			})),
+		},
+		200,
+	);
+});
