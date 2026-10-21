@@ -167,6 +167,10 @@ const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
 beforeEach(() => {
+	// フィクスチャの日時(2026-10-21T20:00+09:00)は固定のため・現在時刻もDateだけ固定する。
+	// 実時刻のままだと20:00(JST)を過ぎるとクライアント検証が先に弾き・試験が時刻で変わる
+	vi.useFakeTimers({ toFake: ["Date"] });
+	vi.setSystemTime(new Date("2026-10-21T10:00:00+09:00"));
 	vi.stubGlobal("fetch", fetchMock);
 	fetchMock.mockClear();
 	localStorage.clear();
@@ -180,6 +184,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	cleanup();
+	vi.useRealTimers();
 	vi.unstubAllGlobals();
 	authSession.clear();
 	localStorage.clear();
