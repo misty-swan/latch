@@ -3,7 +3,8 @@
  * Intent削除(docs/05 §2.5)・active更新での意味フィールドの変更と期限の短縮(docs/01 §8の
  * 不成立経路「Hard Constraintが変化した」・docs/05 §3.2)・ブロック(F7a設計 §2.2)が共有する。
  * 対象のLATCHの照会は呼び出し側が行い(Intentを含むLATCH=openLatchIdsOfIntent・ブロックでは
- * 2人を含むLATCH)、取り消しと保留の解放はcancelOpenLatchesが行う
+ * 2人がともに参加者のLATCH=src/safety/block.tsのlatch_members自己結合)、取り消しと保留の解放は
+ * cancelOpenLatchesが行う
  */
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
