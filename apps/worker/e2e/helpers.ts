@@ -74,12 +74,14 @@ export interface RegisteredUser {
 /**
  * テストユーザーを1人登録する(docs/05 §3.2のauth/token→users登録フローを
  * 1メソッドに束ねた共通ヘルパー・F3以降のspecでも使う)。subは毎回ランダム生成
- * (ローカルD1は実行間で永続するための汚染回避・docs/04 §4)。birth_dateは
- * 18歳以上になる固定値(未成年系の検証はauth.spec.tsが専用の値で担う)
+ * (ローカルD1は実行間で永続するための汚染回避・docs/04 §4)。birth_dateの既定は
+ * 20歳以上になる固定値(未成年系の検証はauth.spec.tsが専用の値で担う)。飲酒年齢の
+ * 検証(safety.spec.tsの#30)は年齢を指定して登録する
  */
 export const registerUser = async (
 	request: APIRequestContext,
 	displayName = "E2Eテストユーザー",
+	birthDate = "2000-01-01",
 ): Promise<RegisteredUser> => {
 	const tokenRes = await request.post("/v1/auth/token", {
 		data: {
@@ -90,7 +92,7 @@ export const registerUser = async (
 	expect(tokenRes.status()).toBe(200);
 	const token = (await tokenRes.json()) as { access_token: string };
 	const registerRes = await request.post("/v1/users", {
-		data: { display_name: displayName, birth_date: "2000-01-01", bio: "" },
+		data: { display_name: displayName, birth_date: birthDate, bio: "" },
 		headers: { authorization: `Bearer ${token.access_token}` },
 	});
 	expect(registerRes.status()).toBe(201);
