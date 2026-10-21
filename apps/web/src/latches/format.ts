@@ -21,17 +21,19 @@ const jstParts = (ms: number) => {
 };
 
 /** JSTの暦日番号(日付境界の比較用) */
-const dayIndex = (ms: number): number => {
+export const jstDayIndex = (ms: number): number => {
 	const p = jstParts(ms);
 	return Date.UTC(p.year, p.month - 1, p.date) / DAY;
 };
 
-const hm = (ms: number): string => {
+/** JSTの時刻「H:MM」(時は0埋めなし) */
+export const formatHm = (ms: number): string => {
 	const p = jstParts(ms);
 	return `${p.hours}:${String(p.minutes).padStart(2, "0")}`;
 };
 
-const md = (ms: number): string => {
+/** JSTの日付「M月D日」 */
+export const formatMd = (ms: number): string => {
 	const p = jstParts(ms);
 	return `${p.month}月${p.date}日`;
 };
@@ -39,10 +41,16 @@ const md = (ms: number): string => {
 /** 「今日 H:MM」「明日 H:MM」「昨日 H:MM」「M月D日 H:MM」 */
 export const formatWhen = (iso: string, now: Date): string => {
 	const t = new Date(iso).getTime();
-	const diff = dayIndex(t) - dayIndex(now.getTime());
+	const diff = jstDayIndex(t) - jstDayIndex(now.getTime());
 	const word =
-		diff === 0 ? "今日" : diff === 1 ? "明日" : diff === -1 ? "昨日" : md(t);
-	return `${word} ${hm(t)}`;
+		diff === 0
+			? "今日"
+			: diff === 1
+				? "明日"
+				: diff === -1
+					? "昨日"
+					: formatMd(t);
+	return `${word} ${formatHm(t)}`;
 };
 
 /** 回答期限までの残り(「あと2日」「あと3時間5分」「あと1分」) */
@@ -59,7 +67,7 @@ export const formatLeft = (iso: string, now: Date): string => {
 /** 成立時刻「M月D日 H:MM」(JST) */
 export const formatMatchedAt = (iso: string): string => {
 	const t = new Date(iso).getTime();
-	return `${md(t)} ${hm(t)}`;
+	return `${formatMd(t)} ${formatHm(t)}`;
 };
 
 /** 金額「4,000円」 */
