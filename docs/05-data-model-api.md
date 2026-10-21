@@ -1,9 +1,9 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.17
+- 文書バージョン: v0.18
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.17更新: 2026-10-21)
+- 作成日: 2026-10-17(v0.18更新: 2026-10-21)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
@@ -20,7 +20,8 @@
 - v0.15の変更点: F5(つながりの性質)実装とオーナー裁定(2026-10-21・01冒頭の決定記録)に伴い、§2.2のlatchesのlast_message_at(成立時に成立時刻を入れる)・completed_at(機会は対象時刻から3時間)、§2.6のcompleted判定(機会LATCHを追加)、§3.3のGET /v1/latches?type=matched(completedを含む)とLatchDTOの成立後の開示範囲(completedを含む)を改めた。前提文書欄の版数を更新
 - v0.16の変更点: F6a(チャットのバックエンド)実装とオーナー裁定(2026-10-21・01冒頭の決定記録: 続いているLATCHを表示から消すと本人はそのLATCHから抜けたものとして扱う)に伴い、§2.2のlatch_membersへhidden_at(表示削除の時刻)と、下限割れでLATCH全体を取り消した離脱者はleft_atを記録せず読み取り専用の参加者として残す旨(オーナー裁定 2026-10-21・01冒頭の決定記録)を、messagesへclient_id(再送の重複防止・UNIQUE(latch_id, user_id, client_id))と保存の条件を、両者のマイグレーション0005と戻す手順を追記。§3.1へUPGRADE_REQUIRED=426を、§3.2へWebSocket接続のルートを、§3.3へチャットのAPI(ws-ticket・履歴・送信・既読)とMessageDTO・LatchDTOのlast_message / unread_count・成立一覧のmatched経由のcancelled・DELETE /v1/latches/{id}の挙動・hidden_atの本人の扱い・全体を取り消した離脱者の読み取り専用の扱い(DELETEはhidden_atの確認を先に行う)を追記。§3.4をF6aの実装確定(チケットの検証はWorkerのルート・1回限りはDO・`retract`フレームを`closed`へ改める・フレームのclient_id・errorのcode・配信前の参加者確認)に改めた。前提文書欄の版数を更新
 - v0.17の変更点: 前提文書欄の版数同期(F6b(チャットの画面)の完了とオーナー裁定3件(2026-10-21・01冒頭の決定記録)に伴う01・02・04改版への追従)。内容の変更はない
-- 前提文書: 01 要件定義書 v0.15 / 02 スコープ・受け入れ条件合意書 v0.9 / 04 アーキテクチャ設計書 v0.17
+- v0.18の変更点: F7a(安全のAPI)実装とオーナー裁定(2026-10-21・01冒頭の決定記録)に伴い、§2.2のreportsへ通報の対象の種別(target)・対象メッセージ(message_id)・通報者内の統合の規定と、マイグレーション0006と戻す手順を、blocksへブロックの即時効果と権限の再検証の扱いを、§2.4へreportsの索引を追記。§3.2のブロック・通報のAPIを確定値に改め、§3.3へブロックのAPI(対象の判定・即時効果の順序・一覧)・通報のAPI(対象の判定・理由コード)・Intentの有効化での飲酒年齢の判定(422 ALCOHOL_RESTRICTED・判定の順・年齢を確かめられないときの拒否)・dev専用API GET /v1/dev/reportsを追記。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.16 / 02 スコープ・受け入れ条件合意書 v0.10 / 04 アーキテクチャ設計書 v0.18
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -236,7 +237,7 @@ UNIQUE(latch_id, user_id, client_id)   # 同じclient_idの再送は既存行を
 
 **latch_feedback**: `id / latch_id / user_id / kind(attendance|connection_quality) / value(json) / created_at — UNIQUE(latch_id, user_id, kind)`(01 §14の正解データ申告。集計は02 #35の対象)。
 
-**blocks**: `blocker_user_id / blocked_user_id / created_at — PK(blocker, blocked)`。**reports**: `id / reporter / reportee / reason(spam|harassment|inappropriate|other) / latch_id|null / note(0..500) / status(open|resolved) / created_at`。
+**blocks**: `blocker_user_id / blocked_user_id / created_at — PK(blocker, blocked)`。行の書き込みと即時効果(進行中の提案の取り消し・続いているLATCHからの本人の離脱)はPOST /v1/users/{user_id}/blockが行う(§3.3・F7a実装確定)。§2.3の権限が関わる操作のうちチャット送信・回答でのblocksの再検証は、ブロックで該当するLATCHがcancelled(読み取り専用・回答不可)になることで満たし、送信・回答の各処理へblocksの照会は加えない。**reports**: `id / reporter / reportee / reason(spam|harassment|inappropriate|other) / target(proposal|profile|icon|message) / latch_id|null / message_id|null / note(0..500) / status(open|resolved) / created_at — INDEX(reporter, latch_id, reportee, target, status)`。targetは通報の対象の種別(proposal=成立前の提案・profile / icon / message=成立後)、message_idはtarget=messageの対象の発言で、それ以外はnull。noteは前後の空白を除いて保存し、未指定は空文字とする。提案段階(target=proposal)は自分以外の全参加者をreporteeとして1人1行で記録する(オーナー裁定 2026-10-21・01冒頭の決定記録)。同じreporter・latch_id・reportee・target(messageはmessage_idも)でstatus=openの行があれば新しい行を作らず、reason・note・created_atを今回の値で上書きする(通報者内の統合・08 §8。resolved後の再通報は新しい行)。target・message_idと索引はマイグレーション0006で追加し、戻す手順(migrations_rollback/0006)を対で持つ(12 §4・11 §3。戻すと通報の対象の種別と対象の発言の記録が失われる。F7a実装確定)。
 
 **notifications**: `id / user_id / type(proposal|matched|closed|system) / latch_id|null / read_at / created_at — INDEX(user_id, read_at)・UNIQUE(latch_id, user_id, type)`。closedは不成立(rejected / expired / cancelled)の総称であり、成立後の離脱(leave・matched→cancelled)ではclosedを作らない(F4a実装確定)。成立前の意思・条件サマリは格納しない(visibility単値化・01 §21)。
 
@@ -286,6 +287,7 @@ notifications:(user_id, read_at, id) / (user_id, type, created_at) ← 通知上
 proposal_history: PK(user_low, user_high)
 latches:      (status, response_deadline) ← 回答期限切れ走査 / (status, proposed_at)
 latch_status_events: (latch_id)
+reports:      (reporter, latch_id, reportee, target, status) ← 通報者内の統合の照会(F7a)
 ```
 
 latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表である(latches本体はintent_idsのみ保持)。
@@ -381,8 +383,10 @@ GET    /v1/latches/{id}/ws?ticket=          # WebSocket接続(Authorizationヘ�
 POST   /v1/ws-ticket                       # {scope:"chat", latch_id} → {ticket, expires_in:60}(matchedのみ発行)
 
 POST   /v1/sessions                        # セッション開始計測
-POST   /v1/users/{user_id}/block  / blocks(GET/DELETE)
-POST   /v1/reports
+POST   /v1/users/{user_id}/block      # ブロック(201新規/200既存・効果は再適用・§3.3)
+DELETE /v1/users/{user_id}/block      # 解除(204・冪等)
+GET    /v1/blocks                     # 自分のブロック一覧(新しい順)
+POST   /v1/reports                    # 通報(201 {received:true}・§3.3)
 GET    /v1/notifications  / POST /v1/notifications/read
 GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完成条件外)
 ```
@@ -403,7 +407,7 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 
 **IntentDTO(Intent系API共通の応答形状)** — `{id, form, topic, category, raw_text, time:{start, end}|null, geo:{center:{lat,lng}, radius_m}|null, participants:{min, max, includes_owner}, budget:{min, max, currency:"JPY"}|null, hard_constraints:[...], soft_constraints:[...], negative_constraints:[...], visibility:"hidden_until_match", notification_level, alcohol_involved, status, version, expires_at, created_at, updated_at}`。form・topic・category・time・geo・budget・expires_atは未確定欄がnullとなる(draft保存の許容・§2.2)。時刻はISO 8601。visibilityは単値のため常に"hidden_until_match"
 
-**POST /v1/intents** — 201 IntentDTO。初回作成はversion=1で、statusの省略時はactive・draftは意味検証せず保存できる。draft保存では期限の選択(expires_in_days)を含められない(POST/PATCHとも400・理由コードexpires_choice_on_draft)。選択は預ける時(active化)に確定し、draftの明示expires_atは格納できる(機会Intentのactive化時の採用順は 明示expires_at > draft保存値 > 既定start+3時間)。active(status="active"を伴う作成)は§2.2の検証を行い、違反は400 VALIDATION_FAILEDのdetails.reasonsに理由コードの配列で返す: form_required / topic_required / starts_at_required / starts_at_out_of_range / starts_at_not_allowed / alcohol_not_allowed / expires_at_not_allowed / expires_at_before_start。機会Intentのactive作成にexpires_in_daysを指定した場合は400(理由コードexpires_in_days_not_allowed・期限は開始時刻基準で確定するため期限日数の選択肢とならない。黙って無視はしない)
+**POST /v1/intents** — 201 IntentDTO。初回作成はversion=1で、statusの省略時はactive・draftは意味検証せず保存できる。draft保存では期限の選択(expires_in_days)を含められない(POST/PATCHとも400・理由コードexpires_choice_on_draft)。選択は預ける時(active化)に確定し、draftの明示expires_atは格納できる(機会Intentのactive化時の採用順は 明示expires_at > draft保存値 > 既定start+3時間)。active(status="active"を伴う作成)は§2.2の検証を行い、違反は400 VALIDATION_FAILEDのdetails.reasonsに理由コードの配列で返す: form_required / topic_required / starts_at_required / starts_at_out_of_range / starts_at_not_allowed / alcohol_not_allowed / expires_at_not_allowed / expires_at_before_start。機会Intentのactive作成にexpires_in_daysを指定した場合は400(理由コードexpires_in_days_not_allowed・期限は開始時刻基準で確定するため期限日数の選択肢とならない。黙って無視はしない)。**飲酒年齢の判定(F7a実装確定)。** 機会Intentでalcohol_involved=trueのactive作成とdraftからのactive化(PATCH)は、判定時点で本人が満20歳未満なら422 ALCOHOL_RESTRICTEDとする(満年齢は日本標準時の誕生日で1つ進む・Layer 1と同じ定数・08 §8)。判定の順は400 VALIDATION_FAILEDの検証の後・Active Intent上限(422 ACTIVE_INTENT_LIMIT)の前で、両方に当たるときはALCOHOL_RESTRICTEDを返す。本人のusers行が無い・activeでないときは年齢を確かめられないため、飲酒を含む機会Intentに限り同じ422で拒否する(安全側。文書の裁量で確定した技術的事項)。activeのPATCHはalcohol_involved・formを変えられないため判定の対象にならず、draftの保存は従来どおり検証しない(01 §9)
 
 **GET /v1/intents** — 200 `{items: IntentDTO[], next_cursor: string|null}`。自Intentのみ・順序はid降順(ULID=新着順)。`?status=<単一値>`で絞り込み(不明な値は400)。limit=1..50(既定20・範囲外は400)。cursorは不透明(直前ページ最終idのbase64url化・復号できない値は400)
 
@@ -436,6 +440,22 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 **dev専用観測API(F3実装確定・テスト専用)** — GET /v1/dev/match-events・GET /v1/dev/match-candidates。worker E2Eがゲートの合格証拠(match_eventsの計測payload・match_candidatesの生成記録)を観測するためのdev専用API。クエリはintent_id(必須・ULID形式外は400)・limit=1..50既定20・cursor(§3.1と同一の不透明cursor)。応答は`{items, next_cursor}`(id降順)で、itemsはmatch_events行=id / event_type / source_intent_id / version / status / payload / created_at / processed_at・match_candidates行=id / intent_a_id / intent_b_id / intent_a_version / intent_b_version / form / retrieval_score / cheap_judge_score / status / created_at / updated_at(テーブル列の範囲のみ・jev_result等の内部列は含めない)。起点Intentとの一致条件はmatch_events=source_intent_id・match_candidates=intent_a_idかintent_b_idのいずれか。所有者に限定しない(候補は2ユーザーのIntentで構成されるため・観測の実行は認証済みユーザーが行う)。存在隠しはPOST /v1/dev/idp-token(04 §4)と同一条件(prod・テスト鍵2変数のいずれか未設定は認証・クエリ検証より先に一律404・理由は区別しない)。
 
 **dev専用API(F4a実装確定・テスト専用)** — 存在隠しは上記と同一条件。(1) GET /v1/dev/match-candidatesの行にjev_result・latch_scoreを追加する(#15の証拠)。(2) GET /v1/dev/latches?intent_id= — intent_idsに指定Intentを含むLATCHをid降順で返す(`{items, next_cursor}`・itemsはid / form / status / intent_ids / response_deadline / proposed_at / score)。(3) GET /v1/dev/proposal-history?user_id= — user_lowかuser_highが指定ユーザーの履歴行をid降順で返す(itemsはid / user_low / user_high / latch_id / outcome / created_at / updated_at)。(2)(3)のlimit・cursorは観測APIと同一の規則で、参加者・所有者に限定しない。(4) POST /v1/dev/latches/{id}/backdate `{response_deadline?, history_updated_at?, intents_last_evaluated_at?}` — E2Eが時計を操作せずに期限経過と再提案の条件を作るための書き換え口(10 §3)。それぞれlatches.response_deadline・そのLATCHのproposal_history行(latch_id一致)のupdated_at・参加Intent全員のlast_evaluated_atを指定時刻へ書き換える。存在しないLATCHは404。
+
+**ブロックのAPI(オーナー裁定 2026-10-21・01冒頭の決定記録・F7a実装確定)。**
+
+- **POST /v1/users/{user_id}/block** — 本文なし。新規は201・既にブロック済みは200(効果は再適用する・冪等)で、応答は本文なし。対象は自分と同じLATCHに成立後の参加者として居たことがある相手(latch_membersで同じLATCHに属し、そのLATCHがmatched・completed・matched経由のcancelledのいずれか)に限る。該当しない相手・存在しない相手・退会済み(deleted)の相手は一律404 NOT_FOUND(成立前は相手のIDを開示しないため、任意IDでの存在の探索を塞ぐ・§3.1)。自分自身は400 VALIDATION_FAILED(理由コードself_block)。blocks行を先に書き込み(既にあれば何もしない)、その後で次の効果を順に適用する(1回のバッチにはまとめない。各効果は対象が既に閉じていれば何もしないため、途中で失敗した前回の効果を再送で完了できる)。(1) 2人を含む進行中の提案(candidate・proposed・partial_accept。グループの提案も全体)をIntent削除と同じ流れでcancelledに閉じる(proposal_historyは消費せず解放する・§2.2。提示済みなら参加者へclosed通知・ブロックした本人以外の参加者の保留を解放・グループの次集合の提案は取り消しの後続と同じ・06 §2)。(2) 2人がともに参加を続ける(left_atがnull)matchedのLATCHごとに、ブロックした本人について上記のleaveを行う(1対1は全体cancelledで双方読み取り専用・グループは本人だけが抜け下限割れで全体cancelled)。その後、離脱した各LATCHについてleaveと同じ宛先へ`closed`を知らせる(§3.4)。completed・cancelledのLATCHは変えない。ブロックを知らせるアプリ内通知は作らない。blocks行が先に書かれるため、適用中に別の評価が作ろうとした提案は提案直前の照合で作られない(06 §3)
+- **DELETE /v1/users/{user_id}/block** — 204。対象の判定は行わず、自分のblocks行を消すだけ(行が無くても204)。候補化は再開するが、提案履歴による恒久排除とブロックで終わったLATCHは戻さない(08 §8)
+- **GET /v1/blocks** — 200 `{blocks: [{user_id, display_name, has_icon, created_at}]}`(blocks.created_atの新しい順)。退会済みの相手は表示名を「つながっていた相手」・has_icon=falseとする(§2.5)
+- 応答とログにブロックの相手を記録しない(ログは許可リストの項目のみ・08 §6)
+
+**POST /v1/reports(オーナー裁定 2026-10-21・01冒頭の決定記録・F7a実装確定)** — `{latch_id, target: "proposal"|"profile"|"icon"|"message", reason: "spam"|"harassment"|"inappropriate"|"other", note?: string, reportee_user_id?: string, message_id?: string}` → 201 `{received: true}`。noteは前後の空白を除いて0〜500字。要求の形はzodスキーマで定め、形の誤り(必須欄の欠落・値の範囲外・ULID形式外・500字超・余分なキー)は400 VALIDATION_FAILEDのdetails.reasonsに該当フィールド名を返す。対象と欄の組み合わせの誤りは400 VALIDATION_FAILEDのdetails.reasonsに理由コードを返す: reportee_not_allowed(target=proposalでreportee_user_idを指定) / message_not_allowed(target=message以外でmessage_idを指定) / reportee_required(成立後の対象でreportee_user_idが無い) / message_required(target=messageでmessage_idが無い)。
+
+- target=proposal: latch_idは自分が参加者で、状態がproposed・partial_accept(提示済み・未成立)のLATCHに限る。自分以外の全参加者をreporteeとして1人1行で記録する。提案は閉じない
+- target=profile・icon・message: latch_idは自分が参加者(left_atがnull。hidden_atは問わない)で、状態がmatched・completed・matched経由のcancelledのLATCHに限る。reportee_user_idはそのLATCHの自分以外のメンバー、target=messageのmessage_idはそのLATCHのreportee_user_idの発言であること
+- 上記に合わないLATCH(保留中・成立せず閉じたもの等)・参加していないLATCH・存在しないLATCH・対象者・発言は一律404 NOT_FOUND
+- 応答は通報の件数・対象者を返さない(提案段階で対象者の人数を推測させない)。通報は提案・LATCHの状態を変えず、被通報者のどのAPI応答・通知にも現れない(08 §8)。noteと被通報者はログに出さない(08 §6)
+
+**dev専用API(F7a実装確定・テスト専用)** — GET /v1/dev/reports。存在隠しは上記の観測APIと同一条件(prodは一律404)。認証した本人が通報者(reporter)の行だけを`{reports: [{id, reportee, latch_id, target, reason, note, message_id, status, created_at}]}`(created_atの新しい順)で返す(#27の証拠・10 §4)。
 
 ### 3.4 WebSocket(リアルタイムチャット)
 

@@ -119,6 +119,8 @@ reportsへ `target`(proposal|profile|icon|message・NOT NULL)と `message_id`(nu
 
 - 判定: 機会Intent(form=occasion)で alcohol_involved=true のとき、判定時点で本人が満20歳未満なら422 ALCOHOL_RESTRICTED(年齢は`src/auth/age.ts`の`ageAtYears`・Clockの現在時刻で算出・08 §8)
 - 判定する経路(有効化する時点の3つ): (a) POST /v1/intents で即activeとして作成 (b) PATCHでdraftからactiveへ (c) activeのPATCHで結果のalcohol_involvedがtrueになる変更(PATCHの可変フィールドの範囲で生じる場合)。draftの保存は従来どおり検証しない(01 §9)
+- 実装時の注記: activeのPATCHの可変フィールド(05 §3.3)にalcohol_involvedは無く、formも変えられないため、(c)は生じない。判定は(a)・(b)の2経路で行う
+- 実装時の注記(文書の裁量で確定した技術的事項): 飲酒を含む機会Intentで本人のusers行が無い・statusがactiveでないときは年齢を確かめられないため、同じ422 ALCOHOL_RESTRICTEDで拒否する(安全側に倒す。飲酒を含まないIntentの挙動は変えない・05 §3.3・08 §8)
 - 判定順はform検証の後・Active Intent上限の前とする(form検証の400が先・同時に満たす場合は422 ALCOHOL_RESTRICTEDを返す)
 - つながりIntentでのalcohol_involved=trueは従来どおり400(alcohol_not_allowed)
 - 候補化時の判定(Layer 1・Pool内)は実装済み(§0.2の2)
@@ -127,8 +129,8 @@ reportsへ `target`(proposal|profile|icon|message・NOT NULL)と `message_id`(nu
 
 ### 5.1 worker E2E(`e2e/safety.spec.ts`・#26〜#30の証明)
 
-1. **#26**: AとBを成立させ、AがBをブロックする。1対1のLATCHがcancelledになりBの側でも読み取り専用であることを確かめたうえで、AとBに一致するIntentを新たに置き、毎分Cronを発火させても2人の間の候補が生成されない(dev観測APIのmatch-candidates)
-2. **#27**: 提案段階の通報(提示済みの提案でtarget=proposal)と、成立後の通報(target=message)の両方が201で完走し、`GET /v1/dev/reports`で対象・理由・LATCH・対象者が記録されている。同じ通報の再送が1件にまとまる
+1. **#26**: AとBを成立させ、AがBをブロックする。1対1のLATCHがcancelledになりBの側でもcancelledに見えることを確かめたうえで、ブロック前なら一致するIntentをAとBに新たに置き、それぞれの評価のmatch_events.payloadで`l1_exclusions.blocked`が1以上・提案0件であり、2人の間に新しいLATCHが作られない(dev観測APIのmatch-events・latches)。Layer 1はブロックを提案履歴より先に判定するため、成立済みで提案履歴でも恒久排除される組でも、ブロックによる除外として区別して観測できる(実装時に除外記録による証明へ改めた。候補が無いことだけでは提案履歴の恒久排除と区別できないため)
+2. **#27**: 提案段階の通報(提示済みの提案でtarget=proposal)と、成立後の通報(target=message)の両方が201で完走し、`GET /v1/dev/reports`で対象・理由・LATCH・対象者が記録されている(同じ通報の再送が1件にまとまることは統合試験が確かめる・§5.2)
 3. **#28**: 提示済みの提案を相手側で取得した応答(一覧・単一)にraw_text・NG条件(negative_constraints)・相手のIntentの中身が含まれない
 4. **#29**: 地理を添付した機会Intentどうしの成立後、相手側の応答にregion_name(地域名)だけがあり、緯度経度・半径・距離の数値が含まれない
 5. **#30**: 18〜19歳のテストユーザー(10 §2のbirth_date可変ユーザー)が飲酒を含む機会Intentを作成すると422 ALCOHOL_RESTRICTED。20歳のユーザーは作成できる
@@ -140,7 +142,7 @@ reportsへ `target`(proposal|profile|icon|message・NOT NULL)と `message_id`(nu
 - ブロック: 対象の判定(成立前だけの相手・存在しない・退会済み=404・自分=400)/冪等/進行中の提案(1対1・グループ・提示前のcandidate)の取り消しと提案履歴の不消費/1対1のmatchedの全体cancelled/グループで本人だけ抜ける・下限割れで全体cancelled/completedは不変/一覧/解除と候補化の再開・恒久排除は戻らない
 - 提案直前の照合: 評価の開始後にブロックされた組で`proposeSet`が提案を作らない
 - 通報: 提案段階で自分以外の全参加者の行/成立後のreportee・message_idの検証/状態・非参加の404/noteの字数/統合/被通報者の応答に現れない
-- 飲酒年齢: 3つの経路・19歳と20歳の境界(誕生日の前日・当日)・draft保存は通る
+- 飲酒年齢: 有効化の経路((a)・(b)。(c)は生じない・§4)・19歳と20歳の境界(誕生日の前日・当日)・draft保存は通る・年齢を確かめられないときの拒否
 
 ## 6. 文書の更新(docs/00 §3)
 
