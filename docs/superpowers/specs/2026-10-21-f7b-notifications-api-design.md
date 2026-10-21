@@ -41,7 +41,8 @@
 | `src/routes/notifications.ts` | GET /v1/notifications・POST /v1/notifications/read(§3) |
 | `src/routes/push.ts` | GET /v1/push/vapid-public-key・POST/DELETE /v1/push-subscriptions(§4) |
 | `src/push/` | 送信の判断と実行(`dispatch.ts`)・送り手の差し替え口(`sender.ts`: stub/real)・RFC 8291暗号化(`encrypt.ts`)・VAPID署名(`vapid.ts`)・本文(`payload.ts`)・送信先ホストの許可リスト(§5) |
-| `src/latches/propose.ts`・`release.ts`・`respond.ts`・`close.ts` | 通知行にpush_stateを書く。書いた後でdispatchPushをwaitUntilで呼ぶ(§5.1) |
+| `src/latches/propose.ts`・`release.ts`・`respond.ts`・`close.ts` | 通知行にpush_stateを書く(§5.1)。これらの関数はDBだけを受け取るため、送出は入口側で行う |
+| `src/push/flush-middleware.ts`・`src/routes/latches.ts`・`intents.ts`・`safety.ts`・`src/pipeline/consumer.ts` | 変更系の要求とキューのバッチの後に`flushPush`をwaitUntilで呼ぶ(§5.1) |
 | `src/pipeline/cron.ts` | (c)の期限切れでintent_expiredを作る・Pushの回収走査を追加(§5.6・§5.7) |
 | `src/routes/intents.ts` | Intent削除でintent_idの通知行を削除(05 §2.5) |
 | `src/routes/dev.ts` | dev専用GET /v1/dev/notifications(§6.1) |
@@ -98,7 +99,7 @@ notificationsへ次の3列を追加する(戻すマイグレーションと対�
 ### 5.1 流れ(オーナー裁定2)
 
 1. 通知行を書く処理(提案化・保留の解放・成立)はproposal・matchedを`push_state='pending'`で書く
-2. バッチの後で、そのLATCHについて実際に書けた`pending`の行を照会し(行は条件付きの1文で書くため、書けたかは後で確かめる)、`dispatchPush(env, ids)`を`waitUntil`で呼ぶ(APIの応答・キューの消費を待たせない)。waitUntilを持たない呼び出し元(Cron)はawaitする
+2. 通知行を書き得る入口(LATCH・Intent・安全のAPIの変更系(POST・PATCH・DELETE)の成功応答の後と、キューのバッチの後)で`flushPush`を`waitUntil`で呼ぶ(APIの応答・キューの消費を待たせない)。flushPushは作成から10分以内の未試行の`pending`行(上限100件)を照会して`dispatchPush`へ渡す。通知行は条件付きの1文で書かれ、書いた関数はDBだけを受け取るため、書けた行を入口で照会する形にする(実装計画の調査で確定)。Cron(§5.6)はawaitする
 3. dispatchPushは行ごとに順番を取る: `UPDATE … SET push_attempted_at=now WHERE id=? AND push_state='pending' AND (push_attempted_at IS NULL OR push_attempted_at≤now−60秒)`が1行を更新したときだけ送る。直後の送信とCronの回収が同時に拾っても片方だけが送る
 4. 判断の順:
    - 本人の当該LATCHでの参加Intent(latches.intent_idsのうち本人が所有するもの)のnotification_levelがmuted → `muted`(送らない・オーナー裁定1)
@@ -149,7 +150,7 @@ notificationsへ次の3列を追加する(戻すマイグレーションと対�
 
 ### 6.1 worker E2E(`e2e/notifications.spec.ts`・#16のAPI部分の証明)
 
-dev専用`GET /v1/dev/notifications?user_id=`(全列・push_stateを含む。prodは404の二重防御)で到達記録を観測する。
+dev専用`GET /v1/dev/notifications`(呼び出した本人の全通知行・push_stateを含む。既存のdev観測APIと同じく本人の行だけを返し、prodは404の二重防御)で到達記録を観測する。
 
 1. proposals_onlyのIntent2件で提案が生まれると、双方にproposalのお知らせが届き、購読を登録した側は`push_state=sent`で記録される
 2. 一方のIntentがmutedのとき、その人にもお知らせは届き、`push_state=muted`で送られない。提案はproposedで、その人が参加する(yes)と回答できる
