@@ -82,7 +82,7 @@ const statusClass = (intent: IntentDTO, waiting: boolean): string => {
 
 /** カードの半円グリフ(状態ごとにボードの意匠を出し分ける)。
  * activeはformを問わずgt/gm(DSLatchボードのactive表現)・灯りのgl/gmは回答待ちのみ */
-function GlyphPaths({
+export function GlyphPaths({
 	intent,
 	waiting,
 }: {

@@ -1,0 +1,7 @@
+/* 意思の詳細(F8a設計 §1.3)。latch.cssに無い見た目だけを足す */
+
+/* 操作の並び(prototypeのインライン指定 gap:8px・上26px) */
+.intent-actions {
+	gap: 8px;
+	margin-top: 26px;
+}
