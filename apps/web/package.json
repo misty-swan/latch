@@ -14,6 +14,8 @@
 		"@hookform/resolvers": "5.9.2",
 		"@latch/shared": "workspace:*",
 		"@tanstack/react-query": "5.104.4",
+		"@tanstack/react-query-persist-client": "5.104.4",
+		"idb-keyval": "6.3.0",
 		"react": "19.3.1",
 		"react-dom": "19.3.1",
 		"react-hook-form": "7.90.0",

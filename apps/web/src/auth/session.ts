@@ -8,6 +8,7 @@
  * - refresh()は同時多発の401を単一フライトに収束させる
  * リフレッシュの呼び出しは生のfetchを直接使う(apiFetchを経由しない=循環と無限ループの構造的防止)。
  * リフレッシュ失敗時のセッション破棄と遷移は呼び出し側(apiFetch)が判断する
+ * (refreshOutcome()で通信失敗と明示拒否を見分ける)
  * F8a(設計書 §2.2):
  * - 最後に確立したアクセストークンのsubを利用者IDとしてlocalStorage(latch.uid)に置く
  *   (端末に保存した内容をその利用者に紐づけるための識別子のみ)
@@ -34,7 +35,7 @@ interface RefreshResponse {
  * - rejected: 応答は受けたがサーバーが明示拒否(!ok)=保存値が無効と判断できる
  * - network_error: fetch例外・応答本文が読めない等で判断できない(一時的なオフライン含む)
  */
-type RefreshOutcome = "success" | "rejected" | "network_error";
+export type RefreshOutcome = "success" | "rejected" | "network_error";
 
 let accessToken: string | null = null;
 let accessUserId: string | null = null;
@@ -163,6 +164,8 @@ export const authSession = {
 	/** トークンを設定する。refreshTokenがnullのとき保存値は変更しない */
 	setTokens(nextAccessToken: string, nextRefreshToken: string | null): void {
 		applyAccessToken(nextAccessToken);
+		// トークンを得た=オフライン中のセッションではない(接続の回復時の無駄な復元を防ぐ)
+		offline = false;
 		if (nextRefreshToken !== null) {
 			localStorage.setItem(REFRESH_STORAGE_KEY, nextRefreshToken);
 		}
@@ -256,4 +259,9 @@ export const authSession = {
 	},
 	/** リフレッシュトークンを回転させる(同時呼び出しは単一フライトに収束) */
 	refresh: refreshTokens,
+	/**
+	 * refresh()と同じリフレッシュ(単一フライトを共有)を行い、結果の理由まで返す。
+	 * apiFetchが通信失敗(network_error)と明示拒否(rejected)を分けるために使う(F8a設計 §2.2)
+	 */
+	refreshOutcome,
 };

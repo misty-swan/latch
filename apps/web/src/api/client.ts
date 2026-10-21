@@ -2,8 +2,9 @@
  * APIクライアント(docs/04 §3.2・05 §3.1)。
  * - 同一オリジンの /v1 配下へfetchし・アクセストークンをBearerで自動付与する
  * - 401(TOKEN_EXPIRED/UNAUTHORIZED)はauthSession.refresh()を1回試みて同一リクエストを再試行する
- * - リフレッシュ失敗・リフレッシュトークン不在・再試行でも401のときは
+ * - リフレッシュの明示拒否・リフレッシュトークン不在・再試行でも401のときは
  *   セッションを破棄して/welcomeへ遷移する(再試行は1回のみ=無限ループの防止)
+ * - リフレッシュが通信失敗のときはセッションを破棄せずTypeErrorを投げる(F8a設計 §2.2)
  * - エラー応答はdocs/05 §3.1の共通形状をApiErrorとして投げる
  */
 
@@ -116,7 +117,13 @@ export const apiFetch = async <T>(
 	let error = await readError(response);
 	if (response.status === 401 && isAuthError(error)) {
 		// リフレッシュは1回だけ。再試行後の401では再リフレッシュしない
-		if (await authSession.refresh()) {
+		const outcome = await authSession.refreshOutcome();
+		if (outcome === "network_error") {
+			// 通信失敗ではトークンの有効性を判断できない。セッションは破棄せず、
+			// オフラインの判定(isOfflineError)に使える通信失敗として投げる(F8a設計 §2.2)
+			throw new TypeError("refresh network error");
+		}
+		if (outcome === "success") {
 			response = await send(path, init);
 			if (response.ok) {
 				return readSuccess<T>(response);

@@ -126,6 +126,29 @@ describe("apiFetch", () => {
 		expect(assign).toHaveBeenCalledWith("/welcome");
 	});
 
+	it("リフレッシュが通信失敗ならセッションを破棄せず・遷移せずTypeErrorを投げる(オフライン中のセッション)", async () => {
+		const assign = vi.fn();
+		vi.stubGlobal("location", { assign });
+		const listener = vi.fn();
+		const off = authSession.onClear(listener);
+		authSession.setTokens("old-access", "refresh-1");
+		fetchMock
+			.mockResolvedValueOnce(
+				errorResponse(401, "TOKEN_EXPIRED", "期限切れです"),
+			)
+			.mockRejectedValueOnce(new TypeError("network down"));
+
+		const caught = await settle(apiFetch("/users/me"));
+		off();
+
+		expect(caught).toBeInstanceOf(TypeError);
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(assign).not.toHaveBeenCalled();
+		expect(listener).not.toHaveBeenCalled();
+		expect(authSession.accessToken).toBe("old-access");
+		expect(localStorage.getItem(REFRESH_KEY)).toBe("refresh-1");
+	});
+
 	it("リフレッシュトークンが不在ならリフレッシュせず/welcomeへ遷移する", async () => {
 		const assign = vi.fn();
 		vi.stubGlobal("location", { assign });

@@ -328,6 +328,34 @@ describe("authSession.offline", () => {
 		expect(authSession.offline).toBe(false);
 	});
 
+	it("setTokensでオフラインを解く(サインインし直したら復元の再試行は不要)", async () => {
+		localStorage.setItem(REFRESH_KEY, "refresh-1");
+		fetchMock.mockRejectedValueOnce(new TypeError("network down"));
+		await authSession.restore();
+		expect(authSession.offline).toBe(true);
+
+		authSession.setTokens(fakeJwt({ sub: "U1" }), "refresh-2");
+
+		expect(authSession.offline).toBe(false);
+	});
+
+	it("refreshの成功でもオフラインを解く", async () => {
+		localStorage.setItem(REFRESH_KEY, "refresh-1");
+		fetchMock.mockRejectedValueOnce(new TypeError("network down"));
+		await authSession.restore();
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(200, {
+				access_token: fakeJwt({ sub: "U1" }),
+				refresh_token: "refresh-2",
+				expires_in: 3600,
+			}),
+		);
+
+		await expect(authSession.refresh()).resolves.toBe(true);
+
+		expect(authSession.offline).toBe(false);
+	});
+
 	it("clearでオフラインを解く", async () => {
 		localStorage.setItem(REFRESH_KEY, "refresh-1");
 		fetchMock.mockRejectedValueOnce(new TypeError("network down"));
@@ -377,5 +405,25 @@ describe("authSession.onClear", () => {
 
 		expect(listener).toHaveBeenCalledTimes(1);
 		off();
+	});
+});
+
+describe("authSession.refreshOutcome", () => {
+	it("通信失敗はnetwork_error・明示拒否はrejected・成功はsuccessを返す", async () => {
+		localStorage.setItem(REFRESH_KEY, "refresh-1");
+		fetchMock.mockRejectedValueOnce(new TypeError("network down"));
+		await expect(authSession.refreshOutcome()).resolves.toBe("network_error");
+
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(200, {
+				access_token: fakeJwt({ sub: "U1" }),
+				refresh_token: "refresh-2",
+				expires_in: 3600,
+			}),
+		);
+		await expect(authSession.refreshOutcome()).resolves.toBe("success");
+
+		fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }));
+		await expect(authSession.refreshOutcome()).resolves.toBe("rejected");
 	});
 });
