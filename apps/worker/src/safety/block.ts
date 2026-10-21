@@ -27,7 +27,7 @@ export type BlockOutcome =
 	| { ok: false; reason: "not_found" | "self_block" };
 
 /** 退会済みの相手の一覧での表示名(F7a設計 §2.1・prototype README §7 #2) */
-const DELETED_DISPLAY_NAME = "つながっていた相手";
+export const DELETED_DISPLAY_NAME = "つながっていた相手";
 
 /** 取り消しの対象になる進行中の状態(F7a設計 §2.2の1) */
 const OPEN_STATUSES: LatchStatus[] = [
