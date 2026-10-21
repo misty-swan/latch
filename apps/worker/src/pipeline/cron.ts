@@ -36,6 +36,7 @@ import {
 	sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { ulid } from "ulid";
 import { type Clock, jstDayKey, jstMonthKey } from "../clock/clock";
 import {
 	groupCandidates,
@@ -44,6 +45,7 @@ import {
 	latchResponses,
 	matchCandidates,
 	matchEvents,
+	notifications,
 	usageCounters,
 } from "../db/schema";
 import type { Env } from "../env";
@@ -53,6 +55,8 @@ import { completeDueLatches } from "../latches/complete";
 import { proposeNextGroupAfterClose } from "../latches/next-group";
 import { expireHeld, releaseHeld } from "../latches/release";
 import { createLogger } from "../logging/logger";
+import { flushPush } from "../push/dispatch";
+import { pushSenderOf } from "../push/sender";
 import { createVectorStore } from "../vectorstore";
 import { syncVectorStatus } from "../vectorstore/sync-status";
 import type { StoredVector } from "../vectorstore/types";
@@ -188,6 +192,46 @@ const runCatchUpSweep = async (env: Env, clock: Clock): Promise<void> => {
  * 第2窓: ベクトル削除を先に実行し、成功後にvector_deleted_atへ記録する
  * (記録が先行すると削除済みでも再試行できなくなるため)
  */
+/**
+ * intent_expiredのアプリ内通知を1件書く文(F7b設計 §5.7)。IDはULIDをJS側で採番するため
+ * Intent1件につき1文。status=expiredのIntentだけを選び、UNIQUE(intent_id, type)の
+ * 競合は無視する(再実行・再走査で二重に作らない)。列順はnotificationsの定義順
+ * (id・user_id・type・latch_id・read_at・created_at・intent_id・push_state・push_attempted_at)
+ */
+export const intentExpiredInsert = (
+	db: ReturnType<typeof drizzle>,
+	intentId: string,
+	now: Date,
+) =>
+	db
+		.insert(notifications)
+		.select(
+			sql`SELECT ${ulid()} AS id, user_id, 'intent_expired' AS type, NULL AS latch_id,
+				NULL AS read_at, ${now.getTime()} AS created_at, id AS intent_id,
+				'none' AS push_state, NULL AS push_attempted_at
+				FROM intents WHERE id = ${intentId} AND status = 'expired'`,
+		)
+		.onConflictDoNothing();
+
+/**
+ * Pushの回収(F7b設計 §5.6)。作成から10分を過ぎたpendingは試行を打ち切ってfailedへ倒し、
+ * 残りのうち作成から30秒以上のものを再送する(送信直後の起動と競合しない間隔)
+ */
+export const runPushSweep = async (env: Env, clock: Clock): Promise<void> => {
+	const db = drizzle(env.DB);
+	const now = clock.now();
+	await db
+		.update(notifications)
+		.set({ pushState: "failed" })
+		.where(
+			and(
+				eq(notifications.pushState, "pending"),
+				lt(notifications.createdAt, new Date(now.getTime() - 10 * 60_000)),
+			),
+		);
+	await flushPush(db, pushSenderOf(env), now, { minAgeMs: 30_000 });
+};
+
 const runExpiryWindows = async (env: Env, clock: Clock): Promise<void> => {
 	const db = drizzle(env.DB);
 	const nowMs = clock.now().getTime();
@@ -245,17 +289,17 @@ const runExpiryWindows = async (env: Env, clock: Clock): Promise<void> => {
 					inArray(groupCandidates.id, closingGroups.slice(i, i + UPDATE_CHUNK)),
 				);
 		}
-		// expired化(ステートメント内でstatus=activeを再確認する)
+		// expired化(ステートメント内でstatus=activeを再確認する)。同じ1バッチに
+		// intent_expiredのアプリ内通知を置く(expired化が0行なら書かれない・F7b設計 §5.7)
 		for (let i = 0; i < ids.length; i += UPDATE_CHUNK) {
-			await db
-				.update(intents)
-				.set({ status: "expired" })
-				.where(
-					and(
-						eq(intents.status, "active"),
-						inArray(intents.id, ids.slice(i, i + UPDATE_CHUNK)),
-					),
-				);
+			const chunk = ids.slice(i, i + UPDATE_CHUNK);
+			await db.batch([
+				db
+					.update(intents)
+					.set({ status: "expired" })
+					.where(and(eq(intents.status, "active"), inArray(intents.id, chunk))),
+				...chunk.map((id) => intentExpiredInsert(db, id, now)),
+			]);
 		}
 		// ベクトルmetadata.statusの同期(best-effort・docs/06 §2)
 		for (const row of expiring) {
@@ -808,6 +852,7 @@ export const runScheduledPipeline = async (
 	);
 	await runIsolated("budget_alert", () => runBudgetAlert(env, clock));
 	await runIsolated("pending", () => runPendingSweep(env, clock));
+	await runIsolated("push", () => runPushSweep(env, clock));
 	await runIsolated("completion", async () => {
 		await completeDueLatches(drizzle(env.DB), clock.now());
 	});

@@ -920,6 +920,42 @@ describe("DELETE /v1/intents/{id}(削除・docs/05 §3.1・§3.2)", () => {
 		expect(row).toBeUndefined();
 	});
 
+	it("削除でそのIntentのintent_expired通知だけが消え、他の通知は残る", async () => {
+		const accessToken = await registerUser("delete-notif");
+		const created = await createActiveConnection(
+			accessToken,
+			"通知つきの学習仲間",
+		);
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, created.id));
+		const userId = row?.userId as string;
+		const base = {
+			userId,
+			createdAt: new Date(),
+		};
+		const expiredId = ulid();
+		const otherId = ulid();
+		await db.insert(notifications).values([
+			{ ...base, id: expiredId, type: "intent_expired", intentId: created.id },
+			{
+				...base,
+				id: otherId,
+				type: "proposal",
+				latchId: ulid(),
+				pushState: "none",
+			},
+		]);
+		const res = await deleteReq(`/v1/intents/${created.id}`, accessToken);
+		expect(res.status).toBe(204);
+		const left = await db
+			.select({ id: notifications.id })
+			.from(notifications)
+			.where(inArray(notifications.id, [expiredId, otherId]));
+		expect(left.map((r) => r.id)).toEqual([otherId]);
+	});
+
 	it("他人のIntentの削除は404・行は残る(存在を隠す)", async () => {
 		const owner = await registerUser("del-owner");
 		const other = await registerUser("del-other");

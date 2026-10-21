@@ -54,6 +54,7 @@ import {
 	intents,
 	matchCandidates,
 	matchEvents,
+	notifications,
 	users,
 } from "../db/schema";
 import type { Env } from "../env";
@@ -1059,6 +1060,8 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 			sql`EXISTS (SELECT 1 FROM json_each(${groupCandidates.intentIds}) WHERE json_each.value = ${target.id})`,
 		);
 	await db.delete(matchEvents).where(eq(matchEvents.sourceIntentId, target.id));
+	// 期限切れの通知(intent_expired)も消す(F7b設計 §5.7。対象が消えた通知を残さない)
+	await db.delete(notifications).where(eq(notifications.intentId, target.id));
 	const [deleted] = await db
 		.delete(intents)
 		.where(and(eq(intents.id, target.id), eq(intents.userId, sub)))

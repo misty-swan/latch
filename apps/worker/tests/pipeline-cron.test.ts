@@ -31,6 +31,7 @@ import {
 	matchEvents,
 	notifications,
 	proposalHistory,
+	pushSubscriptions,
 	usageCounters,
 	users,
 } from "../src/db/schema";
@@ -38,7 +39,11 @@ import type { Env as WorkerEnv } from "../src/env";
 import worker from "../src/index";
 import { MS_PER_DAY } from "../src/intents/expiry";
 import { stubEmbedding } from "../src/llm/stub/embedding";
-import { runScheduledPipeline } from "../src/pipeline/cron";
+import {
+	intentExpiredInsert,
+	runPushSweep,
+	runScheduledPipeline,
+} from "../src/pipeline/cron";
 import { buildNormalizedText } from "../src/pipeline/normalize";
 import {
 	memoryVectorStore,
@@ -1134,5 +1139,77 @@ describe("結線(index.tsのscheduledハンドラ)", () => {
 		// 期限切れ2窓・bucket走査が動いている(結線の証明)
 		expect((await rowOf(expiring.id))?.status).toBe("expired");
 		expect((await rowOf(bucketTarget.id))?.lastEvaluatedAt).not.toBeNull();
+	});
+});
+
+describe("F7b: Intent期限切れのアプリ内通知とPushの回収(F7b設計 §5.6・§5.7)", () => {
+	it("期限切れにしたIntentごとに本人へintent_expired(intent_id付き・none)が1行・再書き込みしても1行のまま", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const expiring = intentFixture({
+			id: ulid(),
+			userId,
+			expiresAt: new Date(BASE - 1 * MIN),
+		});
+		const healthy = intentFixture({ id: ulid(), userId });
+		for (const row of [expiring, healthy]) await insertIntentRow(row);
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		const rows = await db
+			.select()
+			.from(notifications)
+			.where(eq(notifications.userId, userId));
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			type: "intent_expired",
+			intentId: expiring.id,
+			latchId: null,
+			pushState: "none",
+		});
+		// 同じIntentへもう一度書いても増えない(UNIQUE(intent_id, type))
+		await db.batch([intentExpiredInsert(db, expiring.id, FIXED_NOW)]);
+		await runScheduledPipeline(testEnv, directClock);
+		const after = await db
+			.select()
+			.from(notifications)
+			.where(eq(notifications.userId, userId));
+		expect(after).toHaveLength(1);
+	});
+
+	it("runPushSweep: 40秒前のpendingはsent・11分前はfailed・20秒前はpendingのまま", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		await db.insert(pushSubscriptions).values({
+			id: ulid(),
+			userId,
+			endpoint: `https://push.example/${ulid()}`,
+			p256dh: "p",
+			auth: "a",
+			status: "active",
+			createdAt: FIXED_NOW,
+		});
+		const mk = async (ageMs: number) => {
+			const id = ulid();
+			await db.insert(notifications).values({
+				id,
+				userId,
+				type: "proposal",
+				latchId: ulid(),
+				createdAt: new Date(BASE - ageMs),
+				pushState: "pending",
+			});
+			return id;
+		};
+		const fresh = await mk(20_000);
+		const mid = await mk(40_000);
+		const old = await mk(11 * MIN);
+		await runPushSweep(testEnv, directClock);
+		const stateOf = async (id: string) =>
+			(await db.select().from(notifications).where(eq(notifications.id, id)))[0]
+				?.pushState;
+		expect(await stateOf(fresh)).toBe("pending");
+		expect(await stateOf(mid)).toBe("sent");
+		expect(await stateOf(old)).toBe("failed");
 	});
 });
