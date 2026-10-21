@@ -450,6 +450,46 @@ describe("POST /v1/reports", () => {
 		expect(rows.filter((r) => r.status === "open")).toHaveLength(1);
 	});
 
+	it("target=messageの再送は同じmessage_idなら1行のまま", async () => {
+		const [a, b] = [await registerUser("rr1"), await registerUser("rr2")];
+		const latchId = await seedLatch([a, b], "matched");
+		const msg = await seedMessage(latchId, b.id);
+		const body = {
+			latch_id: latchId,
+			target: "message",
+			reportee_user_id: b.id,
+			message_id: msg,
+		};
+		expect((await post(a.token, { ...body, reason: "spam" })).status).toBe(201);
+		expect(
+			(await post(a.token, { ...body, reason: "other", note: "再送" })).status,
+		).toBe(201);
+		const rows = await rowsOf(a.id, latchId);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.reason).toBe("other");
+		expect(rows[0]?.note).toBe("再送");
+		expect(rows[0]?.messageId).toBe(msg);
+	});
+
+	it("target=proposalの再送は他の参加者ごとに1行のまま", async () => {
+		const [a, b, c] = [
+			await registerUser("rq1"),
+			await registerUser("rq2"),
+			await registerUser("rq3"),
+		];
+		const latchId = await seedLatch([a, b, c], "proposed", { min: 3 });
+		const body = { latch_id: latchId, target: "proposal" };
+		await post(a.token, { ...body, reason: "spam", note: "一回目" });
+		await post(a.token, { ...body, reason: "harassment", note: "二回目" });
+		const rows = await rowsOf(a.id, latchId);
+		expect(rows).toHaveLength(2);
+		expect(rows.map((r) => r.reportee).sort()).toEqual([b.id, c.id].sort());
+		for (const r of rows) {
+			expect(r.reason).toBe("harassment");
+			expect(r.note).toBe("二回目");
+		}
+	});
+
 	it("通報後も被通報者のLATCH応答に通報に関する値が無い", async () => {
 		const [a, b] = [await registerUser("rv1"), await registerUser("rv2")];
 		const latchId = await seedLatch([a, b], "matched");
