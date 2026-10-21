@@ -20,6 +20,11 @@ export interface LatchDtoOptions {
 	matchedAt: Date | null;
 	/** 自分を除く参加者。成立後(matched経由)のときだけ渡す。渡さなければ成立前の形 */
 	members?: (typeof users.$inferSelect)[];
+	/** 最終メッセージと本人の未読数。membersと同じく成立後(matched経由)のときだけ渡す(F6a設計 §3.2) */
+	chat?: {
+		lastMessage: { body: string; createdAt: Date; userId: string } | null;
+		unreadCount: number;
+	};
 }
 
 export const toLatchDto = (
@@ -43,6 +48,17 @@ export const toLatchDto = (
 			const { display_name, bio, has_icon } = toUserDto(u);
 			return { user_id: u.id, display_name, bio, has_icon };
 		});
+	}
+	if (opts.chat !== undefined) {
+		dto.last_message =
+			opts.chat.lastMessage === null
+				? null
+				: {
+						body: opts.chat.lastMessage.body,
+						created_at: opts.chat.lastMessage.createdAt.toISOString(),
+						user_id: opts.chat.lastMessage.userId,
+					};
+		dto.unread_count = opts.chat.unreadCount;
 	}
 	return dto;
 };

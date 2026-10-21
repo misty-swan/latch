@@ -15,11 +15,22 @@ import {
 	type LatchResponseValue,
 	latchResponseRequestSchema,
 } from "@latch/shared";
-import { and, desc, eq, inArray, isNull, lt, ne } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	exists,
+	inArray,
+	isNull,
+	lt,
+	ne,
+	or,
+} from "drizzle-orm";
 import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { type AppEnv, requireRegistered } from "../auth/middleware";
+import { chatSummary } from "../chat/messages";
 import { systemClock } from "../clock/clock";
 import {
 	intents,
@@ -107,6 +118,8 @@ const loadLatchDto = async (
 				eq(latchMembers.latchId, latches.id),
 				eq(latchMembers.userId, userId),
 				options.includeLeft === true ? undefined : isNull(latchMembers.leftAt),
+				// 本人が一覧から消したLATCHは非参加と同じ扱い(F6a設計 §2.3)。離脱応答でも変えない
+				isNull(latchMembers.hiddenAt),
 			),
 		)
 		.where(and(eq(latches.id, latchId), ne(latches.status, "candidate")));
@@ -164,11 +177,14 @@ const loadLatchDto = async (
 		matchedAt = ev?.createdAt ?? null;
 	}
 	const revealed = latch.status === "matched" || matchedAt !== null;
+	// 最終メッセージ・未読数はmembersと同じ成立後だけ(F6a設計 §3.2)
+	const chat = revealed ? await chatSummary(db, latchId, userId) : undefined;
 	return toLatchDto(latch, {
 		participantsCount: memberRows.length,
 		myResponse: (mine?.response ?? null) as LatchResponseValue | null,
 		myIntentId: myIntent?.id ?? null,
 		matchedAt,
+		chat,
 		members: revealed
 			? memberRows.filter((m) => m.user.id !== userId).map((m) => m.user)
 			: undefined,
@@ -235,13 +251,27 @@ latchRoutes.get("/", requireRegistered, async (c) => {
 		cursorId = decoded;
 	}
 	const db = dbOf(c.env);
+	// 成立一覧はmatched経由のcancelled(相手の離脱で終わったもの)も含める(F6a設計 §3.3)
 	const conditions = [
-		inArray(
-			latches.status,
-			type === "proposals"
-				? ["proposed", "partial_accept"]
-				: ["matched", "completed"],
-		),
+		type === "proposals"
+			? inArray(latches.status, ["proposed", "partial_accept"])
+			: or(
+					inArray(latches.status, ["matched", "completed"]),
+					and(
+						eq(latches.status, "cancelled"),
+						exists(
+							db
+								.select({ one: latchStatusEvents.id })
+								.from(latchStatusEvents)
+								.where(
+									and(
+										eq(latchStatusEvents.latchId, latches.id),
+										eq(latchStatusEvents.toStatus, "matched"),
+									),
+								),
+						),
+					),
+				),
 	];
 	if (cursorId !== undefined) {
 		conditions.push(lt(latches.id, cursorId));
@@ -256,6 +286,7 @@ latchRoutes.get("/", requireRegistered, async (c) => {
 				eq(latchMembers.latchId, latches.id),
 				eq(latchMembers.userId, sub),
 				isNull(latchMembers.leftAt),
+				isNull(latchMembers.hiddenAt),
 			),
 		)
 		.where(and(...conditions))

@@ -9,12 +9,14 @@ import { importJWK, SignJWT } from "jose";
 import { ulid } from "ulid";
 import { describe, expect, it } from "vitest";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
+import { markRead } from "../src/chat/messages";
 import {
 	intents,
 	latches,
 	latchMembers,
 	latchResponses,
 	latchStatusEvents,
+	messages,
 	proposalHistory,
 } from "../src/db/schema";
 import privateJwkText from "./fixtures/test-idp-private.jwk?raw";
@@ -705,5 +707,113 @@ describe("グループの成立後の離脱(F4b設計 §3.4・オーナー裁定
 		expect(((await res2.json()) as { status: string }).status).toBe(
 			"cancelled",
 		);
+	});
+});
+
+describe("成立後のLatchDTOの最終メッセージ・未読数と一覧の範囲(F6a設計 §2.3・§3.2・§3.3)", () => {
+	const sendMessage = async (latchId: string, userId: string, body: string) => {
+		const id = ulid();
+		await db.insert(messages).values({
+			id,
+			latchId,
+			userId,
+			body,
+			createdAt: new Date(),
+			clientId: null,
+		});
+		return id;
+	};
+	type ChatDto = {
+		status: string;
+		participants_count: number;
+		members?: unknown[];
+		last_message?: { body: string; created_at: string; user_id: string } | null;
+		unread_count?: number;
+	};
+	const getDto = async (id: string, token: string): Promise<ChatDto> =>
+		(await (await call("GET", `/v1/latches/${id}`, token)).json()) as ChatDto;
+
+	it("成立後のDTOはlast_message(0件ならnull)とunread_countを持つ", async () => {
+		const { a, b, id } = await setup("matched");
+		const empty = await getDto(id, a.token);
+		expect(empty.last_message).toBeNull();
+		expect(empty.unread_count).toBe(0);
+		await sendMessage(id, b.id, "こんにちは");
+		const got = await getDto(id, a.token);
+		expect(got.last_message?.body).toBe("こんにちは");
+		expect(got.last_message?.user_id).toBe(b.id);
+		expect(Number.isNaN(Date.parse(got.last_message?.created_at ?? ""))).toBe(
+			false,
+		);
+		expect(got.unread_count).toBe(1);
+	});
+
+	it("成立前(proposed)のDTOにはlast_message・unread_countのキー自体が無い", async () => {
+		const { a, id } = await setup("proposed");
+		const dto = await getDto(id, a.token);
+		expect("last_message" in dto).toBe(false);
+		expect("unread_count" in dto).toBe(false);
+	});
+
+	it("未読は相手の送信だけを数え、既読記録で0になる", async () => {
+		const { a, b, id } = await setup("matched");
+		await sendMessage(id, a.id, "自分の送信");
+		await sendMessage(id, b.id, "相手1");
+		const last = await sendMessage(id, b.id, "相手2");
+		expect((await getDto(id, a.token)).unread_count).toBe(2);
+		expect((await getDto(id, b.token)).unread_count).toBe(1);
+		await markRead(db, id, a.id, last);
+		expect((await getDto(id, a.token)).unread_count).toBe(0);
+	});
+
+	it("1対1をleaveでcancelledにすると、残された側のtype=matchedに出て、離脱した本人には出ない", async () => {
+		const { a, b, id } = await setup("proposed");
+		expect((await yes(id, a.token)).status).toBe(200);
+		expect((await yes(id, b.token)).status).toBe(200);
+		const res = await call("POST", `/v1/latches/${id}/leave`, a.token);
+		expect(((await res.json()) as { status: string }).status).toBe("cancelled");
+		const listB = (await (
+			await call("GET", "/v1/latches?type=matched", b.token)
+		).json()) as { items: (ChatDto & { id: string })[] };
+		const item = listB.items.find((i) => i.id === id);
+		expect(item?.status).toBe("cancelled");
+		expect(item?.unread_count).toBe(0);
+		// 本人の側はDELETE(表示から消す)がleaveに加えて記録するhidden_atで一覧から消える(POST /leave単独は本人のleft_atを記録しない1対1の既存挙動)
+		await db
+			.update(latchMembers)
+			.set({ hiddenAt: new Date() })
+			.where(and(eq(latchMembers.latchId, id), eq(latchMembers.userId, a.id)));
+		const listA = (await (
+			await call("GET", "/v1/latches?type=matched", a.token)
+		).json()) as { items: { id: string }[] };
+		expect(listA.items.map((i) => i.id)).not.toContain(id);
+	});
+
+	it("matchedを経ないcancelledはtype=matchedに出ない", async () => {
+		const { a, id } = await setup("proposed");
+		await db
+			.update(latches)
+			.set({ status: "cancelled" })
+			.where(eq(latches.id, id));
+		const list = (await (
+			await call("GET", "/v1/latches?type=matched", a.token)
+		).json()) as { items: { id: string }[] };
+		expect(list.items.map((i) => i.id)).not.toContain(id);
+	});
+
+	it("hidden_atを立てた本人の一覧・単一取得から消え、相手のmembers・participants_countは変わらない", async () => {
+		const { a, b, id } = await setup("matched");
+		await db
+			.update(latchMembers)
+			.set({ hiddenAt: new Date() })
+			.where(and(eq(latchMembers.latchId, id), eq(latchMembers.userId, a.id)));
+		expect((await call("GET", `/v1/latches/${id}`, a.token)).status).toBe(404);
+		const listA = (await (
+			await call("GET", "/v1/latches?type=matched", a.token)
+		).json()) as { items: { id: string }[] };
+		expect(listA.items.map((i) => i.id)).not.toContain(id);
+		const gotB = await getDto(id, b.token);
+		expect(gotB.participants_count).toBe(2);
+		expect(gotB.members).toHaveLength(1);
 	});
 });
