@@ -38,7 +38,7 @@ export interface L1Judgement {
 }
 
 /** 飲酒を伴う機会Intentに必要な満年齢(docs/06 §3・08 §8。作成時の18歳検証とは別値) */
-const LEGAL_DRINKING_AGE = 20;
+export const LEGAL_DRINKING_AGE = 20;
 
 /** D1照会のチャンク幅(100件・docs/06 §3) */
 const CHUNK_SIZE = 100;

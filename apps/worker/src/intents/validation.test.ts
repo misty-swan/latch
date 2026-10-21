@@ -7,7 +7,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { fixedClock } from "../clock/clock";
 import { connectionExpiry, MS_PER_DAY, occasionDefaultExpiry } from "./expiry";
-import { validateIntentForActive } from "./validation";
+import { isAlcoholRestricted, validateIntentForActive } from "./validation";
 
 const MS_PER_HOUR = 3_600_000;
 const MS_PER_MINUTE = 60_000;
@@ -233,4 +233,69 @@ describe("validateIntentForActive(docs/05 §2.2: active化検証)", () => {
 		);
 		expect(atMax.ok).toBe(true);
 	});
+});
+
+describe("isAlcoholRestricted(F7a設計 §4・docs/08 §8: 20歳未満の飲酒を含む機会Intent)", () => {
+	// now=2026-10-18T00:00:00Z=JST 2026-10-18 09:00。2006-10-18生まれは当日に満20歳
+	const cases: Array<{
+		name: string;
+		form: "occasion" | "connection" | null;
+		alcoholInvolved: boolean;
+		birthDate: string;
+		expected: boolean;
+	}> = [
+		{
+			name: "occasion+飲酒+19歳は制限",
+			form: "occasion",
+			alcoholInvolved: true,
+			birthDate: "2007-10-18",
+			expected: true,
+		},
+		{
+			name: "誕生日前日(満20歳の前日)は制限",
+			form: "occasion",
+			alcoholInvolved: true,
+			birthDate: "2006-10-19",
+			expected: true,
+		},
+		{
+			name: "誕生日当日(満20歳)は制限なし",
+			form: "occasion",
+			alcoholInvolved: true,
+			birthDate: "2006-10-18",
+			expected: false,
+		},
+		{
+			name: "connectionは飲酒でも制限なし",
+			form: "connection",
+			alcoholInvolved: true,
+			birthDate: "2007-10-18",
+			expected: false,
+		},
+		{
+			name: "formがnullは制限なし",
+			form: null,
+			alcoholInvolved: true,
+			birthDate: "2007-10-18",
+			expected: false,
+		},
+		{
+			name: "飲酒なしは制限なし",
+			form: "occasion",
+			alcoholInvolved: false,
+			birthDate: "2007-10-18",
+			expected: false,
+		},
+	];
+	for (const c of cases) {
+		it(c.name, () => {
+			expect(
+				isAlcoholRestricted(
+					{ form: c.form, alcoholInvolved: c.alcoholInvolved },
+					c.birthDate,
+					now,
+				),
+			).toBe(c.expected);
+		});
+	}
 });

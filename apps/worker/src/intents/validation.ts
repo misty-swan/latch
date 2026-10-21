@@ -7,6 +7,8 @@ import {
 	type IntentForm,
 	OCCASION_STARTS_AT_MAX_DAYS_AHEAD,
 } from "@latch/shared";
+import { ageAtYears } from "../auth/age";
+import { LEGAL_DRINKING_AGE } from "../pipeline/layer1";
 import {
 	connectionExpiry,
 	type ExpiryDays,
@@ -99,3 +101,17 @@ export const validateIntentForActive = (
 	// 機会でstarts_at無し(上でstarts_at_requiredを列挈済みのため通常到達しない)
 	return { ok: false, reasons };
 };
+
+/**
+ * 20歳未満の飲酒を含む機会Intentか(F7a設計 §4・docs/08 §8)。
+ * form=occasionかつalcohol_involvedで、満年齢が飲酒年齢(Layer 1と同じ定数)未満なら制限する。
+ * 現在時刻は呼び出し側から受け取る(docs/04 §4)
+ */
+export const isAlcoholRestricted = (
+	f: { form: IntentForm | null; alcoholInvolved: boolean },
+	birthDate: string,
+	now: Date,
+): boolean =>
+	f.form === "occasion" &&
+	f.alcoholInvolved &&
+	ageAtYears(now, birthDate) < LEGAL_DRINKING_AGE;

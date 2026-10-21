@@ -53,12 +53,16 @@ import {
 	intents,
 	matchCandidates,
 	matchEvents,
+	users,
 } from "../db/schema";
 import type { Env } from "../env";
 import { type ErrorResult, errorJson } from "../http/errors";
 import { newUlid } from "../ids";
 import { MS_PER_DAY } from "../intents/expiry";
-import { validateIntentForActive } from "../intents/validation";
+import {
+	isAlcoholRestricted,
+	validateIntentForActive,
+} from "../intents/validation";
 import {
 	cancelOpenLatches,
 	openLatchIdsOfIntent,
@@ -390,6 +394,30 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 				"VALIDATION_FAILED",
 				"Intentを有効にするには内容の確認が必要です",
 				{ reasons: validation.reasons },
+			);
+			return c.json(r.body, r.status);
+		}
+		// 20歳未満の飲酒を含む機会Intentは有効化できない(F7a設計 §4・docs/08 §8)。
+		// 上限判定より先に行う(上限に達していても飲酒年齢の理由を優先して返す)
+		const [owner] = await db
+			.select({ birthDate: users.birthDate })
+			.from(users)
+			.where(eq(users.id, sub))
+			.limit(1);
+		if (
+			owner &&
+			isAlcoholRestricted(
+				{ form: d.form ?? null, alcoholInvolved: d.alcohol_involved },
+				owner.birthDate,
+				now,
+			)
+		) {
+			logger.warn("intents.create.rejected", {
+				error_code: "ALCOHOL_RESTRICTED",
+			});
+			const r = errorJson(
+				"ALCOHOL_RESTRICTED",
+				"20歳未満の方は、お酒を含む機会のIntentを有効にできません",
 			);
 			return c.json(r.body, r.status);
 		}
@@ -783,6 +811,33 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 				"VALIDATION_FAILED",
 				"Intentを有効にするには内容の確認が必要です",
 				{ reasons: validation.reasons },
+			);
+			return c.json(r.body, r.status);
+		}
+		// 20歳未満の飲酒を含む機会Intentは有効化できない(F7a設計 §4・docs/08 §8)。
+		// 上限判定より先に行う(上限に達していても飲酒年齢の理由を優先して返す)
+		const [owner] = await db
+			.select({ birthDate: users.birthDate })
+			.from(users)
+			.where(eq(users.id, sub))
+			.limit(1);
+		if (
+			owner &&
+			isAlcoholRestricted(
+				{
+					form: d.form ?? row.form,
+					alcoholInvolved: d.alcohol_involved ?? row.alcoholInvolved,
+				},
+				owner.birthDate,
+				now,
+			)
+		) {
+			logger.warn("intents.update.rejected", {
+				error_code: "ALCOHOL_RESTRICTED",
+			});
+			const r = errorJson(
+				"ALCOHOL_RESTRICTED",
+				"20歳未満の方は、お酒を含む機会のIntentを有効にできません",
 			);
 			return c.json(r.body, r.status);
 		}

@@ -89,7 +89,10 @@ interface ErrorResponse {
  * auth/token→POST /v1/usersで登録済みユーザーを作りアクセストークンを返す実フロー。
  * subjectは試験ごとにユニーク
  */
-const registerUser = async (label: string): Promise<string> => {
+const registerUser = async (
+	label: string,
+	birthDate: string = birthDateYearsAgo(25),
+): Promise<string> => {
 	const tokenRes = await postJson("/v1/auth/token", {
 		provider: "google",
 		idp_token: await signIdpToken(`${label}-${crypto.randomUUID()}`),
@@ -102,7 +105,7 @@ const registerUser = async (label: string): Promise<string> => {
 	expect(tokenBody.registration_required).toBe(true);
 	const regRes = await postJson(
 		"/v1/users",
-		{ display_name: `${label}テスト`, birth_date: birthDateYearsAgo(25) },
+		{ display_name: `${label}テスト`, birth_date: birthDate },
 		{ Authorization: `Bearer ${tokenBody.access_token}` },
 	);
 	expect(regRes.status).toBe(201);
@@ -481,5 +484,78 @@ describe("POST /v1/intents・入力検証と上限(docs/05 §3.1・§2.2)", () =
 		expect(res.status).toBe(401);
 		const body = (await res.json()) as ErrorResponse;
 		expect(body.error.code).toBe("UNAUTHORIZED");
+	});
+});
+
+/** 飲酒を含む機会Intentのactive作成ボディ(2日後開始) */
+const alcoholOccasionBody = (
+	extra: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+	raw_text: "土曜の夜に一緒に飲みに行きたい",
+	form: "occasion",
+	topic: "土曜の飲み会",
+	time: {
+		start: new Date(Date.now() + 2 * MS_PER_DAY).toISOString(),
+		end: null,
+	},
+	alcohol_involved: true,
+	...extra,
+});
+
+describe("POST /v1/intents・飲酒年齢(F7a設計 §4・docs/08 §8)", () => {
+	it("19歳が飲酒の機会Intentをactiveで作ると422 ALCOHOL_RESTRICTED・draftは201", async () => {
+		const accessToken = await registerUser("alc-19", birthDateYearsAgo(19));
+		const res = await postIntents(accessToken, alcoholOccasionBody());
+		expect(res.status).toBe(422);
+		const body = (await res.json()) as ErrorResponse;
+		expect(body.error.code).toBe("ALCOHOL_RESTRICTED");
+		const draft = await postIntents(
+			accessToken,
+			alcoholOccasionBody({ status: "draft" }),
+		);
+		expect(draft.status).toBe(201);
+	});
+
+	it("誕生日当日に満20歳なら201・前日なら422", async () => {
+		const okToken = await registerUser("alc-20", birthDateYearsAgo(20));
+		expect((await postIntents(okToken, alcoholOccasionBody())).status).toBe(
+			201,
+		);
+		// 20年前の同日の翌日生まれ=あと1日で満20歳
+		const next = new Date(`${birthDateYearsAgo(20)}T00:00:00Z`);
+		next.setUTCDate(next.getUTCDate() + 1);
+		const ngToken = await registerUser(
+			"alc-eve",
+			next.toISOString().slice(0, 10),
+		);
+		const res = await postIntents(ngToken, alcoholOccasionBody());
+		expect(res.status).toBe(422);
+		expect(((await res.json()) as ErrorResponse).error.code).toBe(
+			"ALCOHOL_RESTRICTED",
+		);
+	});
+
+	it("飲酒なしの機会は19歳でも201", async () => {
+		const accessToken = await registerUser("alc-none", birthDateYearsAgo(19));
+		const res = await postIntents(
+			accessToken,
+			alcoholOccasionBody({ alcohol_involved: false }),
+		);
+		expect(res.status).toBe(201);
+	});
+
+	it("activeが5件ある19歳の飲酒機会は上限より先にALCOHOL_RESTRICTED", async () => {
+		const accessToken = await registerUser("alc-limit", birthDateYearsAgo(19));
+		for (let i = 0; i < 5; i++) {
+			expect(
+				(await postIntents(accessToken, connectionBody(`学習仲間その${i + 1}`)))
+					.status,
+			).toBe(201);
+		}
+		const res = await postIntents(accessToken, alcoholOccasionBody());
+		expect(res.status).toBe(422);
+		expect(((await res.json()) as ErrorResponse).error.code).toBe(
+			"ALCOHOL_RESTRICTED",
+		);
 	});
 });

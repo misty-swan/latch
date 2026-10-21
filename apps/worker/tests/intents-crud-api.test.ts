@@ -127,7 +127,10 @@ interface ErrorResponse {
  * auth/token→POST /v1/usersで登録済みユーザーを作りアクセストークンを返す実フロー。
  * subjectは試験ごとにユニーク
  */
-const registerUser = async (label: string): Promise<string> => {
+const registerUser = async (
+	label: string,
+	birthDate: string = birthDateYearsAgo(25),
+): Promise<string> => {
 	const tokenRes = await postJson("/v1/auth/token", {
 		provider: "google",
 		idp_token: await signIdpToken(`${label}-${crypto.randomUUID()}`),
@@ -140,7 +143,7 @@ const registerUser = async (label: string): Promise<string> => {
 	expect(tokenBody.registration_required).toBe(true);
 	const regRes = await postJson(
 		"/v1/users",
-		{ display_name: `${label}テスト`, birth_date: birthDateYearsAgo(25) },
+		{ display_name: `${label}テスト`, birth_date: birthDate },
 		{ Authorization: `Bearer ${tokenBody.access_token}` },
 	);
 	expect(regRes.status).toBe(201);
@@ -494,6 +497,37 @@ describe("PATCH /v1/intents/{id}・draft状態(docs/05 §3.2: 全項目可変+ac
 		expect(res.status).toBe(422);
 		const body = (await res.json()) as ErrorResponse;
 		expect(body.error.code).toBe("ACTIVE_INTENT_LIMIT");
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, draft.id));
+		expect(row?.status).toBe("draft");
+		expect(row?.version).toBe(1);
+	});
+
+	it("19歳のdraft(飲酒の機会)のactive化は422 ALCOHOL_RESTRICTED・draftのまま(F7a設計 §4)", async () => {
+		const accessToken = await registerUser(
+			"patch-alcohol",
+			birthDateYearsAgo(19),
+		);
+		const draft = await createDraft(accessToken);
+		const res = await patchJson(
+			`/v1/intents/${draft.id}`,
+			{
+				status: "active",
+				form: "occasion",
+				topic: "土曜の飲み会",
+				time: {
+					start: new Date(Date.now() + 2 * MS_PER_DAY).toISOString(),
+					end: null,
+				},
+				alcohol_involved: true,
+			},
+			accessToken,
+		);
+		expect(res.status).toBe(422);
+		const body = (await res.json()) as ErrorResponse;
+		expect(body.error.code).toBe("ALCOHOL_RESTRICTED");
 		const [row] = await db
 			.select()
 			.from(intents)
