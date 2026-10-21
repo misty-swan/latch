@@ -1,6 +1,6 @@
 /**
  * WebSocket接続チケット(F6a設計 §3.5)。ブラウザのWebSocketはAuthorizationヘッダを付けられないため、
- * 認証済みのPOSTで60秒の使い捨て相当のチケットを発行し、接続URLのクエリで渡す。
+ * 認証済みのPOSTで60秒有効のチケットを発行し、接続URLのクエリで渡す。1回限りの記録(jtiの使用済み)はChatRoomDOが担う。
  * HS256・iss="latch"・typ="ws_ticket"で、アクセストークンとは相互に通らない
  * (verifyAccessTokenはtypを持つトークンを拒否し、本検証はtyp一致を要求する)。
  * 時刻の規律(docs/04 §4): 発行時刻はClock引数でのみ受け取る。

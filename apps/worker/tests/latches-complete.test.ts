@@ -429,7 +429,12 @@ describe("completeOne(照会後の変化)", () => {
 });
 
 describe("Cronの入口", () => {
-	it("runScheduledPipelineで90日経過のつながりLATCHがcompletedになる", async () => {
+	// 同じファイルの先行試験が配置した未埋め込みのactiveなIntent(上限の試験で数百件)を、
+	// runScheduledPipelineのバックフィル(06 §2)も処理するため時間がかかる。埋め込み済みにすると
+	// ベクトル欠損の修復・未評価の回収が代わりに走るだけなので、全件の負荷下でも落ちない上限を置く
+	it("runScheduledPipelineで90日経過のつながりLATCHがcompletedになる", {
+		timeout: 15000,
+	}, async () => {
 		const { id } = await insertLatch("connection", {
 			lastMessageAt: ago(90 * DAY),
 		});

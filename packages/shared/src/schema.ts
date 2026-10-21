@@ -394,13 +394,13 @@ export const markReadRequestSchema = z
 	.strict();
 export type MarkReadRequest = z.infer<typeof markReadRequestSchema>;
 
-/** POST /v1/ws-tickets のリクエスト(F6a設計) */
+/** POST /v1/ws-ticket のリクエスト(F6a設計) */
 export const wsTicketRequestSchema = z
 	.object({ scope: z.literal("chat"), latch_id: ulidSchema })
 	.strict();
 export type WsTicketRequest = z.infer<typeof wsTicketRequestSchema>;
 
-/** POST /v1/ws-tickets のレスポンス(expires_inは有効秒数) */
+/** POST /v1/ws-ticket のレスポンス(expires_inは有効秒数) */
 export const wsTicketResponseSchema = z.object({
 	ticket: z.string(),
 	expires_in: z.literal(CHAT.WS_TICKET_TTL_SECONDS),
