@@ -29,6 +29,8 @@ export interface Env {
 	MATCH_QUEUE: Queue<MatchQueueMessage>;
 	/** パイプラインのメトリクス送信先(docs/04 §4)。dataset=latch_metrics */
 	PIPELINE_AX: AnalyticsEngineDataset;
+	/** チャットルームのDurable Object(成立LATCHごとに1DO・F6a設計 §1)。Workerのルートからのみ到達する */
+	CHAT_DO: DurableObjectNamespace;
 	LATCH_LLM_MODE: string;
 	/** Embeddingの動作モード(既定stub・llm/embedding.ts)。Parser/JevのLATCH_LLM_MODEとは独立に切り替える(07 §2) */
 	LATCH_EMBEDDING_MODE?: string;
