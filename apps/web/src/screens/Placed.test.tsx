@@ -17,9 +17,16 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../auth/session";
 import { readComposeState, saveComposeState } from "../intents/composeState";
+import { browserPushEnv, enablePush } from "../push/subscription";
 import { appRoutes } from "../router";
 import { PATHS } from "../routes/paths";
 import { withQueryClient } from "../test/helpers";
+
+// 購読の手順そのものはsubscription.test.tsで確かめるため・ここではenablePushだけを差し替える
+vi.mock("../push/subscription", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../push/subscription")>()),
+	enablePush: vi.fn(async () => "on"),
+}));
 
 const WORDS =
 	"イラストを描く人と、月1くらいで雑に絵を見せ合える関係になれたら嬉しい。初心者です。";
@@ -60,12 +67,16 @@ beforeEach(() => {
 	authSession.clear();
 	// placedは要認証ガードの内側のため・JWTを注入して置く
 	authSession.setTokens("access-placed", null);
+	// 既定はこの端末でまだ通知の許可を聞いていない状態
+	vi.spyOn(browserPushEnv, "permission").mockReturnValue("default");
+	vi.mocked(enablePush).mockClear();
 });
 
 afterEach(() => {
 	cleanup();
 	vi.useRealTimers();
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 	authSession.clear();
 	localStorage.clear();
 	sessionStorage.clear();
@@ -127,6 +138,69 @@ describe("Placed", () => {
 		});
 		expect(router.state.location.pathname).toBe(PATHS.home);
 	});
+
+	it("[通知を受け取る]はenablePushを待ってからhomeへ進む", async () => {
+		let finish: (value: "on") => void = () => {};
+		vi.mocked(enablePush).mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				}),
+		);
+		saveComposeState({ raw_text: WORDS, draft_id: null, parse });
+		const { router } = setup();
+
+		fireEvent.click(screen.getByRole("button", { name: "通知を受け取る" }));
+		expect(enablePush).toHaveBeenCalledTimes(1);
+		expect(router.state.location.pathname).toBe(PATHS.placed);
+		await act(async () => {
+			finish("on");
+		});
+		await waitFor(() => {
+			expect(router.state.location.pathname).toBe(PATHS.home);
+		});
+	});
+
+	it("[通知を受け取る]の手順のあいだは自動で進まない", async () => {
+		vi.useFakeTimers();
+		vi.mocked(enablePush).mockImplementation(() => new Promise(() => {}));
+		saveComposeState({ raw_text: WORDS, draft_id: null, parse });
+		const { router } = setup();
+
+		fireEvent.click(screen.getByRole("button", { name: "通知を受け取る" }));
+		act(() => {
+			vi.advanceTimersByTime(10_000);
+		});
+		expect(router.state.location.pathname).toBe(PATHS.placed);
+	});
+
+	it("[あとで]は購読せずhomeへ進む", async () => {
+		saveComposeState({ raw_text: WORDS, draft_id: null, parse });
+		const { router } = setup();
+
+		fireEvent.click(screen.getByRole("button", { name: "あとで" }));
+		await waitFor(() => {
+			expect(router.state.location.pathname).toBe(PATHS.home);
+		});
+		expect(enablePush).not.toHaveBeenCalled();
+	});
+
+	it.each(["denied", "unsupported", "granted"] as const)(
+		"許可が%sの端末ではpush-askを出さない",
+		(permission) => {
+			vi.mocked(browserPushEnv.permission).mockReturnValue(permission);
+			saveComposeState({ raw_text: WORDS, draft_id: null, parse });
+			const { container } = setup();
+
+			expect(container.querySelector(".push-ask")).toBeNull();
+			expect(
+				screen.queryByRole("button", { name: "通知を受け取る" }),
+			).toBeNull();
+			expect(
+				screen.getByRole("link", { name: "預けている一覧へ" }),
+			).toBeTruthy();
+		},
+	);
 
 	it("状態が無い直アクセスではhomeへ送り返す", async () => {
 		const { router } = setup();

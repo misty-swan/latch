@@ -16,6 +16,7 @@ import {
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../auth/session";
+import { browserPushEnv } from "../push/subscription";
 import { appRoutes } from "../router";
 import { PATHS } from "../routes/paths";
 import { withQueryClient } from "../test/helpers";
@@ -191,11 +192,14 @@ beforeEach(() => {
 	authSession.setTokens("access-home", null);
 	listResponse = jsonResponse(200, { items: [], next_cursor: null });
 	proposalsResponse = jsonResponse(200, { items: [], next_cursor: null });
+	// 既定は通知の許可が未決(帯は出ない)
+	vi.spyOn(browserPushEnv, "permission").mockReturnValue("default");
 });
 
 afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
+	vi.restoreAllMocks();
 	authSession.clear();
 	localStorage.clear();
 	sessionStorage.clear();
@@ -466,5 +470,42 @@ describe("Home", () => {
 
 		expect(await screen.findByText(connectionIntent.raw_text)).toBeTruthy();
 		expect(intentListCalls()).toBe(2);
+	});
+
+	it("通知がブラウザで拒否済みなら帯と[設定]を出す", async () => {
+		vi.mocked(browserPushEnv.permission).mockReturnValue("denied");
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		const router = setup();
+
+		expect(
+			await screen.findByText(
+				"通知がオフです。提案はアプリ内のお知らせでお伝えします。",
+			),
+		).toBeTruthy();
+		const settings = screen.getByRole("link", { name: "設定" });
+		expect(settings.getAttribute("href")).toBe(PATHS.settings);
+		fireEvent.click(settings);
+		await waitFor(() => {
+			expect(router.state.location.pathname).toBe(PATHS.settings);
+		});
+	});
+
+	it("通知が拒否済みでなければ帯を出さない", async () => {
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		setup();
+
+		expect(await screen.findByText(connectionIntent.raw_text)).toBeTruthy();
+		expect(
+			screen.queryByText(
+				"通知がオフです。提案はアプリ内のお知らせでお伝えします。",
+			),
+		).toBeNull();
+		expect(document.querySelector(".banner")).toBeNull();
 	});
 });

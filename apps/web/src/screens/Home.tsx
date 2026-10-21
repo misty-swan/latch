@@ -5,6 +5,7 @@
  * - 下書きカードは /compose?draft=<id> への再開導線・それ以外のカードの詳細はF3以降のため表示のみ
  * - 進行中の提案は到着カード(arrival)として見出しの後に並べ・提案先の意思カードは「回答を待っています」にする(F4c設計)。
  *   器の灯りは未回答の提案があるときだけ。提案の取得中・失敗時は到着カードを出さず意思の一覧だけ表示する
+ * - ブラウザで通知が拒否済みのときは「通知がオフです」の帯と[設定]を出す(設計書 §3.1・PushOff.dc.html)
  * - 右上はお知らせ(未読の点つき)と自分への入口(TopbarActions)
  * - 取得失敗時は再試行を出す(ボードに通信エラー画面がないための共通表示・実装の裁量)
  */
@@ -15,6 +16,7 @@ import { Link } from "react-router";
 import { INTENT_STATUS_LABELS, useIntentsQuery } from "../intents/queries";
 import { formatWhen } from "../latches/format";
 import { useProposalsQuery } from "../latches/queries";
+import { usePushStatus } from "../push/subscription";
 import { latchPath, PATHS } from "../routes/paths";
 import { LatchArt } from "./latch/art";
 import { ScreenGrain } from "./shared";
@@ -298,8 +300,27 @@ function HomeTopbar() {
 	);
 }
 
+/** 通知が拒否済みの帯(PushOff.dc.htmlの移植) */
+function PushOffBanner() {
+	return (
+		<p className="banner" style={{ marginBottom: 12 }}>
+			<svg className="ic" viewBox="0 0 24 24" aria-hidden="true">
+				<path d="M8.4 6.9a5.5 5.5 0 0 1 9.1 4.4v5.2l1.6 1.9H9.6" />
+				<path d="M6.5 11.3v5.2l-1.6 1.9H15" />
+				<path d="M10 20.6a2.1 2.1 0 0 0 4 0" />
+				<path d="M4 4l16 16" />
+			</svg>
+			<span>通知がオフです。提案はアプリ内のお知らせでお伝えします。</span>
+			<Link className="link" to={PATHS.settings} style={{ fontSize: 13 }}>
+				設定
+			</Link>
+		</p>
+	);
+}
+
 export function Home() {
 	const { data, isPending, isError, refetch } = useIntentsQuery();
+	const pushDenied = usePushStatus().data === "denied";
 	// 提案の取得中・失敗は空として扱い・意思の一覧だけを出す
 	const proposals = useProposalsQuery().data?.items ?? [];
 	const waitingIntentIds = new Set(
@@ -428,6 +449,7 @@ export function Home() {
 							: `いま、${activeCount}つの意思を預けています。`}
 					</p>
 				</div>
+				{pushDenied && <PushOffBanner />}
 				{proposals.map((latch) => (
 					<ArrivalCard key={latch.id} latch={latch} now={now} />
 				))}

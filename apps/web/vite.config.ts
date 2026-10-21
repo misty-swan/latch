@@ -8,6 +8,8 @@ export default defineConfig({
 		VitePWA({
 			registerType: "autoUpdate",
 			includeAssets: ["icon.svg"],
+			// プッシュの受信だけを素のJSで足す(生成するsw.jsは変えない・設計書 §3.2)
+			workbox: { importScripts: ["push-sw.js"] },
 			manifest: {
 				name: "LATCH",
 				short_name: "LATCH",
