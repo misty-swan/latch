@@ -6,6 +6,7 @@
 import type { LatchDTO } from "@latch/shared";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+	act,
 	cleanup,
 	fireEvent,
 	render,
@@ -199,6 +200,19 @@ describe("Connections(オフラインの帯)", () => {
 		setOnline(false);
 		open();
 		expect(await screen.findByText(BANNER)).toBeTruthy();
+	});
+
+	it("オフラインで保存済みの一覧が無いときは、帯と読み込めなかった表示を出し、オンラインに戻ると一覧を出す", async () => {
+		pages = { "": { items: [latchOf()], next_cursor: null } };
+		setOnline(false);
+		open();
+		expect(await screen.findByText(BANNER)).toBeTruthy();
+		expect(screen.getByText("一覧を読み込めませんでした。")).toBeTruthy();
+		act(() => setOnline(true));
+		expect(
+			await screen.findByRole("heading", { name: "つながっている" }),
+		).toBeTruthy();
+		expect(screen.queryByText(BANNER)).toBeNull();
 	});
 
 	it("オンラインなら帯を出さない", async () => {

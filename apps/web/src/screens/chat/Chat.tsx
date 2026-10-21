@@ -302,7 +302,9 @@ function ChatView({
 					void client.invalidateQueries({ queryKey: latchQueryKey(latch.id) });
 				} else {
 					setState(clientId, "failed");
-					if (isOfflineError(error)) setToast(OFFLINE_MESSAGES.send);
+					if (isOfflineError(error)) {
+						setToast(OFFLINE_MESSAGES.send);
+					}
 				}
 			},
 		);

@@ -150,8 +150,9 @@ export function Connections() {
 				<ConnectionsTopbar />
 				<div className="screen__body pad" style={{ paddingTop: 6 }}>
 					<h1 className="t-display">つながり</h1>
-					{isError ? (
+					{isError || !online ? (
 						<>
+							{!online && <OfflineBanner />}
 							<p className="t-caption" style={{ marginTop: 8 }}>
 								一覧を読み込めませんでした。
 							</p>

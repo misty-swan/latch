@@ -8,6 +8,7 @@
 import type { IntentDTO, LatchDTO } from "@latch/shared";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+	act,
 	cleanup,
 	fireEvent,
 	render,
@@ -553,6 +554,20 @@ describe("Home(オフラインの帯)", () => {
 		setup();
 		expect(await screen.findByText(BANNER)).toBeTruthy();
 		expect(screen.queryByText(/通知がオフです/)).toBeNull();
+	});
+
+	it("オフラインで保存済みの一覧が無いときは、帯と読み込めなかった表示を出し、オンラインに戻ると一覧を出す", async () => {
+		listResponse = jsonResponse(200, {
+			items: [connectionIntent],
+			next_cursor: null,
+		});
+		setOnline(false);
+		setup();
+		expect(await screen.findByText(BANNER)).toBeTruthy();
+		expect(screen.getByText("一覧を読み込めませんでした。")).toBeTruthy();
+		act(() => setOnline(true));
+		expect(await screen.findByText(connectionIntent.raw_text)).toBeTruthy();
+		expect(screen.queryByText(BANNER)).toBeNull();
 	});
 
 	it("オンラインなら帯を出さない", async () => {

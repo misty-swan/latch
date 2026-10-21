@@ -165,6 +165,21 @@ afterEach(() => {
 });
 
 describe("Compose", () => {
+	it("遷移元が渡したstate.toastをトーストに出す", async () => {
+		const router = createMemoryRouter(appRoutes, {
+			initialEntries: [
+				{
+					pathname: PATHS.compose,
+					state: { toast: "オフラインのため、いまは読み解けません。" },
+				},
+			],
+		});
+		render(withQueryClient(<RouterProvider router={router} />));
+		expect(
+			await screen.findByText("オフラインのため、いまは読み解けません。"),
+		).toBeTruthy();
+	});
+
 	it("ボードどおりのコピー・便箋・プライバシー表示と・カウンタは0/300から始まる", () => {
 		setup();
 

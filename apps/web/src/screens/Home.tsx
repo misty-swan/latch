@@ -344,7 +344,8 @@ export function Home() {
 	// 相対表示(預けてN日・開始まで など)の基準時刻
 	const now = new Date();
 
-	if (isPending) {
+	// オフラインで保存済みの一覧が無いときは、取得が止まったままなので読み込めなかった表示にする
+	if (isPending && online) {
 		return (
 			<div className="screen home">
 				<ScreenGrain />
@@ -368,6 +369,7 @@ export function Home() {
 				<HomeTopbar />
 				<div className="screen__body pad" style={{ paddingTop: 6 }}>
 					<h1 className="t-display">預けている</h1>
+					{!online && <OfflineBanner />}
 					<p className="t-caption" style={{ marginTop: 8 }}>
 						一覧を読み込めませんでした。
 					</p>
