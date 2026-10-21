@@ -8,9 +8,16 @@
  * - refresh()は同時多発の401を単一フライトに収束させる
  * リフレッシュの呼び出しは生のfetchを直接使う(apiFetchを経由しない=循環と無限ループの構造的防止)。
  * リフレッシュ失敗時のセッション破棄と遷移は呼び出し側(apiFetch)が判断する
+ * F8a(設計書 §2.2):
+ * - 最後に確立したアクセストークンのsubを利用者IDとしてlocalStorage(latch.uid)に置く
+ *   (端末に保存した内容をその利用者に紐づけるための識別子のみ)
+ * - 保存済みリフレッシュトークンがあり通信失敗で復元できなかったときを
+ *   「オフライン中のセッション」(offline)とし、保護画面の描画を許す
+ * - clear()の最後に登録されたlistenerを呼ぶ(端末に保存した内容の破棄に使う)
  */
 
 const REFRESH_STORAGE_KEY = "latch.refresh";
+const USER_ID_STORAGE_KEY = "latch.uid";
 const REFRESH_ENDPOINT = "/v1/auth/refresh";
 const LOGOUT_ENDPOINT = "/v1/auth/logout";
 
@@ -30,10 +37,50 @@ interface RefreshResponse {
 type RefreshOutcome = "success" | "rejected" | "network_error";
 
 let accessToken: string | null = null;
+let accessUserId: string | null = null;
+let offline = false;
 let refreshInFlight: Promise<RefreshOutcome> | null = null;
+const clearListeners = new Set<() => void>();
 
 const readStoredRefreshToken = (): string | null =>
 	localStorage.getItem(REFRESH_STORAGE_KEY);
+
+/**
+ * JWTのペイロードからsubを読む。署名は検証しない
+ * (端末に保存した内容を紐づけるための識別子として使うだけで、認可の判断には使わない)。
+ * 形が崩れたトークンは投げずにnullを返す
+ */
+const readSubject = (token: string): string | null => {
+	const segment = token.split(".")[1];
+	if (segment === undefined || segment === "") {
+		return null;
+	}
+	try {
+		const base64 = segment.replace(/-/g, "+").replace(/_/g, "/");
+		const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+		const bytes = Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+		const payload: unknown = JSON.parse(new TextDecoder().decode(bytes));
+		if (typeof payload !== "object" || payload === null) {
+			return null;
+		}
+		const sub = (payload as { sub?: unknown }).sub;
+		return typeof sub === "string" && sub !== "" ? sub : null;
+	} catch {
+		return null;
+	}
+};
+
+/** アクセストークンを置き換え、そのsubを利用者IDとして保存する */
+const applyAccessToken = (token: string): void => {
+	accessToken = token;
+	accessUserId = readSubject(token);
+	if (accessUserId === null) {
+		// 読めないときは古い利用者IDを残さない(別の利用者の保存内容と取り違えないため)
+		localStorage.removeItem(USER_ID_STORAGE_KEY);
+	} else {
+		localStorage.setItem(USER_ID_STORAGE_KEY, accessUserId);
+	}
+};
 
 /** リフレッシュを1回実行する(成功時は回転後のトークンで上書きする) */
 const performRefresh = async (): Promise<RefreshOutcome> => {
@@ -62,7 +109,9 @@ const performRefresh = async (): Promise<RefreshOutcome> => {
 			// 応答が期待どおりでない=判断できない(拒否とは限らない)
 			return "network_error";
 		}
-		accessToken = data.access_token;
+		applyAccessToken(data.access_token);
+		// apiFetch経由のリフレッシュで回復した場合もオフライン中のセッションを解く
+		offline = false;
 		if (data.refresh_token !== null) {
 			localStorage.setItem(REFRESH_STORAGE_KEY, data.refresh_token);
 		}
@@ -90,17 +139,51 @@ export const authSession = {
 	get accessToken(): string | null {
 		return accessToken;
 	},
+	/**
+	 * 利用者ID(アクセストークンのsub)。アクセストークンが無いとき(起動直後・オフライン中)は
+	 * 最後に保存した値を返す。端末の保存内容の紐づけ用で、認可の判断には使わない
+	 */
+	get userId(): string | null {
+		if (accessToken !== null) {
+			return accessUserId;
+		}
+		return localStorage.getItem(USER_ID_STORAGE_KEY);
+	},
+	/** オフライン中のセッション(直近のrestore()が通信失敗で、保存済みリフレッシュトークンがある) */
+	get offline(): boolean {
+		return offline && readStoredRefreshToken() !== null;
+	},
+	/** clear()の最後に呼ぶlistenerを登録する。戻り値で解除する */
+	onClear(listener: () => void): () => void {
+		clearListeners.add(listener);
+		return () => {
+			clearListeners.delete(listener);
+		};
+	},
 	/** トークンを設定する。refreshTokenがnullのとき保存値は変更しない */
 	setTokens(nextAccessToken: string, nextRefreshToken: string | null): void {
-		accessToken = nextAccessToken;
+		applyAccessToken(nextAccessToken);
 		if (nextRefreshToken !== null) {
 			localStorage.setItem(REFRESH_STORAGE_KEY, nextRefreshToken);
 		}
 	},
-	/** セッションを破棄する(メモリとlocalStorageの両方) */
+	/**
+	 * セッションを破棄する(メモリとlocalStorageの両方)。最後に登録されたlistenerを呼ぶ。
+	 * listenerが投げても破棄は済んでおり、他のlistenerも呼ぶ
+	 */
 	clear(): void {
 		accessToken = null;
+		accessUserId = null;
+		offline = false;
 		localStorage.removeItem(REFRESH_STORAGE_KEY);
+		localStorage.removeItem(USER_ID_STORAGE_KEY);
+		for (const listener of [...clearListeners]) {
+			try {
+				listener();
+			} catch {
+				// 後始末の失敗で破棄や他のlistenerを止めない
+			}
+		}
 	},
 	/**
 	 * ログアウト。後始末(beforeClear・Pushの購読解除等)を待ち→APIへrefresh_tokenを付けて
@@ -149,19 +232,25 @@ export const authSession = {
 	 * 起動時の復元。保存済みリフレッシュトークンがあればリフレッシュを試みる。
 	 * サーバーの明示拒否(401等)のときだけlocalStorageのトークンを除去する
 	 * (失効済みの保存値による無駄な再試行の防止)。通信失敗では保存値を残し・
-	 * 次回の起動時に再試行する(一時的なオフラインで有効なセッションを消さない)
+	 * 次回の起動時・接続の回復時に再試行する(一時的なオフラインで有効なセッションを消さない)。
+	 * 通信失敗のときはオフライン中のセッションとし、成功・拒否で解く。
+	 * 拒否はclear()を通して破棄する(端末の保存内容もlistenerで消すため)
 	 */
 	restore(): Promise<boolean> {
 		if (readStoredRefreshToken() === null) {
+			offline = false;
 			return Promise.resolve(false);
 		}
 		return refreshOutcome().then((outcome) => {
 			if (outcome === "success") {
+				offline = false;
 				return true;
 			}
 			if (outcome === "rejected") {
-				localStorage.removeItem(REFRESH_STORAGE_KEY);
+				authSession.clear();
+				return false;
 			}
+			offline = true;
 			return false;
 		});
 	},

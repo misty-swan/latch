@@ -216,3 +216,166 @@ describe("authSession.logout", () => {
 		expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
 	});
 });
+
+/** JWT風の文字列を作る(署名は検証しないので適当でよい) */
+const fakeJwt = (payload: Record<string, unknown>): string => {
+	const encode = (value: unknown): string =>
+		btoa(JSON.stringify(value))
+			.replace(/\+/g, "-")
+			.replace(/\//g, "_")
+			.replace(/=+$/, "");
+	return `${encode({ alg: "EdDSA", typ: "JWT" })}.${encode(payload)}.sig`;
+};
+
+const UID_KEY = "latch.uid";
+
+describe("authSession.userId", () => {
+	it("setTokensでJWTのsubを読み・latch.uidへ保存する", () => {
+		authSession.setTokens(fakeJwt({ sub: "U1" }), "refresh-1");
+
+		expect(authSession.userId).toBe("U1");
+		expect(localStorage.getItem(UID_KEY)).toBe("U1");
+	});
+
+	it("リフレッシュ成功でも新しいトークンのsubを保存する", async () => {
+		localStorage.setItem(REFRESH_KEY, "refresh-1");
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(200, {
+				access_token: fakeJwt({ sub: "U2" }),
+				refresh_token: "refresh-2",
+				expires_in: 3600,
+			}),
+		);
+
+		await authSession.restore();
+
+		expect(authSession.userId).toBe("U2");
+		expect(localStorage.getItem(UID_KEY)).toBe("U2");
+	});
+
+	it("アクセストークンが無いときは保存値を返す(起動直後・オフライン中)", () => {
+		localStorage.setItem(UID_KEY, "U9");
+
+		expect(authSession.accessToken).toBeNull();
+		expect(authSession.userId).toBe("U9");
+	});
+
+	it("壊れたトークンでは投げずにnullを返す", () => {
+		expect(() => authSession.setTokens("not-a-jwt", "refresh-1")).not.toThrow();
+		expect(authSession.userId).toBeNull();
+		authSession.setTokens("a.%%%.c", null);
+		expect(authSession.userId).toBeNull();
+	});
+
+	it("clearはlatch.uidも消す", () => {
+		authSession.setTokens(fakeJwt({ sub: "U1" }), "refresh-1");
+
+		authSession.clear();
+
+		expect(authSession.userId).toBeNull();
+		expect(localStorage.getItem(UID_KEY)).toBeNull();
+	});
+});
+
+describe("authSession.offline", () => {
+	it("通信失敗のrestoreでオフライン中のセッションになり・続くrestoreの成功で解ける", async () => {
+		localStorage.setItem(REFRESH_KEY, "refresh-1");
+		localStorage.setItem(UID_KEY, "U1");
+		fetchMock.mockRejectedValueOnce(new TypeError("network down"));
+
+		await expect(authSession.restore()).resolves.toBe(false);
+
+		expect(authSession.offline).toBe(true);
+		expect(authSession.accessToken).toBeNull();
+		expect(localStorage.getItem(REFRESH_KEY)).toBe("refresh-1");
+		expect(authSession.userId).toBe("U1");
+
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(200, {
+				access_token: fakeJwt({ sub: "U1" }),
+				refresh_token: "refresh-2",
+				expires_in: 3600,
+			}),
+		);
+		await expect(authSession.restore()).resolves.toBe(true);
+
+		expect(authSession.offline).toBe(false);
+	});
+
+	it("拒否(401)のrestoreでオフラインを解き・保存値を消し・onClearを1回呼ぶ", async () => {
+		localStorage.setItem(REFRESH_KEY, "refresh-1");
+		localStorage.setItem(UID_KEY, "U1");
+		fetchMock.mockRejectedValueOnce(new TypeError("network down"));
+		await authSession.restore();
+		expect(authSession.offline).toBe(true);
+
+		const listener = vi.fn();
+		const off = authSession.onClear(listener);
+		fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }));
+
+		await expect(authSession.restore()).resolves.toBe(false);
+
+		expect(authSession.offline).toBe(false);
+		expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
+		expect(localStorage.getItem(UID_KEY)).toBeNull();
+		expect(listener).toHaveBeenCalledTimes(1);
+		off();
+	});
+
+	it("保存が無いrestoreではオフラインにならない", async () => {
+		await authSession.restore();
+
+		expect(authSession.offline).toBe(false);
+	});
+
+	it("clearでオフラインを解く", async () => {
+		localStorage.setItem(REFRESH_KEY, "refresh-1");
+		fetchMock.mockRejectedValueOnce(new TypeError("network down"));
+		await authSession.restore();
+
+		authSession.clear();
+
+		expect(authSession.offline).toBe(false);
+	});
+});
+
+describe("authSession.onClear", () => {
+	it("解除したlistenerは呼ばれない", () => {
+		const listener = vi.fn();
+		const off = authSession.onClear(listener);
+		off();
+
+		authSession.clear();
+
+		expect(listener).not.toHaveBeenCalled();
+	});
+
+	it("投げるlistenerがあっても破棄を終え・他のlistenerも呼ぶ", () => {
+		authSession.setTokens(fakeJwt({ sub: "U1" }), "refresh-1");
+		const throwing = authSession.onClear(() => {
+			throw new Error("失敗");
+		});
+		const other = vi.fn();
+		const offOther = authSession.onClear(other);
+
+		expect(() => authSession.clear()).not.toThrow();
+
+		expect(authSession.accessToken).toBeNull();
+		expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
+		expect(other).toHaveBeenCalledTimes(1);
+		throwing();
+		offOther();
+	});
+
+	it("logoutの最後にlistenerを呼ぶ", async () => {
+		authSession.setTokens("access-1", "refresh-1");
+		fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+		const listener = vi.fn();
+		const off = authSession.onClear(listener);
+
+		await authSession.logout();
+
+		expect(listener).toHaveBeenCalledTimes(1);
+		off();
+	});
+});
