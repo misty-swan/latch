@@ -17,6 +17,8 @@ import { intents, matchEvents } from "../db/schema";
 import type { Env } from "../env";
 import { createEmbedder } from "../llm/embedding";
 import { createLogger } from "../logging/logger";
+import { flushPush } from "../push/dispatch";
+import { pushSenderOf } from "../push/sender";
 import { createVectorStore } from "../vectorstore";
 import type { VectorStore } from "../vectorstore/types";
 import { errorCodeOf } from "./errors";
@@ -354,7 +356,7 @@ const handleDlqBatch = async (
 export const handleQueueBatch = async (
 	batch: MessageBatch<MatchQueueMessage>,
 	env: Env,
-	_ctx: ExecutionContext,
+	ctx: ExecutionContext,
 	clock: Clock,
 ): Promise<void> => {
 	try {
@@ -363,6 +365,20 @@ export const handleQueueBatch = async (
 			return;
 		}
 		await handleMainQueueBatch(env, batch, clock);
+		// 提案化・成立で作られた通知をその場で送り出す(F7b設計 §5.1 手順2)。
+		// 失敗はログだけ(取りこぼしはCronの回収が担う・§5.6)
+		ctx.waitUntil(
+			flushPush(drizzle(env.DB), pushSenderOf(env), clock.now(), {
+				minAgeMs: 0,
+			}).then(
+				() => undefined,
+				(error: unknown) => {
+					logger.warn("push.flush.failed", {
+						error_code: errorCodeOf(error, "PUSH_FLUSH_FAILED"),
+					});
+				},
+			),
+		);
 	} catch (error) {
 		// 最終安全網: 例外を外へ出さずackする(失敗はメッセージごとの記録に努める)
 		logger.warn("pipeline.stage1.failed", {

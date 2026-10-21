@@ -54,9 +54,13 @@ import {
 	saveDeferReason,
 } from "../latches/respond";
 import { toLatchDto } from "../latches/view";
+import { pushFlushAfterWrite } from "../push/flush-middleware";
 
 /** LATCH APIのサブアプリ。index.tsが /v1/latches にマウントする */
 export const latchRoutes = new Hono<AppEnv>();
+
+// 変更系の成功後にWeb Pushを送り出す(F7b設計 §5.1)
+latchRoutes.use("*", pushFlushAfterWrite);
 
 const dbOf = (env: Env): DrizzleD1Database => drizzle(env.DB);
 

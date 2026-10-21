@@ -73,6 +73,7 @@ import {
 import { createLlm } from "../llm/mode";
 import { createLogger } from "../logging/logger";
 import { emitMatchEvent } from "../pipeline/events";
+import { pushFlushAfterWrite } from "../push/flush-middleware";
 import { createVectorStore } from "../vectorstore";
 import { syncVectorStatus } from "../vectorstore/sync-status";
 
@@ -81,6 +82,9 @@ const logger = createLogger();
 
 /** Intent APIのサブアプリ。index.tsが /v1/intents にマウントする(docs/05 §3.2) */
 export const intentRoutes = new Hono<AppEnv>();
+
+// 変更系の成功後にWeb Pushを送り出す(F7b設計 §5.1)
+intentRoutes.use("*", pushFlushAfterWrite);
 
 /** D1接続。envのバインディングからdrizzleインスタンスを作る(軽量オブジェクトのため関数ごとの生成でよい) */
 const dbOf = (env: Env): DrizzleD1Database => drizzle(env.DB);

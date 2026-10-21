@@ -23,11 +23,15 @@ import { systemClock } from "../clock/clock";
 import type { Env } from "../env";
 import { errorJson } from "../http/errors";
 import { closedTargetsAfterLeave } from "../latches/hide";
+import { pushFlushAfterWrite } from "../push/flush-middleware";
 import { blockUser, listBlocks, unblockUser } from "../safety/block";
 import { createReport } from "../safety/report";
 
 /** 安全のAPIのサブアプリ。index.tsが /v1 にマウントする */
 export const safetyRoutes = new Hono<AppEnv>();
+
+// 変更系の成功後にWeb Pushを送り出す(F7b設計 §5.1)
+safetyRoutes.use("*", pushFlushAfterWrite);
 
 const dbOf = (env: Env): DrizzleD1Database => drizzle(env.DB);
 
