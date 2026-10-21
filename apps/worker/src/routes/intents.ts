@@ -32,6 +32,7 @@
 import {
 	createIntentRequestSchema,
 	type IntentDTO,
+	type IntentForm,
 	type IntentStatus,
 	intentStatusSchema,
 	LIMITS,
@@ -108,6 +109,38 @@ const unauthorizedForRegistered = () =>
 	);
 
 /** 404 NOT_FOUND。他人の・存在しないIntentは区別せず存在を隠す(docs/05 §3.1) */
+/**
+ * 20歳未満の飲酒を含む機会Intentの有効化を拒む(F7a設計 §4・docs/08 §8)。
+ * 拒否ならErrorResult・通すならnullを返す。上限判定より先に呼ぶ。
+ * 飲酒を含む機会Intentで本人のusers行が無い・statusがactiveでないときは、
+ * 年齢を確かめられないので拒否する(安全側・飲酒を含まないIntentの挙動は変えない)
+ */
+const rejectIfAlcoholRestricted = async (
+	db: DrizzleD1Database,
+	userId: string,
+	f: { form: IntentForm | null; alcoholInvolved: boolean },
+	now: Date,
+	event: "intents.create.rejected" | "intents.update.rejected",
+): Promise<ErrorResult | null> => {
+	if (f.form !== "occasion" || !f.alcoholInvolved) {
+		return null;
+	}
+	const [owner] = await db
+		.select({ birthDate: users.birthDate, status: users.status })
+		.from(users)
+		.where(eq(users.id, userId))
+		.limit(1);
+	const unverifiable = owner === undefined || owner.status !== "active";
+	if (unverifiable || isAlcoholRestricted(f, owner.birthDate, now)) {
+		logger.warn(event, { error_code: "ALCOHOL_RESTRICTED" });
+		return errorJson(
+			"ALCOHOL_RESTRICTED",
+			"20歳未満の方、または年齢を確認できない場合は、お酒を含む機会のIntentを有効にできません",
+		);
+	}
+	return null;
+};
+
 const notFound = () => errorJson("NOT_FOUND", "Intentが見つかりません");
 
 /**
@@ -397,29 +430,15 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 			);
 			return c.json(r.body, r.status);
 		}
-		// 20歳未満の飲酒を含む機会Intentは有効化できない(F7a設計 §4・docs/08 §8)。
-		// 上限判定より先に行う(上限に達していても飲酒年齢の理由を優先して返す)
-		const [owner] = await db
-			.select({ birthDate: users.birthDate })
-			.from(users)
-			.where(eq(users.id, sub))
-			.limit(1);
-		if (
-			owner &&
-			isAlcoholRestricted(
-				{ form: d.form ?? null, alcoholInvolved: d.alcohol_involved },
-				owner.birthDate,
-				now,
-			)
-		) {
-			logger.warn("intents.create.rejected", {
-				error_code: "ALCOHOL_RESTRICTED",
-			});
-			const r = errorJson(
-				"ALCOHOL_RESTRICTED",
-				"20歳未満の方は、お酒を含む機会のIntentを有効にできません",
-			);
-			return c.json(r.body, r.status);
+		const alcoholRejection = await rejectIfAlcoholRestricted(
+			db,
+			sub,
+			{ form: d.form ?? null, alcoholInvolved: d.alcohol_involved },
+			now,
+			"intents.create.rejected",
+		);
+		if (alcoholRejection) {
+			return c.json(alcoholRejection.body, alcoholRejection.status);
 		}
 		// 参加中active数の上限(上限5件・docs/05 §3.1のACTIVE_INTENT_LIMIT=422)
 		const [counted] = await db
@@ -814,32 +833,18 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 			);
 			return c.json(r.body, r.status);
 		}
-		// 20歳未満の飲酒を含む機会Intentは有効化できない(F7a設計 §4・docs/08 §8)。
-		// 上限判定より先に行う(上限に達していても飲酒年齢の理由を優先して返す)
-		const [owner] = await db
-			.select({ birthDate: users.birthDate })
-			.from(users)
-			.where(eq(users.id, sub))
-			.limit(1);
-		if (
-			owner &&
-			isAlcoholRestricted(
-				{
-					form: d.form ?? row.form,
-					alcoholInvolved: d.alcohol_involved ?? row.alcoholInvolved,
-				},
-				owner.birthDate,
-				now,
-			)
-		) {
-			logger.warn("intents.update.rejected", {
-				error_code: "ALCOHOL_RESTRICTED",
-			});
-			const r = errorJson(
-				"ALCOHOL_RESTRICTED",
-				"20歳未満の方は、お酒を含む機会のIntentを有効にできません",
-			);
-			return c.json(r.body, r.status);
+		const alcoholRejection = await rejectIfAlcoholRestricted(
+			db,
+			sub,
+			{
+				form: d.form ?? row.form,
+				alcoholInvolved: d.alcohol_involved ?? row.alcoholInvolved,
+			},
+			now,
+			"intents.update.rejected",
+		);
+		if (alcoholRejection) {
+			return c.json(alcoholRejection.body, alcoholRejection.status);
 		}
 		// 参加中active数の上限(上限5件・docs/05 §3.1のACTIVE_INTENT_LIMIT=422)
 		const [counted] = await db

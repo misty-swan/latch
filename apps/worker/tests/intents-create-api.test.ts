@@ -18,7 +18,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { importJWK, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
-import { intents } from "../src/db/schema";
+import { intents, users } from "../src/db/schema";
 import { MS_PER_DAY } from "../src/intents/expiry";
 import { toIntentDto } from "../src/routes/intents";
 import privateJwkText from "./fixtures/test-idp-private.jwk?raw";
@@ -557,5 +557,37 @@ describe("POST /v1/intents・飲酒年齢(F7a設計 §4・docs/08 §8)", () => {
 		expect(((await res.json()) as ErrorResponse).error.code).toBe(
 			"ALCOHOL_RESTRICTED",
 		);
+	});
+	it("検証違反(400)の20歳未満の飲酒機会は422でなく400が先", async () => {
+		const accessToken = await registerUser("alc-400", birthDateYearsAgo(19));
+		const res = await postIntents(accessToken, {
+			raw_text: "そのうち飲みに行きたい",
+			form: "occasion",
+			topic: "飲み会",
+			alcohol_involved: true,
+		});
+		expect(res.status).toBe(400);
+		expect(((await res.json()) as ErrorResponse).error.code).toBe(
+			"VALIDATION_FAILED",
+		);
+	});
+
+	it("users行が削除済みの飲酒機会は年齢を確かめられず422 ALCOHOL_RESTRICTED・飲酒なしは従来どおり201", async () => {
+		const label = `alc-gone-${crypto.randomUUID().slice(0, 6)}`;
+		const accessToken = await registerUser(label);
+		await db
+			.update(users)
+			.set({ status: "deleted" })
+			.where(eq(users.displayName, `${label}テスト`));
+		const res = await postIntents(accessToken, alcoholOccasionBody());
+		expect(res.status).toBe(422);
+		expect(((await res.json()) as ErrorResponse).error.code).toBe(
+			"ALCOHOL_RESTRICTED",
+		);
+		const dry = await postIntents(
+			accessToken,
+			alcoholOccasionBody({ alcohol_involved: false }),
+		);
+		expect(dry.status).toBe(201);
 	});
 });
