@@ -2,7 +2,7 @@
  * 預けた画面(ボード: Placed.dc.htmlの移植)。
  * - 預けた文章・縦書き「預けました。」・latch is-waitingの演出
  * - 受け渡し状態(composeState)はここで消費して破棄する(次の預け入れに残さない)
- * - 数秒後の自動遷移と「預けている一覧へ」でhomeへ進む
+ * - 「預けている一覧へ」でhomeへ進む。数秒後の自動遷移は通知の枠を出さない端末だけ
  * - push-ask(届いたときの通知)は、この端末で通知の許可がまだ未決のときだけ出す(設計書 §3.1)。
  *   [通知を受け取る]は購読の手順を待ってから(結果を問わず)homeへ・[あとで]は何もせずhomeへ
  */
@@ -19,7 +19,10 @@ import {
 import { PATHS } from "../routes/paths";
 import { ScreenGrain } from "./shared";
 
-/** 演出(縦書きのink-inとrise)が収まってから自動で進む待ち時間(実装の裁量) */
+/**
+ * 演出(縦書きのink-inとrise)が収まってから自動で進む待ち時間(実装の裁量)。
+ * 通知の枠(push-ask)を出す端末では張らない(許可が未決のあいだは本人が選ぶまで移らない)
+ */
 const AUTO_REDIRECT_MS = 4000;
 
 /** 縦書きの1字ずつ(--iでink-inの遅延をずらす・ボードどおり) */
@@ -48,8 +51,9 @@ export function Placed() {
 			return;
 		}
 		clearComposeState();
-		if (enabling) {
-			// 許可の確認を出しているあいだは自動で進めない(押した後の遷移はonEnablePushが行う)
+		if (askPush || enabling) {
+			// 通知の枠を出しているあいだ・許可の確認を出しているあいだは自動で進めない
+			// (押した後の遷移はonEnablePushと[あとで]が行う)
 			return;
 		}
 		const timer = window.setTimeout(
@@ -57,7 +61,7 @@ export function Placed() {
 			AUTO_REDIRECT_MS,
 		);
 		return () => window.clearTimeout(timer);
-	}, [navigate, words, enabling]);
+	}, [navigate, words, enabling, askPush]);
 
 	return (
 		<div className="screen placed">

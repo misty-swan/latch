@@ -127,16 +127,31 @@ describe("Placed", () => {
 		});
 	});
 
-	it("数秒後に自動でhomeへ進む", () => {
+	it.each(["granted", "denied", "unsupported"] as const)(
+		"許可が%sなら数秒後に自動でhomeへ進む",
+		(permission) => {
+			vi.mocked(browserPushEnv.permission).mockReturnValue(permission);
+			vi.useFakeTimers();
+			saveComposeState({ raw_text: WORDS, draft_id: null, parse });
+			const { router } = setup();
+			expect(router.state.location.pathname).toBe(PATHS.placed);
+
+			act(() => {
+				vi.advanceTimersByTime(5_000);
+			});
+			expect(router.state.location.pathname).toBe(PATHS.home);
+		},
+	);
+
+	it("通知の枠を出しているあいだ(default)は4秒たっても自動で進まない", () => {
 		vi.useFakeTimers();
 		saveComposeState({ raw_text: WORDS, draft_id: null, parse });
 		const { router } = setup();
-		expect(router.state.location.pathname).toBe(PATHS.placed);
 
 		act(() => {
-			vi.advanceTimersByTime(5_000);
+			vi.advanceTimersByTime(60_000);
 		});
-		expect(router.state.location.pathname).toBe(PATHS.home);
+		expect(router.state.location.pathname).toBe(PATHS.placed);
 	});
 
 	it("[通知を受け取る]はenablePushを待ってからhomeへ進む", async () => {
