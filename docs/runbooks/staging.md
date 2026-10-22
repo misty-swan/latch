@@ -247,3 +247,26 @@ node tools/load/cleanup.mjs
 
 - 結果の表の`THRESHOLDS`に、目標(`http_req_duration{name:intent_save}`の`p(95)<500`・`http_req_duration{name:parse}`の`p(95)<3000`・失敗の割合`http_req_failed`の`rate<0.01`)ごとに✓か✗が出る。1つでも✗ならk6は失敗(0以外)で終わる。合否の正本は報告書(`docs/reports/f8b-load-test.md`)の集計である
 - 小さく試すときは`-e LOAD_SCALE=0.1`を足す(10人・10件/分を30秒。保存は6件前後になる)
+
+### 7.6 シナリオ(b) 作成〜提案の一連・(d) 通知の一斉送信
+
+2人組×30組(60人)が、組ごとに同じ話題の機会Intentをactiveで保存し、2人とも提案のアプリ内通知を受け取るまで待つ。組kの意思は基準時刻(実行時刻+24時間を1時間単位に切り上げた時刻)+k×3時間から2時間とし、組どうしは時間帯が重ならないため、相手の組とは提案されない。(b)と(d)は同じスクリプト`tools/load/scenarios/bd-proposal.js`で、`MODE`だけを変える。
+
+- `MODE=staggered`((b)): 組ごとに2秒間隔で投入する。試験用の利用者のsubjectは`load-<RUN_ID>-b<連番>`(組kは連番2k+1と2k+2)
+- `MODE=burst`((d)): 全組を同じ時刻に一斉に投入する(60件前後の提案の通知が同時に発生する)。subjectは`load-<RUN_ID>-d<連番>`
+
+```bash
+export LATCH_LOAD_BASE_URL=<stagingのURL>
+RUN_ID=$(date -u +%Y%m%d%H%M)
+node tools/load/cleanup.mjs
+node tools/load/run.mjs tools/load/scenarios/bd-proposal.js -e MODE=staggered -e RUN_ID=$RUN_ID \
+  --summary-export tools/load/results/$RUN_ID-b.json
+node tools/load/cleanup.mjs
+```
+
+(後始末→包みを通した(b)の実行→後始末の順に動く。k6は準備で60人を登録し、各組の2人の意思を保存してから、2人に提案の通知が届くまで1秒間隔で確かめる。(d)は`MODE=burst`にし、結果のファイル名を`$RUN_ID-d.json`にする。(b)と(d)は別の実行の印で続けて行う)
+
+- k6は時間を測らない。初期判定(p95 10秒)と通知(判定後5秒以内)の値は、試験の後に集計(F8b設計 §4.1)がstagingのD1から出す。そのため、集計を終えるまで後始末(cleanup.mjs)をしない
+- 結果の表の`proposal_delivered`が通知の届いた人数、`proposal_missing`が待ちの上限(`PROPOSAL_WAIT_SEC`・既定60秒)までに届かなかった人数である。`THRESHOLDS`の`proposal_missing`の`count<1`が✗なら、届かない人がいたことを示す
+- 小さく試すときは`-e LOAD_SCALE=0.2`を足す(6組=12人)
+- 不具合#7(GitHubのissue)が直るまでは、stagingで新しい意思の索引の登録が毎回失敗し、毎分の定期処理の取りこぼし回収で5〜10分後に評価される。それまでは`-e PROPOSAL_WAIT_SEC=900`を足して待ちを延ばす(k6の1回の実行の上限は、待ちの上限から自動で決まる)
