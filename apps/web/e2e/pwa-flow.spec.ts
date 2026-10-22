@@ -269,7 +269,10 @@ test("ホーム画面追加の要件(manifestとアイコン)を満たす", asyn
 	expect(svgRoot).toContain('width="512"');
 	expect(svgRoot).toContain('height="512"');
 
-	// Chromiumが実際に解釈したマニフェストの警告(#6)。screenshotsの警告は検査しない
+	// Chromiumが実際に解釈したマニフェストを確かめる(#6)。screenshotsの警告は検査しない。
+	// headless Chromiumは#6のDevToolsの警告そのものを errors に返さない(修正の前後とも空)ので、
+	// errors の検査はマニフェストの解釈エラーを防ぐ範囲に限る。#6の警告が消えたことは
+	// オーナーが実ブラウザで確認する。警告の原因(SVGの固有サイズ)は上のSVGの幅と高さの検査で守る。
 	const cdp = await page.context().newCDPSession(page);
 	const parsed = (await cdp.send("Page.getAppManifest")) as {
 		errors: { message: string }[];
