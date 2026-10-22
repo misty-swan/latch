@@ -157,8 +157,6 @@ interface Member {
 interface Group {
 	members: Member[];
 	latch: DevLatchItem;
-	/** 最後に作ったメンバーの評価イベント(集合が組まれる評価) */
-	lastEvent: MatchEventItem;
 }
 
 /**
@@ -172,11 +170,10 @@ const proposeGroup = async (
 	create: (user: RegisteredUser) => Promise<CreatedIntent>,
 ): Promise<Group> => {
 	const members: Member[] = [];
-	let lastEvent: MatchEventItem | undefined;
 	for (let i = 0; i < n; i++) {
 		const user = await registerUser(request, `E2E${label}${i + 1}`);
 		const intent = await create(user);
-		lastEvent = await waitForEvaluation(request, user.access_token, intent.id);
+		await waitForEvaluation(request, user.access_token, intent.id);
 		members.push({ user, intent });
 	}
 	const first = members[0] as Member;
@@ -190,7 +187,52 @@ const proposeGroup = async (
 	for (const m of members) {
 		expect(latch.intent_ids).toContain(m.intent.id);
 	}
-	return { members, latch, lastEvent: lastEvent as MatchEventItem };
+	return { members, latch };
+};
+
+/** 評価を記録するイベント(即時の評価と、反映確認の評価し直し) */
+const EVALUATION_EVENT_TYPES = ["embedding_completed", "vector_reflection"];
+
+/**
+ * 全メンバーの評価イベント(version 1)が処理し終わるのを待ち、group_proposedの合計を返す。
+ * 集合はどのメンバーの評価(後から預けた人の即時の評価、または先に預けた人の
+ * 反映確認による評価し直し)でも組まれ得るため、1件だけ提案されたことを合計で確かめる
+ */
+const groupProposedTotal = async (
+	request: APIRequestContext,
+	members: Member[],
+): Promise<number> => {
+	let total = 0;
+	await waitFor(
+		async () => {
+			total = 0;
+			for (const m of members) {
+				const events = (
+					await listObserve<MatchEventItem>(
+						request,
+						m.user.access_token,
+						`match-events?intent_id=${m.intent.id}`,
+					)
+				).filter(
+					(e) =>
+						EVALUATION_EVENT_TYPES.includes(e.event_type) && e.version === 1,
+				);
+				if (
+					events.length < EVALUATION_EVENT_TYPES.length ||
+					events.some((e) => e.status === "pending")
+				) {
+					return false;
+				}
+				for (const e of events) {
+					total += Number(asStage2(e.payload).group_proposed ?? 0);
+				}
+			}
+			return true;
+		},
+		60_000,
+		500,
+	);
+	return total;
 };
 
 const getLatch = async (
@@ -261,8 +303,8 @@ test("#24 3人のつながり集合で3人目のYESにより成立する", async
 		),
 	);
 	const [a, b, c] = group.members as [Member, Member, Member];
-	// 集合は最後のメンバーの評価で1件だけ提案される
-	expect(asStage2(group.lastEvent.payload).group_proposed).toBe(1);
+	// 集合はメンバーの評価のどれか1回で1件だけ提案される
+	expect(await groupProposedTotal(request, group.members)).toBe(1);
 	for (const m of group.members) {
 		const dto = await getLatch(request, m.user, group.latch.id);
 		expect(dto.participants_count).toBe(3);
@@ -315,7 +357,7 @@ test("#24 4人の機会集合で全員のYESにより成立する", async ({ req
 		),
 	);
 	expect(group.latch.intent_ids.length).toBe(4);
-	expect(asStage2(group.lastEvent.payload).group_proposed).toBe(1);
+	expect(await groupProposedTotal(request, group.members)).toBe(1);
 	for (const m of group.members) {
 		const dto = await getLatch(request, m.user, group.latch.id);
 		expect(dto.participants_count).toBe(4);

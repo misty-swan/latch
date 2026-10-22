@@ -96,6 +96,34 @@ export interface Stage2Result {
 	retrievalMs: number;
 }
 
+/** 第2段の計測結果を起点イベントのpayloadへ載せる形にする(docs/06 §7・順序は試験で固定) */
+export const stage2Payload = (
+	result: Stage2Result,
+): Record<string, unknown> => ({
+	retrieval_count: result.retrievalCount,
+	l1_pass: result.l1Pass,
+	l1_exclusions: result.exclusions,
+	l3_pass: result.l3Pass,
+	l4_skipped_history: result.l4SkippedHistory,
+	jev_calls: result.jevCalls,
+	jev_reused: result.jevReused,
+	jev_held: result.jevHeld,
+	jev_latency: result.jevLatencyMs,
+	l5_over_threshold: result.l5OverThreshold,
+	proposed: result.proposed,
+	held_proposals: result.held,
+	l4_skipped_participants: result.l4SkippedParticipants,
+	group_pool: result.groupPool,
+	group_sets: result.groupSets,
+	group_jev_calls: result.groupJevCalls,
+	group_held_sets: result.groupHeldSets,
+	group_over_threshold: result.groupOverThreshold,
+	group_proposed: result.groupProposed,
+	group_held_proposals: result.groupHeldProposals,
+	group_failed: result.groupFailed,
+	retrieval_ms: result.retrievalMs,
+});
+
 /** evaluateIntentの差し替え口(試験用)。jevはLayer 4へそのまま渡す */
 export interface EvaluateOptions {
 	jev?: { primary: JevFn; fallback: JevFn };

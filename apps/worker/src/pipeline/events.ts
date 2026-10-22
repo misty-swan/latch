@@ -15,10 +15,13 @@ import { newUlid } from "../ids";
 
 /** emitMatchEventのパラメータ */
 export interface EmitMatchEventParams {
-	/** イベント種別(第1段の作成・更新と、第1段からの再投入embedding_completed・docs/06 §2) */
+	/** イベント種別(第1段の作成・更新と、第1段からの再投入embedding_completed・反映確認vector_reflection・docs/06 §2) */
 	eventType: Extract<
 		MatchEventType,
-		"intent_created" | "intent_updated" | "embedding_completed"
+		| "intent_created"
+		| "intent_updated"
+		| "embedding_completed"
+		| "vector_reflection"
 	>;
 	/** 起点Intentのid */
 	intentId: string;

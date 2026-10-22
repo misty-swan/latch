@@ -4,12 +4,14 @@
  * upsert(反映は待たない) → intents.embedding_model/embedded_at更新 →
  * 計算したベクトルを載せたembedding_completedイベントの再投入(同version・即時)。
  * 第2段は載せられたベクトルで自分を検索するため、upsertの反映待ちは不要。
+ * 続けて反映確認のvector_reflection(同version・遅延付き)を投入し、反映後に
+ * 1回だけ評価し直す(pipeline/reflection.ts・同時に預けた相手の取りこぼしを拾う)。
  * 消費は例外を外へ出さない(=全メッセージack)。失敗はイベント行のstatusで
  * 記録し、Embedding失敗は再試行せずCronのバックフィルが回収する(06 §5)。
  * embedding_completedの消費(第2段)はevaluateIntent(pipeline/evaluate.ts)へ
  * 委譲し、戻り値の計測結果を起点イベントのpayloadへ記録する(06 §7)。
  */
-import type { MatchQueueMessage } from "@latch/shared";
+import { type MatchQueueMessage, PIPELINE } from "@latch/shared";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Clock } from "../clock/clock";
@@ -21,9 +23,10 @@ import { flushPush } from "../push/dispatch";
 import { pushSenderOf } from "../push/sender";
 import { createVectorStore } from "../vectorstore";
 import { errorCodeOf } from "./errors";
-import { evaluateIntent, type Stage2Result } from "./evaluate";
+import { evaluateIntent, stage2Payload } from "./evaluate";
 import { emitMatchEvent } from "./events";
 import { buildNormalizedText } from "./normalize";
+import { consumeReflectionEvent } from "./reflection";
 
 const logger = createLogger();
 
@@ -36,13 +39,15 @@ export type EmbeddingStageResult = "embedded" | "failed";
 /**
  * 第1段の本体(docs/06 §2)。埋め込み→VectorStoreへのupsert(反映は待たない)→
  * intents.embedding_model/embedded_atの更新→embedding_completedイベント(vector付き)の投入
- * (同version・即時)までを行い、成功("embedded")/失敗("failed")を返す。
+ * (同version・即時)→vector_reflectionの投入(同version・遅延付き)までを行い、
+ * 成功("embedded")/失敗("failed")を返す。
  * 失敗(throw/timeout)は再試行せず、呼び出し側が起点イベントをfailedへ倒す
  * (06 §5: 再試行なし・Cronのバックフィルが回収)。Cronのバックフィル
  * (docs/12 Task 12(e))からも再利用するためexportする。
  * options.emitCompleted=false はembedding_completedを投入しない(既定true)。
  * Cronのバックフィルは直後にevaluateIntentを直接呼ぶため、投入すると二重評価になる
- * (docs/06 §2「Cronからは新たな起点イベントを発行しない」)
+ * (docs/06 §2「Cronからは新たな起点イベントを発行しない」)。
+ * vector_reflectionはemitCompletedによらず投入する(反映後の評価し直しで取りこぼしを拾う)
  */
 export const runEmbeddingStage = async (
 	env: Env,
@@ -90,6 +95,26 @@ export const runEmbeddingStage = async (
 				clock,
 			);
 		}
+		// 反映確認(同version・遅延付き・不具合の修正工程の設計 §2.1の4)。
+		// emitCompleted=false(Cronのバックフィル)でも投入し、同時投入の取りこぼしを拾う。
+		// 投入の失敗はログだけにして第1段の結果をfailedにしない(Cronの(h)が拾う)
+		try {
+			await emitMatchEvent(
+				env,
+				{
+					eventType: "vector_reflection",
+					intentId: intent.id,
+					version: intent.version,
+				},
+				{ delaySeconds: PIPELINE.REFLECTION_DELAYS_S[0] },
+				clock,
+			);
+		} catch (error) {
+			logger.warn("pipeline.reflection.emit_failed", {
+				error_code: errorCodeOf(error, "REFLECTION_EMIT_FAILED"),
+				intent_id: intent.id,
+			});
+		}
 		// count=upsertしたベクトル数(1Intent=1ベクトル・06 §7の層別観測)
 		logger.info("pipeline.stage1.completed", {
 			intent_id: intent.id,
@@ -105,34 +130,6 @@ export const runEmbeddingStage = async (
 		return "failed";
 	}
 };
-
-/** 第2段の計測結果を起点イベントのpayloadへ載せる形にする(docs/06 §7・順序は試験で固定) */
-export const stage2Payload = (
-	result: Stage2Result,
-): Record<string, unknown> => ({
-	retrieval_count: result.retrievalCount,
-	l1_pass: result.l1Pass,
-	l1_exclusions: result.exclusions,
-	l3_pass: result.l3Pass,
-	l4_skipped_history: result.l4SkippedHistory,
-	jev_calls: result.jevCalls,
-	jev_reused: result.jevReused,
-	jev_held: result.jevHeld,
-	jev_latency: result.jevLatencyMs,
-	l5_over_threshold: result.l5OverThreshold,
-	proposed: result.proposed,
-	held_proposals: result.held,
-	l4_skipped_participants: result.l4SkippedParticipants,
-	group_pool: result.groupPool,
-	group_sets: result.groupSets,
-	group_jev_calls: result.groupJevCalls,
-	group_held_sets: result.groupHeldSets,
-	group_over_threshold: result.groupOverThreshold,
-	group_proposed: result.groupProposed,
-	group_held_proposals: result.groupHeldProposals,
-	group_failed: result.groupFailed,
-	retrieval_ms: result.retrievalMs,
-});
 
 /**
  * 起点イベントをprocessedへ倒す。payloadの上書きがあれば合わせて記録する
@@ -187,11 +184,27 @@ const consumeEvent = async (
 	if (event.status === "processed") {
 		return;
 	}
+	// vector_reflection(反映確認・不具合の修正工程の設計 §2.3)
+	if (event.eventType === "vector_reflection") {
+		await consumeReflectionEvent(env, event, clock);
+		return;
+	}
 	// embedding_completed(第2段・docs/06 §2〜§3): 評価実行(Layer 2検索→
 	// Layer 1→Layer 3→候補保存)をevaluateIntentへ委譲し、戻り値の計測結果を
 	// 起点イベントのpayloadへ記録する(docs/06 §7のイベント単位の計測)。
 	// evaluateIntentがnull(抑制・対象外)のときはskippedを載せてprocessedへ倒す
 	if (event.eventType === "embedding_completed") {
+		// 古いversionの第2段は評価しない。評価するとlast_evaluated_atが書かれ、
+		// 新しいversionの評価が30分抑制にかかるため
+		const [current] = await db
+			.select({ version: intents.version })
+			.from(intents)
+			.where(eq(intents.id, event.sourceIntentId))
+			.limit(1);
+		if (current !== undefined && current.version !== event.version) {
+			await markProcessed(env, event.id, clock, { skipped: "stale_version" });
+			return;
+		}
 		let result: Awaited<ReturnType<typeof evaluateIntent>>;
 		try {
 			result = await evaluateIntent(env, event.sourceIntentId, clock, {
@@ -276,8 +289,10 @@ const handleMainQueueBatch = async (
 		}
 		try {
 			const body = message.body;
+			// 空でない数値の配列だけを第2段へ渡す(空配列で照会しない)
 			const vector =
 				Array.isArray(body.vector) &&
+				body.vector.length > 0 &&
 				body.vector.every((v) => typeof v === "number")
 					? body.vector
 					: undefined;

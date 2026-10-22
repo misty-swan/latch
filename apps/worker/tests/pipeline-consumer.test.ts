@@ -211,12 +211,23 @@ describe("第1段の消費(intent_created・docs/06 §2)", () => {
 		expect(completed[0]?.status).toBe("pending");
 
 		// embedding_completedは即時投入(delaySeconds未指定=第2引数なしのsend)
-		expect(send).toHaveBeenCalledTimes(1);
+		expect(send).toHaveBeenCalledTimes(2);
 		expect(send.mock.calls[0]).toHaveLength(1);
 		expect(send.mock.calls[0]?.[0]).toEqual({
 			event_id: completed[0]?.id,
 			vector: expectedValues,
 		});
+		// 続けて反映確認(vector_reflection・同version)を遅延2秒で投入する
+		const reflection = (await eventsOf(intentId)).filter(
+			(e) => e.eventType === "vector_reflection",
+		);
+		expect(reflection).toHaveLength(1);
+		expect(reflection[0]?.version).toBe(1);
+		expect(reflection[0]?.status).toBe("pending");
+		expect(send.mock.calls[1]).toEqual([
+			{ event_id: reflection[0]?.id },
+			{ delaySeconds: 2 },
+		]);
 
 		// 起点イベントはprocessed(payloadに件数等は載せない)
 		const [origin] = await db
@@ -245,7 +256,7 @@ describe("第1段の消費(intent_created・docs/06 §2)", () => {
 			.from(intents)
 			.where(eq(intents.id, intentId));
 		const expectedValues = await stubEmbedding(buildNormalizedText(row));
-		expect(send).toHaveBeenCalledTimes(1);
+		expect(send).toHaveBeenCalledTimes(2);
 		expect(send.mock.calls[0]?.[0]).toMatchObject({ vector: expectedValues });
 		// 反映後に読むと、upsertしたmetadataにversion: 1がある
 		releaseMemoryVectorWrites();
@@ -307,6 +318,52 @@ describe("第1段の消費(intent_created・docs/06 §2)", () => {
 		expect(origin?.payload).toHaveProperty("retrieval_count");
 	});
 
+	it("空のvectorは渡さず、従来どおりgetByIdsで評価する", async () => {
+		const { eventId } = await seedEvent({
+			eventType: "embedding_completed",
+		});
+		const getByIds = vi.spyOn(memoryVectorStore(), "getByIds");
+
+		expectAcked(await runBatch("match-events", [eventId], testEnv, []));
+
+		expect(getByIds).toHaveBeenCalled();
+		const [origin] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		// 自分のベクトルが無いため評価の対象外で終わる
+		expect(origin?.payload).toEqual({ skipped: "suppressed" });
+	});
+
+	it("古いversionのembedding_completedは評価せずstale_versionでprocessed", async () => {
+		// 直した意思(intent=2)に届いた旧version(event=1)の第2段
+		const { intentId, eventId } = await seedEvent({
+			eventType: "embedding_completed",
+			eventVersion: 1,
+			intentVersion: 2,
+		});
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		const values = await stubEmbedding(buildNormalizedText(row));
+
+		expectAcked(await runBatch("match-events", [eventId], testEnv, values));
+
+		const [origin] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		expect(origin?.status).toBe("processed");
+		expect(origin?.payload).toEqual({ skipped: "stale_version" });
+		// 評価していない(新versionの評価を30分抑制にかけない)
+		const [after] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		expect(after?.lastEvaluatedAt).toBeNull();
+	});
+
 	it("embedding_completedイベントは第2段の評価へ委譲されprocessedになる", async () => {
 		const { intentId, eventId } = await seedEvent({
 			eventType: "embedding_completed",
@@ -338,12 +395,12 @@ describe("冪等とスキップ条件(docs/06 §2)", () => {
 		const second = await runBatch("match-events", [eventId]);
 		expectAcked(second);
 
-		// embedding_completedの投入は1回だけ(2回目はprocessedスキップ)
+		// embedding_completed・vector_reflectionの投入は1回ずつ(2回目はprocessedスキップ)
 		const completed = (await eventsOf(intentId)).filter(
 			(e) => e.eventType === "embedding_completed",
 		);
 		expect(completed).toHaveLength(1);
-		expect(send).toHaveBeenCalledTimes(1);
+		expect(send).toHaveBeenCalledTimes(2);
 	});
 
 	it("event.versionがintent.versionと不一致ならstale_versionでprocessed・埋め込みはしない", async () => {

@@ -497,7 +497,8 @@ const runUnevaluatedSweep = async (env: Env, clock: Clock): Promise<void> => {
  * (h) つながりIntentの1回きり遅延再評価(docs/06 §2(h))。active化後10分
  * (DELAYED_REEVAL_AFTER_MS・ちょうどを含む)経過したつながりのactive Intentを
  * 評価し、delayed_reeval_atへ実行時刻を刻印する。刻印は評価の成否(抑制を含む)
- * に関係なく1度だけ行う(upsert反映遅延による相互取りこぼしの安全網)
+ * に関係なく1度だけ行う(upsert反映遅延による相互取りこぼしの安全網)。
+ * 評価は30分の再評価抑制の例外として行う(#10・埋め込み直後の評価に抑制されない)
  */
 const runDelayedReevalSweep = async (env: Env, clock: Clock): Promise<void> => {
 	const db = drizzle(env.DB);
@@ -522,7 +523,9 @@ const runDelayedReevalSweep = async (env: Env, clock: Clock): Promise<void> => {
 	let reevaluated = 0;
 	for (const row of rows) {
 		try {
-			await evaluateIntent(env, row.id, clock);
+			// 30分の再評価抑制の例外(#10)。埋め込みの直後に評価済み(last_evaluated_atが
+			// 約10分前)という通常の状態でも評価する
+			await evaluateIntent(env, row.id, clock, { ignoreSuppression: true });
 			await db
 				.update(intents)
 				.set({ delayedReevalAt: clock.now() })

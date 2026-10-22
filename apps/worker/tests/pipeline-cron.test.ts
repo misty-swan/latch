@@ -543,7 +543,8 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 			userId,
 			topic: "遅延再評価される学習仲間",
 			embeddedAt: new Date(BASE - 11 * MIN),
-			lastEvaluatedAt: new Date(BASE - 31 * MIN),
+			// 埋め込みの直後に評価済み(通常の状態)。30分抑制の内側でも評価する(#10)
+			lastEvaluatedAt: new Date(BASE - 10 * MIN),
 			delayedReevalAt: null,
 		});
 		await insertIntentRow(target);
@@ -1024,7 +1025,7 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 		]);
 	});
 
-	it("バックフィル: 埋め込み後にembedding_completedイベント行を作らない(評価はCronが直接行う)", async () => {
+	it("バックフィル: 埋め込み後にembedding_completedイベント行を作らない(評価はCronが直接行う・反映確認は投入する)", async () => {
 		const userId = ulid();
 		await insertUserRow(userId);
 		const target = intentFixture({
@@ -1044,7 +1045,10 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 			.select()
 			.from(matchEvents)
 			.where(eq(matchEvents.sourceIntentId, target.id));
-		expect(events).toEqual([]);
+		// 反映確認(vector_reflection)だけを投入する(同時投入の取りこぼしを拾う・設計 §2.1)
+		expect(events.map((e) => [e.eventType, e.version, e.status])).toEqual([
+			["vector_reflection", 1, "pending"],
+		]);
 	});
 
 	it("バックフィル: Embeddingが連続5件失敗したら当回の走査を打ち切る", async () => {

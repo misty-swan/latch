@@ -81,6 +81,19 @@ describe("memoryVectorStore(docs/05 §2.3・docs/06 Layer 2)", () => {
 		expect((await store.getByIds(["now"]))[0]?.id).toBe("now");
 	});
 
+	it("hold中のupsertはdeleteByIdsで捨てられ、releaseで蘇らない", async () => {
+		const store = memoryVectorStore();
+		holdMemoryVectorWrites();
+		await store.upsert([
+			makeVector("deleted", [1, 0]),
+			makeVector("kept", [0, 1]),
+		]);
+		await store.deleteByIds(["deleted"]);
+		releaseMemoryVectorWrites();
+		expect(await store.getByIds(["deleted"])).toEqual([null]);
+		expect((await store.getByIds(["kept"]))[0]?.id).toBe("kept");
+	});
+
 	it("query: topKで切り詰める", async () => {
 		const store = memoryVectorStore();
 		await store.upsert([

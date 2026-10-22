@@ -65,6 +65,8 @@ const singleton: VectorStore = {
 	deleteByIds: async (ids) => {
 		for (const id of ids) {
 			store.delete(id);
+			// 保留中の書き込みも捨てる(解放で削除済みのベクトルが蘇らないように)
+			pending.delete(id);
 		}
 	},
 };
