@@ -261,10 +261,11 @@ RUN_ID=$(date -u +%Y%m%d%H%M)
 node tools/load/cleanup.mjs
 node tools/load/run.mjs tools/load/scenarios/bd-proposal.js -e MODE=staggered -e RUN_ID=$RUN_ID \
   --summary-export tools/load/results/$RUN_ID-b.json
+node tools/load/report.mjs $RUN_ID
 node tools/load/cleanup.mjs
 ```
 
-(後始末→包みを通した(b)の実行→後始末の順に動く。k6は準備で60人を登録し、各組の2人の意思を保存してから、2人に提案の通知が届くまで1秒間隔で確かめる。(d)は`MODE=burst`にし、結果のファイル名を`$RUN_ID-d.json`にする。(b)と(d)は別の実行の印で続けて行う)
+(後始末→包みを通した(b)の実行→集計(7.8)→後始末の順に動く。k6は準備で60人を登録し、各組の2人の意思を保存してから、2人に提案の通知が届くまで1秒間隔で確かめる。(d)は`MODE=burst`にし、結果のファイル名を`$RUN_ID-d.json`にする。(b)と(d)は別の実行の印で続けて行う)
 
 - k6は時間を測らない。初期判定(p95 10秒)と通知(判定後5秒以内)の値は、試験の後に集計(F8b設計 §4.1)がstagingのD1から出す。そのため、集計を終えるまで後始末(cleanup.mjs)をしない
 - 結果の表の`proposal_delivered`が通知の届いた人数、`proposal_missing`が待ちの上限(`PROPOSAL_WAIT_SEC`・既定60秒)までに届かなかった人数である。`THRESHOLDS`の`proposal_missing`の`count<1`が✗なら、届かない人がいたことを示す
@@ -296,3 +297,18 @@ node tools/load/cleanup.mjs
 - 小さく試すときは`-e LOAD_SCALE=0.1`を足す(5組=10人・接続を30秒保つ。2026-10-22の試しでは10接続すべて成功し、相手への到着は50件・p95 0.63秒だった)
 - 不具合#7が直るまでは、(b)と同じく`-e PROPOSAL_WAIT_SEC=900`を足して提案の待ちを延ばす
 - 成立したつながりとチャットの発言は、後始末の後もstagingのD1に残る(消すAPIが無い)。後始末が消すのは意思だけで、次の回は別の実行の印の利用者で行うため、試験の妨げにはならない
+
+### 7.8 集計
+
+試験の後に、実行の印ごとの結果を01 §20の目標と並べた表にする(F8b設計 §4.1)。
+
+```bash
+node tools/load/report.mjs <RUN_ID>
+```
+
+(`tools/load/results/<RUN_ID>-a.json`・`-c.json`のk6の結果を読み、stagingのD1へ読み取りの問い合わせ(SELECTだけ)を送って、Intent保存・Parser・Candidate Retrieval・初期判定・通知のp95と合否、チャットの参考値をMarkdownの表で出す。宛先のURLは使わないため`LATCH_LOAD_BASE_URL`は要らない)
+
+- 初期判定・通知・Candidate Retrievalは、その実行の印の(b)(d)の利用者の行から出す。後始末で意思を消すと、その意思の有効化や埋め込みの記録(match_events)も消えて集計できなくなるため、**集計は後始末の前に行う**(7.6の手順の順番)。提案の通知の行は後始末の後も残る
+- 実行の印は1回に1つで、シナリオごとに印が違うときは印ごとに実行する。結果のファイルやD1の行が無い項目は「計測なし」と出る
+- 「欠け」は計測できなかった件数(提案の通知が来なかった意思など)。表の下に、埋め込みの記録(embedding_completed)が無い意思の件数も出る。不具合#7が直るまでは埋め込みを毎分の定期処理が行うため、この件数が増え、そのぶんCandidate Retrievalの「欠け」になる
+- 「(stub)」の付いた行は、LLMをstub(決まった答えを返す試験用の代わり)で動かした値である

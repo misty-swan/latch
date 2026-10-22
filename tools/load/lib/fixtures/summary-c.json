@@ -1,0 +1,24 @@
+{
+	"metrics": {
+		"chat_delivery_ms": {
+			"p(90)": 600.1,
+			"p(95)": 625.15,
+			"avg": 395.12,
+			"min": 143,
+			"med": 395,
+			"max": 645
+		},
+		"chat_connect_failed": {
+			"fails": 10,
+			"passes": 0,
+			"thresholds": {
+				"rate<0.01": false
+			},
+			"value": 0
+		},
+		"chat_messages_sent": {
+			"count": 50,
+			"rate": 0.06451786290470275
+		}
+	}
+}
