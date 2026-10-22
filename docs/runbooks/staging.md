@@ -102,6 +102,8 @@ GitHubのリポジトリの Settings → Secrets and variables → Actions → S
 
 URLもシークレットとして持つ。GitHubはシークレットの値を記録の中で伏せ字にするため、デプロイの記録にURLが残らない。
 
+3件の登録を終えたら、最後に同じ画面の Variables(Secretsの隣)でリポジトリ変数を1件作る。名前は`STAGING_DEPLOY_ENABLED`、値は`true`である。この変数が`true`のあいだだけ、mainへの変更でstagingへの自動デプロイが動く(5.1)。
+
 ## 5. デプロイ
 
 デプロイは、手元のプログラムをCloudflareへ載せて動かすことである。どちらの方法も同じ順で進み、途中で失敗したらそこで止まる。

@@ -26,6 +26,8 @@ interface Section {
 	ai?: { binding: string };
 	vars?: Record<string, string>;
 	triggers?: { crons: string[] };
+	workers_dev?: boolean;
+	preview_urls?: boolean;
 }
 const config = parse(raw) as Section & { env?: { staging?: Section } };
 const top = config;
@@ -97,5 +99,10 @@ describe("wrangler.jsonc の env.staging", () => {
 
 	it("毎分Cronを持つ", () => {
 		expect(staging.triggers?.crons).toEqual(["* * * * *"]);
+	});
+
+	it("workers.devは有効でプレビューURLは無効", () => {
+		expect(staging.workers_dev).toBe(true);
+		expect(staging.preview_urls).toBe(false);
 	});
 });

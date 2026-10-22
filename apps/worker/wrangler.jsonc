@@ -144,6 +144,10 @@
 	// scripts/provision-staging.mjs --write で実IDへ置き換える(IDは秘密ではない)
 	"env": {
 		"staging": {
+			// workers.devのURLは使う。プレビューURLは無効にし、stagingのURLが
+			// 増えないようにする(F8b設計 合意#4)
+			"workers_dev": true,
+			"preview_urls": false,
 			"triggers": {
 				"crons": ["* * * * *"]
 			},
