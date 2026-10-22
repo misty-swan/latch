@@ -1,9 +1,9 @@
 # LATCH アーキテクチャ設計書
 
-- 文書バージョン: v0.21
+- 文書バージョン: v0.22
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.21更新: 2026-10-21)
+- 作成日: 2026-10-17(v0.22更新: 2026-10-22)
 - v0.2の変更点: §3を全面改訂し、スタックを「バックエンド・フロントエンドの構成部品」(DBアクセス・マイグレーション・入力検証・プッシュ実装・フォーム等)まで確定した。D-A-06(Biome)を解消し、D-A-07(スタイリング=03で確定)を新設した
 - v0.3の変更点: 07(LLM利用仕様書)の策定に伴いD-A-01(Embedding)を解消した(Workers AI bge-m3・1024次元・cosine)。R2(ユーザーアイコン)をスタックへ追加した
 - v0.4の変更点: 本書が単体で完結するよう記述を整理した(変更の経緯はgit履歴を参照)
@@ -24,7 +24,8 @@
 - v0.19の変更点: F7b(通知のAPI)の実装確定に伴い、§4のWeb Pushへ送信の構成(書き込みの直後に同じWorker内でwaitUntilにより送り、送れていない行を毎分Cronで回収する・2026-10-21オーナー裁定)・送信の判断(mutedはWeb Pushだけを止める・01冒頭の決定記録)・順番取りの時刻と1回の送出の45秒の予算・順番取りの時刻を条件にした結果の記録・送信1件の10秒の時間制限とリダイレクトを追わないこと・送り手の差し替え口(LATCH_PUSH_MODE=stub/real)・VAPID鍵の設定と起動ガードを追記し、§4のCronへPushの回収走査と(c)の期限切れのアプリ内通知を、§3.1の表と§3.4へ実装状況を、§7の通知5秒以内へ構成の確定を加えた。前提文書欄の版数を更新
 - v0.20の変更点: F7c(安全と通知の画面)の実装確定に伴い、§4のWeb Pushへ画面側の構成(Service Workerはvite-plugin-pwaの自動生成(generateSW)にworkbox.importScriptsでプッシュ処理のpush-sw.jsを読み込ませる・タップでアプリ内通知の一覧(`/notices`)を開く・購読の解除はサーバーの行の削除(DELETE /v1/push-subscriptions)を先に行ってから端末の購読を外す)を追記し、§3.1の表と§3.4の実機ブラウザでの受信確認の工程をF8(02 #32)に改めた。前提文書欄の版数を更新
 - v0.21の変更点: F8a(PWAと画面の仕上げ)の実装確定とオーナー合意(2026-10-21・01冒頭の決定記録(PWAと画面の仕上げ))に伴い、§3.2の表へオフライン保存の部品を加え、§3.2へオフライン表示の構成(`PersistQueryClientProvider`とIndexedDBの保存部品・4つのキー・7日・利用者IDの紐づけ・消去の契機・帯と案内の文)を、§4へService Workerの`navigateFallbackDenylist`(`/v1/`・`/healthz`)・APIの応答をService Workerで保存しないこと・ホーム画面追加のPNGアイコン・オフライン中のセッション(`authSession.offline`・接続の回復で復元)を追記した。§3.1の表と§3.4の実機検証の工程をF8a(02 #32・実機確認はオーナーの記録待ち)に改めた。前提文書欄の版数を更新
-- 前提文書: 01 要件定義書 v0.19 / 02 スコープ・受け入れ条件合意書 v0.13
+- v0.22の変更点: F8b(stagingの構築と負荷試験)の実装確定とオーナー合意(2026-10-22・12 §2の決定記録(stagingと負荷試験))に伴い、§6の環境のstagingを`wrangler.jsonc`の`env.staging`で別名のWorkerとして載せる形に改め、§6へstagingの構成(資源の名前・vars・シークレット・URLを伏せる扱い)とCIの自動デプロイ(`deploy-staging`ジョブ)・手元からのデプロイ・手順書(`docs/runbooks/staging.md`)を追記した。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.20 / 02 スコープ・受け入れ条件合意書 v0.14
 - 本書の位置づけ: 01第19節の技術スタック選定を確定させる文書。UIの正本は`prototype/`(03は不作成)。スタイリング手法(D-A-07)はバニラCSS(グローバル)に確定済み(§3.2・決定記録(2026-10-19))
 
 **決定記録(2026-10-17・プロダクトオーナー)**
@@ -191,11 +192,15 @@
 
 ## 6. 環境・CI/CD・テスト戦略
 
-**環境(3つ)。** (1)開発= `wrangler dev`(ローカルD1・Queues・DOのエミュレート。Vectorizeは§4のインメモリ代替を使用。外部LLMはstubモード)、(2)staging= Workersのプレビュー環境(実D1・stub/real切替。02の#34クローズドテストの対象)、(3)prod=カスタムドメイン。D1・Vectorize・KVは環境ごとに分離する。
+**環境(3つ)。** (1)開発= `wrangler dev`(ローカルD1・Queues・DOのエミュレート。Vectorizeは§4のインメモリ代替を使用。外部LLMはstubモード)、(2)staging= wranglerの環境(`env.staging`)で別名のWorkerとして載せる(実D1・stub/real切替。02の#34クローズドテストと#33負荷試験の対象)、(3)prod=カスタムドメイン。D1・Vectorize・KVは環境ごとに分離する。
 
 **CI(GitHub Actions)。** プルリクエストごとに(1)Biome(リント+整形)、(2)tsc(typecheck)、(3)vitest(vitest-pool-workersでD1・Queues込みの単体・統合試験。Vectorizeは§4のインメモリ代替)、(4)Playwright E2E(wrangler devに対して実行)を回す。mainマージでstagingへ自動デプロイ、**prodへのデプロイは手動承認トリガー**とする(公開前はプロダクトオーナーの操作)。
 
 **テストの所在。** 02の対応表(#1〜#35)のうち、#34(社内クローズドテスト)はstagingでPlaywright+実機ブラウザによって証明する。Durable Objectsはvitest-pool-workersとwrangler devがローカル実行に対応しており、WebSocketを含むチャット(#25)の試験がローカルで完結する。負荷試験(#33)はstagingに対して実施し、性能目標(01 §20)のp95を計測する。
+
+**実装確定(F8b・staging)。** stagingは`apps/worker/wrangler.jsonc`の`env.staging`区画に置く(別ファイルにしない)。wranglerの環境はバインディングとvarsを区画へ引き継がないため、区画の中ですべて宣言し直し、トップレベルとstaging区画のバインディング名の集合・varsの値・資源名が設計どおりであることを単体試験(tests/wrangler-envs.test.ts)で確かめる。資源はCloudflareのアカウントの中に`-staging`付きの新しい名前で作り、アカウント内の既存の資源には触れない: Worker=`latch-worker-staging`・D1=`latch-db-staging`・KV=`latch-revocation-staging`/`latch-pipeline-staging`・R2=`latch-icons-staging`・Vectorize=`latch-intents-staging`(1024次元・cosine・metadata index form/status/category・07 §1)・Queues=`match-events-staging`/`match-events-dlq-staging`(consumerの再試行とDLQはトップレベルと同じ)・Analytics Engine=`latch_metrics_staging`・毎分Cron。作成は何度実行しても同じ結果になるスクリプト(`pnpm --filter worker provision:staging`)で行い、資源のIDはwrangler.jsoncにコミットする(IDは単独では使えないため秘密ではない)。varsはLATCH_ENV=staging(VectorStoreはVectorize・prodの起動ガードは働かない)・LATCH_EMBEDDING_MODE=real・LATCH_LLM_MODE=stub・LATCH_PUSH_MODE=stub(負荷試験の利用者は本物の購読先を持たないため)とする。シークレット(JWT_SECRET・テスト用IdP鍵・テスト用VAPID鍵)は、ローカルの`.dev.vars`と同じコミット済みのfixturesから登録スクリプト(`pnpm --filter worker secrets:staging`)で入れる。画面は`VITE_DEV_AUTH=1`付きでビルドしてテスト用サインインを出し、dev専用API(§4)もstagingで有効のまま負荷試験の準備と確認に使う。workers.devのURLを使い、プレビューURLは無効(preview_urls=false)とする。守りはURLを伏せるだけとし、stagingには試験用のデータだけを入れる。stagingのURLは文書・設定・報告書に書かず、CIでもシークレットとして持つ(オーナー合意 2026-10-22・社内クローズドテスト(F9・#34)の前に守りを強めるかを改めて判断する・12 §2の決定記録(stagingと負荷試験))。
+
+**実装確定(F8b・CIの自動デプロイ)。** `.github/workflows/ci.yml`の`deploy-staging`ジョブが、mainへのpushで`ci`・`web-e2e`の両ジョブの成功後に動く(pull_requestでは動かない・`concurrency`で同時に1本とし後から来たものは待つ)。手順は`pnpm install --frozen-lockfile`→`VITE_DEV_AUTH=1`でのweb build→`wrangler d1 migrations apply DB --env staging --remote`(10 §1の「明示実行のみ」はCIの工程として明示的に書くことで満たす)→`wrangler deploy --env staging`→`/healthz`のスモーク確認(200でなければ失敗)である。GitHubのシークレットは`CLOUDFLARE_API_TOKEN`・`CLOUDFLARE_ACCOUNT_ID`・`LATCH_STAGING_URL`で、APIトークンの発行(権限はWorkers・D1・KV・R2・Queues・Vectorize・Workers AI・アカウント設定の読み取りに絞る)とGitHubへの登録はオーナーが行う。登録が済むまで動かないよう、ジョブはリポジトリ変数`STAGING_DEPLOY_ENABLED`が`true`のときだけ動く(2026-10-22時点で未登録のため未実行)。手元からは同じ手順を`pnpm --filter worker deploy:staging`(OAuthのログインを使う)で行う。資源の作成・シークレット・トークン・デプロイ・戻し方・負荷試験の実行の手順は`docs/runbooks/staging.md`に置く(11 §2・§3・10 §5)
 
 ## 7. 非機能要件(01 §20)への対応
 
