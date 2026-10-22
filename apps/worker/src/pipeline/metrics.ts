@@ -52,6 +52,8 @@ export interface Stage2MetricsData {
 	groupHeldProposals: number;
 	/** グループ部分で例外が起きたら1 */
 	groupFailed: 0 | 1;
+	/** Layer 2 Candidate Retrievalの所要時間(ミリ秒) */
+	retrievalMs: number;
 }
 
 /**
@@ -60,7 +62,8 @@ export interface Stage2MetricsData {
  * doubles=層通過件数(Vectorize取得→L1→L3)・処理時間・Jev(呼び出し・再利用・
  * 保留の理由別 budget/breaker/failed/cap・処理時間)・L5閾値超過・提示・保留の順。
  * その後にF4bの項目(人数条件の除外・Pool・集合・グループ用Jev・集合の保留・
- * 集合の閾値超過・集合の提示・集合の保留・グループ部分の失敗)を同順で続ける(F4b設計 §5)
+ * 集合の閾値超過・集合の提示・集合の保留・グループ部分の失敗)を同順で続け、最後にLayer 2
+ * Candidate Retrievalの所要時間(retrievalMs)を置く(F4b設計 §5・F8b)
  */
 export const writeStage2Metrics = (env: Env, data: Stage2MetricsData): void => {
 	if (env.PIPELINE_AX === undefined) {
@@ -92,6 +95,7 @@ export const writeStage2Metrics = (env: Env, data: Stage2MetricsData): void => {
 			data.groupProposed,
 			data.groupHeldProposals,
 			data.groupFailed,
+			data.retrievalMs,
 		],
 		indexes: ["stage2"],
 	});

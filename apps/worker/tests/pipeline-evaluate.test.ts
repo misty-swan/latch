@@ -221,6 +221,8 @@ const NO_GROUP = {
 	groupProposed: 0,
 	groupHeldProposals: 0,
 	groupFailed: 0,
+	/** Candidate Retrievalの所要時間(実時間の計測のため値は固定しない) */
+	retrievalMs: expect.any(Number),
 } as const;
 
 /** NO_GROUPのpayload表記(consumer.tsのキー名・F4b設計 §5) */
@@ -234,6 +236,8 @@ const NO_GROUP_PAYLOAD = {
 	group_proposed: 0,
 	group_held_proposals: 0,
 	group_failed: 0,
+	/** Candidate Retrievalの所要時間(実時間の計測のため値は固定しない) */
+	retrieval_ms: expect.any(Number),
 } as const;
 
 /** vi.waitUntilのタイムアウト(waitUntil内のINSERT完了待ち・CIの遅延を吸収) */
@@ -648,6 +652,7 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			groupProposed: 0,
 			groupHeldProposals: 0,
 			groupFailed: 0,
+			retrievalMs: expect.any(Number),
 		});
 		expect(await candidatesInvolving(origin.id)).toHaveLength(2);
 	});
@@ -861,6 +866,28 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			held_proposals: 0,
 			...NO_GROUP_PAYLOAD,
 		});
+	});
+
+	it("payloadのretrieval_msは0以上の数", async () => {
+		const userA = ulid();
+		const userB = ulid();
+		await insertUserRow(userA);
+		await insertUserRow(userB);
+		const a = intentFixture({ id: ulid(), userId: userA });
+		const b = intentFixture({ id: ulid(), userId: userB });
+		await insertIntentRow(a);
+		await insertIntentRow(b);
+		await upsertVector(a);
+		await upsertVector(b);
+
+		const eventId = await seedCompletedEvent(a.id);
+		expectAcked(await runBatch("match-events", [eventId], directClock));
+		const [event] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		const payload = event?.payload as Record<string, number>;
+		expect(payload.retrieval_ms).toBeGreaterThanOrEqual(0);
 	});
 
 	it("#7相当: 150候補で検索100・L1上位50・L3上位20に頭打ちになる", async () => {
@@ -1078,9 +1105,13 @@ describe("計測(Analytics Engine・docs/06 §7)", () => {
 		// 末尾にF4bの項目(l4_skipped_participants・group_pool・group_sets・group_jev_calls・
 		// group_held_sets・group_over_threshold・group_proposed・group_held_proposals・
 		// group_failed)が続く
-		expect(point.doubles).toEqual([
+		// 最後にretrievalMs(Layer 2の所要時間・実時間のため値は固定しない)が続く
+		expect(point.doubles).toHaveLength(24);
+		expect(point.doubles.slice(0, 23)).toEqual([
 			2, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 		]);
+		expect(point.doubles[23]).toBeGreaterThanOrEqual(0);
+		expect(point.doubles[23]).toBe(result?.retrievalMs);
 
 		// PIPELINE_AXが未バインドの環境(単体試験等)でも評価自体は完走する
 		const envWithoutAx = {

@@ -247,6 +247,7 @@ const consumeEvent = async (
 						group_proposed: result.groupProposed,
 						group_held_proposals: result.groupHeldProposals,
 						group_failed: result.groupFailed,
+						retrieval_ms: result.retrievalMs,
 					},
 		);
 		return;

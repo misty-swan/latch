@@ -92,6 +92,8 @@ export interface Stage2Result {
 	groupHeldProposals: number;
 	/** グループ部分(準備・仕上げ)で例外が起きたら1(F4b設計 §5・1対1の結果は返す) */
 	groupFailed: 0 | 1;
+	/** Layer 2 Candidate Retrieval(store.query)の所要時間(ミリ秒・負荷試験の集計用) */
+	retrievalMs: number;
 }
 
 /** evaluateIntentの差し替え口(試験用)。jevはLayer 4へそのまま渡す */
@@ -159,10 +161,14 @@ export const evaluateIntent = async (
 	const startedAtMs = now.getTime();
 	// Layer 2 Candidate Retrieval(docs/06 §3): filter={form, status:"active"}付きで
 	// topK=100。取り出し後の判定はLayer 1が担う
+	// 所要時間は処理時間の計測でありClockを使う時刻依存のロジックではないため
+	// performance.now()で測る
+	const retrievalStart = performance.now();
 	const hits = await store.query(vector.values, {
 		topK: PIPELINE.TOP_K_RETRIEVAL,
 		filter: { form, status: "active" },
 	});
+	const retrievalMs = Math.round(performance.now() - retrievalStart);
 	const retrievalCount = hits.length;
 	// 自己idの除外は呼び出し側が担う(vectorstore/types.tsの契約)
 	const retrieved = hits.filter((hit) => hit.id !== intentId);
@@ -478,6 +484,7 @@ export const evaluateIntent = async (
 		groupProposed: group?.proposed ?? 0,
 		groupHeldProposals: group?.held ?? 0,
 		groupFailed,
+		retrievalMs,
 	};
 	// 計測(Analytics Engine+ログ・docs/06 §7)。Cron呼び出しはこの計測のみを受け、
 	// イベントpayloadへの反映は呼び出し側(consumer.ts)が行う

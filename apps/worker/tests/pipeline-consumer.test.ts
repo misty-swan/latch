@@ -461,6 +461,7 @@ describe("ログの分離と計測(docs/06 §7・docs/08 §6)", () => {
 			"group_proposed",
 			"group_held_proposals",
 			"group_failed",
+			"retrieval_ms",
 		]);
 		// 相手が居ないためグループの項目はすべて0
 		expect(payload).toMatchObject({
