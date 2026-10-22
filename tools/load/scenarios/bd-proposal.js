@@ -13,7 +13,7 @@
  * 実行(手順書 docs/runbooks/staging.md 7章。k6の出力のURLを伏せる包みrun.mjsを通す):
  *   LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/run.mjs tools/load/scenarios/bd-proposal.js \
  *     -e MODE=staggered -e RUN_ID=<YYYYMMDDHHmm> --summary-export tools/load/results/<RUN_ID>-b.json
- * LOAD_SCALE(既定1)は組数に掛ける倍率(30×倍率・最低1組)。PROPOSAL_WAIT_SEC(既定60)は
+ * LOAD_SCALE(既定1)は組数に掛ける倍率(30×倍率・最低1組・上限1.6=48組。超えると準備で止まる)。PROPOSAL_WAIT_SEC(既定60)は
  * 1組の提案待ちの上限(秒)。
  */
 
@@ -29,6 +29,7 @@ import {
 	waitForProposal,
 } from "../lib/api.js";
 import {
+	assertWithinStartLimit,
 	BURST_LEAD_SEC,
 	baseStartMs,
 	maxDurationSec,
@@ -67,6 +68,8 @@ export const options = {
 
 export function setup() {
 	ensureTarget(config.baseUrl);
+	// LOAD_SCALEが大きすぎて最後の組の開始が7日を超えるなら、登録の前に止める
+	assertWithinStartLimit(Date.now(), pairs);
 	const runId = runIdFromEnv();
 	const groups = [];
 	for (let k = 0; k < pairs; k += 1) {
@@ -75,6 +78,8 @@ export function setup() {
 		);
 	}
 	const now = Date.now();
+	// 登録に時間が掛かり基準時刻が後ろへずれても収まることを、実際の基準で確かめ直す
+	assertWithinStartLimit(now, pairs);
 	return {
 		runId,
 		groups,

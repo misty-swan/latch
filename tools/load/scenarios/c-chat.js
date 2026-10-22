@@ -14,7 +14,7 @@
  * 実行(手順書 docs/runbooks/staging.md 7章。k6の出力のURLを伏せる包みrun.mjsを通す):
  *   LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/run.mjs tools/load/scenarios/c-chat.js \
  *     -e RUN_ID=<YYYYMMDDHHmm> --summary-export tools/load/results/<RUN_ID>-c.json
- * LOAD_SCALE(既定1)は組数(50×倍率・最低1組)と接続を保つ時間(300秒×倍率)に掛ける倍率。
+ * LOAD_SCALE(既定1)は組数(50×倍率・最低1組・上限1.44=72組。超えると準備で止まる)と接続を保つ時間(300秒×倍率)に掛ける倍率。
  * PROPOSAL_WAIT_SEC(既定60)は提案待ちの上限(秒)で、setupTimeoutはこれから決まる。
  * WebSocketのURLは宛先のURLから作り(https→wss)、表示しない。
  */
@@ -45,6 +45,7 @@ import {
 	SEND_INTERVAL_SEC,
 } from "../lib/chat.mjs";
 import {
+	assertWithinStartLimit,
 	baseStartMs,
 	CHAT_PAIR_SPACING_MS,
 	pairStartMs,
@@ -104,6 +105,8 @@ function matchPair(tokens, deadline) {
 
 export function setup() {
 	ensureTarget(config.baseUrl);
+	// LOAD_SCALEが大きすぎて最後の組の開始が7日を超えるなら、登録の前に止める
+	assertWithinStartLimit(Date.now(), pairs, CHAT_PAIR_SPACING_MS);
 	const runId = runIdFromEnv();
 	const groups = [];
 	for (let k = 0; k < pairs; k += 1) {
@@ -111,7 +114,10 @@ export function setup() {
 			pairSubjects(runId, "chat", k).map((s) => signIn(config.baseUrl, s)),
 		);
 	}
-	const baseMs = baseStartMs(Date.now());
+	const nowMs = Date.now();
+	// 登録に時間が掛かり基準時刻が後ろへずれても収まることを、実際の基準で確かめ直す
+	assertWithinStartLimit(nowMs, pairs, CHAT_PAIR_SPACING_MS);
+	const baseMs = baseStartMs(nowMs);
 	groups.forEach((tokens, k) => {
 		const topic = TOPICS[k % TOPICS.length];
 		const startMs = pairStartMs(baseMs, k, CHAT_PAIR_SPACING_MS);

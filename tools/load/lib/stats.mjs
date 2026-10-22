@@ -13,6 +13,9 @@ export function p95(values) {
 
 /**
  * 1項目の集計。durationsのnullは「計測できなかった1件」(欠け)。
+ * 判定(pass): 計測したp95が目標を超えれば欠けの有無によらずfalse(不合格)。
+ * 目標以内でも欠けが1件でもあればnull(欠けた分が遅かった可能性を否定できず、合格と言えない)。
+ * 計測が0件でもnull。所要時間の行の組み立てはqueries.mjs(judgeFromRows・notifyFromRows)
  * @param {string} name
  * @param {number} targetMs
  * @param {Array<number | null>} durations
@@ -20,37 +23,20 @@ export function p95(values) {
 export function summarize(name, targetMs, durations) {
 	const measuredValues = durations.filter((d) => d !== null);
 	const p95Ms = p95(measuredValues);
+	const missing = durations.length - measuredValues.length;
+	let pass;
+	if (p95Ms === null) pass = null;
+	else if (p95Ms > targetMs) pass = false;
+	else pass = missing > 0 ? null : true;
 	return {
 		name,
 		targetMs,
 		total: durations.length,
 		measured: measuredValues.length,
-		missing: durations.length - measuredValues.length,
+		missing,
 		p95Ms,
-		pass: p95Ms === null ? null : p95Ms <= targetMs,
+		pass,
 	};
-}
-
-/**
- * 初期判定の所要時間(有効化→Push送信試行)。
- * @param {Array<{ activatedAt: number, pushAttemptedAt: number | null }>} rows
- * @returns {Array<number | null>}
- */
-export function judgeDurations(rows) {
-	return rows.map((r) =>
-		r.pushAttemptedAt === null ? null : r.pushAttemptedAt - r.activatedAt,
-	);
-}
-
-/**
- * 通知の所要時間(通知作成→Push送信試行)。
- * @param {Array<{ createdAt: number, pushAttemptedAt: number | null }>} rows
- * @returns {Array<number | null>}
- */
-export function notifyDurations(rows) {
-	return rows.map((r) =>
-		r.pushAttemptedAt === null ? null : r.pushAttemptedAt - r.createdAt,
-	);
 }
 
 const sec = (ms) => `${(ms / 1000).toFixed(2)}秒`;
@@ -67,7 +53,12 @@ export function renderTable(summaries) {
 	];
 	for (const s of summaries) {
 		const p = s.p95Ms === null ? "計測なし" : sec(s.p95Ms);
-		const verdict = s.pass === null ? "—" : s.pass ? "合格" : "不合格";
+		// 欠けの欄が数(k6の行は「—」)で1以上なら、判定の保留を「—(欠けあり)」と出す
+		const hasMissing = typeof s.missing === "number" && s.missing > 0;
+		let verdict;
+		if (s.pass === true) verdict = "合格";
+		else if (s.pass === false) verdict = "不合格";
+		else verdict = hasMissing && s.p95Ms !== null ? "—(欠けあり)" : "—";
 		lines.push(
 			`| ${s.name} | ${sec(s.targetMs)} | ${s.total} | ${s.measured} | ${s.missing} | ${p} | ${verdict} |`,
 		);

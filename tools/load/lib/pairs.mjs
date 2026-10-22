@@ -9,6 +9,8 @@
  *   間隔CHAT_PAIR_SPACING_MS(2時間)を渡す(隣の組との重なりは0分で、下限15分を下回り外れる)
  * - pairSubjects: 組kの2人のsubject(`load-<runId>-b<n>`・(c)は`-c<n>`・(d)は`-d<n>`)
  * - maxDurationSec: k6のシナリオのmaxDuration(提案待ちを途中で切らない長さ)
+ * - maxPairsWithinStartLimit・assertWithinStartLimit: 最後の組の開始が機会の開始の上限
+ *   (保存の時点から7日以内・docs/05 §2.2)に収まるかの確かめ(LOAD_SCALEの上げすぎを準備で止める)
  */
 
 const MS_PER_HOUR = 3_600_000;
@@ -71,4 +73,34 @@ export function pairSubjects(runId, kind, k) {
 export function maxDurationSec(mode, pairs, proposalWaitSec) {
 	const launch = mode === "burst" ? BURST_LEAD_SEC : (pairs - 1) * STAGGER_SEC;
 	return Math.ceil(launch + proposalWaitSec + SLACK_SEC);
+}
+
+/** 機会Intentの開始の上限(保存の時点+7日以内・docs/05 §2.2・OCCASION_STARTS_AT_MAX_DAYS_AHEAD) */
+export const OCCASION_START_LIMIT_MS = 7 * 24 * MS_PER_HOUR;
+
+/**
+ * 実行時刻によらず最後の組の開始が上限に収まる組数の最大。基準時刻は実行時刻+24時間を
+ * 切り上げるため、最も遅いときで実行時刻+25時間になる。(b)(d)(間隔3時間)は48組
+ * (LOAD_SCALE 1.6まで)、(c)(間隔2時間)は72組(LOAD_SCALE 1.44まで)
+ */
+export function maxPairsWithinStartLimit(spacingMs = PAIR_SPACING_MS) {
+	const worstLeadMs = BASE_LEAD_MS + MS_PER_HOUR;
+	return Math.floor((OCCASION_START_LIMIT_MS - worstLeadMs) / spacingMs) + 1;
+}
+
+/**
+ * 最後の組(pairs−1)の開始が実行時刻nowMsから7日以内に収まらなければ例外にする。
+ * 保存はnowMsより後に行うため、ここで収まれば保存の時点でも収まる
+ */
+export function assertWithinStartLimit(
+	nowMs,
+	pairs,
+	spacingMs = PAIR_SPACING_MS,
+) {
+	const lastStartMs = pairStartMs(baseStartMs(nowMs), pairs - 1, spacingMs);
+	if (lastStartMs - nowMs > OCCASION_START_LIMIT_MS) {
+		throw new Error(
+			`組数${pairs}では最後の組の開始が機会の開始の上限(7日以内)を超えます。LOAD_SCALEを下げてください(この間隔での組数の上限は${maxPairsWithinStartLimit(spacingMs)}組)`,
+		);
+	}
 }

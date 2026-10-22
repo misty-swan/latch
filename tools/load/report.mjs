@@ -62,7 +62,7 @@ export function buildReport(runId, k6, rows) {
 		renderChatTable(m),
 		"",
 		`- k6の結果のファイル: ${found}。Intent保存・Parserは(a)、チャットは(c)の結果から読む(k6のsummaryはp95だけを持つため、件数の欄は—)`,
-		"- Candidate Retrieval・初期判定・通知は、stagingのD1の(b)(d)の利用者の行から集計する。「欠け」は計測できなかった件数(提案の通知が無い・送信試行が無い・イベント行が無い)",
+		"- Candidate Retrieval・初期判定・通知は、stagingのD1の(b)(d)の利用者の行から集計する。「欠け」は計測できなかった件数(提案の通知が無い・送信試行が無い・イベント行が無い)。欠けが1件でもあれば、計測した分のp95が目標以内でも判定は「—(欠けあり)」(合格としない)。目標を超えれば欠けがあっても不合格",
 		`- embedding_completedのイベント行が無い意思: ${retrieval.withoutEvent}件(埋め込みを毎分Cronのバックフィルで行った意思はこの行を持たず、Candidate Retrievalの欠けになる)`,
 		"- 初期判定の起点は有効化のイベント行(intent_created)の作成時刻で、有効化の保存の直後に応答の後の処理(waitUntil)で書かれる。保存のコミットよりわずかに後の時刻を起点にしている",
 		"- 送信記録(push_attempted_at)は送信の順番を取った時刻である。試験用の利用者は購読を持たないためno_subscriptionで確定し、暗号化と送信の時間は含まれない",

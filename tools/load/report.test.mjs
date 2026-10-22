@@ -36,11 +36,11 @@ describe("buildReport", () => {
 			},
 		);
 		expect(out).toContain(
-			"| 初期判定(stub) | 10.00秒 | 2 | 1 | 1 | 2.00秒 | 合格 |",
+			"| 初期判定(stub) | 10.00秒 | 2 | 1 | 1 | 2.00秒 | —(欠けあり) |",
 		);
 		expect(out).toContain("| 通知 | 5.00秒 | 1 | 1 | 0 | 0.03秒 | 合格 |");
 		expect(out).toContain(
-			"| Candidate Retrieval | 1.00秒 | 2 | 1 | 1 | 0.12秒 | 合格 |",
+			"| Candidate Retrieval | 1.00秒 | 2 | 1 | 1 | 0.12秒 | —(欠けあり) |",
 		);
 		expect(out).toContain("embedding_completedのイベント行が無い意思: 1件");
 	});

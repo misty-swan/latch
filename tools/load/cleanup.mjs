@@ -5,6 +5,8 @@
  * SQLで状態だけを書き換えるとVectorizeのベクトルが残り、次の回のLayer 2 Candidate
  * Retrievalを汚すため、ベクトルを先に消す削除APIを通す。
  * 実行の印(runId)を問わず`load-`の利用者を全員拾う(途中で止まった回の残りも消す)。
+ * 1人の失敗(サインイン・一覧・削除)で全体を止めず、残りの利用者を続けて処理し、
+ * 最後に失敗が1件でもあれば0以外で終わる。
  *
  * 使い方: LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/cleanup.mjs
  * stagingのURLは標準出力にも誤りメッセージにも出さない(設計 §2.1)。
@@ -116,6 +118,49 @@ async function listIntentIds(base, token) {
 	return ids;
 }
 
+/**
+ * 利用者ごとに後始末を行い、件数を数える(純粋な繰り返し部・cleanOneを差し替えて試験する)。
+ * cleanOne(subject)は{deleted, failed}を返す。例外を投げた利用者は失敗1件として数え、
+ * 次の利用者へ進む。誤りの文はURLを伏せてonErrorへ渡す
+ * @param {string[]} subjects
+ * @param {(subject: string) => Promise<{ deleted: number, failed: number }>} cleanOne
+ * @param {(message: string) => void} onError
+ */
+export async function cleanupSubjects(subjects, cleanOne, onError = () => {}) {
+	let deleted = 0;
+	let failed = 0;
+	let failedUsers = 0;
+	for (const subject of subjects) {
+		try {
+			const r = await cleanOne(subject);
+			deleted += r.deleted;
+			failed += r.failed;
+		} catch (e) {
+			failed += 1;
+			failedUsers += 1;
+			onError(redactUrls(String(e?.message ?? e)));
+		}
+	}
+	return { deleted, failed, failedUsers };
+}
+
+/** 1人分: 入り直して意思を全件消す。404は他の後始末と重なって既に消えた場合 */
+async function cleanOneSubject(base, subject) {
+	const token = await signInExisting(base, subject);
+	let deleted = 0;
+	let failed = 0;
+	for (const id of await listIntentIds(base, token)) {
+		const r = await call(base, "DELETE", `/v1/intents/${id}`, { token });
+		if (r.status === 204 || r.status === 404) {
+			deleted += 1;
+		} else {
+			failed += 1;
+			console.error(`cleanup: DELETE /v1/intents/{id} が${r.status}`);
+		}
+	}
+	return { deleted, failed };
+}
+
 async function main() {
 	const base = (
 		process.env.LATCH_LOAD_BASE_URL ||
@@ -129,22 +174,15 @@ async function main() {
 
 	const subjects = subjectsWithIntents(querySubjects());
 	console.log(`cleanup: 意思を持つload-の利用者 ${subjects.length}人`);
-	let deleted = 0;
-	let failed = 0;
-	for (const subject of subjects) {
-		const token = await signInExisting(base, subject);
-		for (const id of await listIntentIds(base, token)) {
-			const r = await call(base, "DELETE", `/v1/intents/${id}`, { token });
-			// 404は他の後始末と重なって既に消えた場合
-			if (r.status === 204 || r.status === 404) {
-				deleted += 1;
-			} else {
-				failed += 1;
-				console.error(`cleanup: DELETE /v1/intents/{id} が${r.status}`);
-			}
-		}
-	}
-	console.log(`cleanup: 意思を${deleted}件削除しました(失敗${failed}件)`);
+	const { deleted, failed, failedUsers } = await cleanupSubjects(
+		subjects,
+		(subject) => cleanOneSubject(base, subject),
+		(message) =>
+			console.error(`cleanup: 1人の後始末に失敗しました(${message})`),
+	);
+	console.log(
+		`cleanup: 意思を${deleted}件削除しました(失敗${failed}件・うち途中で止まった利用者${failedUsers}人)`,
+	);
 	if (failed > 0) process.exit(1);
 }
 

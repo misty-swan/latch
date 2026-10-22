@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+	assertWithinStartLimit,
 	BURST_LEAD_SEC,
 	baseStartMs,
 	CHAT_PAIR_SPACING_MS,
 	maxDurationSec,
+	maxPairsWithinStartLimit,
 	PAIR_SPACING_MS,
 	pairStartMs,
 	pairSubjects,
@@ -110,5 +112,32 @@ describe("maxDurationSec", () => {
 	});
 	it("(d)は一斉投入までの間+提案待ち+余裕120秒", () => {
 		expect(maxDurationSec("burst", 30, 60)).toBe(BURST_LEAD_SEC + 60 + 120);
+	});
+});
+
+describe("maxPairsWithinStartLimit・assertWithinStartLimit", () => {
+	it("組数の上限は(b)(d)が48組・(c)が72組", () => {
+		expect(maxPairsWithinStartLimit()).toBe(48);
+		expect(maxPairsWithinStartLimit(CHAT_PAIR_SPACING_MS)).toBe(72);
+	});
+	it("基準時刻が最も遅い(正時の直後)ときも上限の組数なら収まり、1組多いと例外", () => {
+		const now = Date.UTC(2026, 9, 22, 15, 0, 1);
+		expect(() => assertWithinStartLimit(now, 48)).not.toThrow();
+		expect(() => assertWithinStartLimit(now, 49)).toThrow(
+			"組数49では最後の組の開始が機会の開始の上限(7日以内)を超えます。LOAD_SCALEを下げてください(この間隔での組数の上限は48組)",
+		);
+		expect(() =>
+			assertWithinStartLimit(now, 72, CHAT_PAIR_SPACING_MS),
+		).not.toThrow();
+		expect(() => assertWithinStartLimit(now, 73, CHAT_PAIR_SPACING_MS)).toThrow(
+			"組数の上限は72組",
+		);
+	});
+	it("既定の規模((b)(d)30組・(c)50組)は収まる", () => {
+		const now = Date.UTC(2026, 9, 22, 15, 30);
+		expect(() => assertWithinStartLimit(now, 30)).not.toThrow();
+		expect(() =>
+			assertWithinStartLimit(now, 50, CHAT_PAIR_SPACING_MS),
+		).not.toThrow();
 	});
 });

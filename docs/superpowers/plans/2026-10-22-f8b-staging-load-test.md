@@ -70,6 +70,7 @@
   - `summarize(name: string, targetMs: number, durations: Array<number | null>): { name, targetMs, total, measured, missing, p95Ms: number | null, pass: boolean | null }` — nullは「計測できなかった1件」(missing)。pass=p95Ms≤targetMs、p95Msがnullならnull
   - `judgeDurations(rows: Array<{ activatedAt: number, pushAttemptedAt: number | null }>): Array<number | null>` — pushAttemptedAt−activatedAt、pushAttemptedAtがnullならnull
   - `notifyDurations(rows: Array<{ createdAt: number, pushAttemptedAt: number | null }>): Array<number | null>`
+  - (追記・最終レビュー: `judgeDurations`・`notifyDurations`は集計のCLIから使われず`queries.mjs`の`judgeFromRows`・`notifyFromRows`と重複したため削除した。所要時間の組み立ては`queries.mjs`に一本化。`summarize`の判定は、欠けが1件でもあれば目標以内でも`null`(表は`—(欠けあり)`)に改めた)
   - `renderTable(summaries: ReturnType<typeof summarize>[]): string` — Markdownの表。列: 項目/目標/対象/計測/欠け/p95/判定。p95Msがnullなら`計測なし`、判定は`合格`・`不合格`・`—`。ミリ秒は秒へ換算し小数2桁(`0.42秒`)
 
 - [ ] **Step 1: 失敗する試験を書く**(`stats.test.mjs`)
