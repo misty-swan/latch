@@ -356,6 +356,11 @@ const runExpiryWindows = async (env: Env, clock: Clock): Promise<void> => {
  */
 const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
 	const db = drizzle(env.DB);
+	// 埋め込みから5分以内はVectorizeへの反映待ちでベクトルが見えないことがあるため
+	// 点検しない(#13・反映確認vector_reflectionが扱う)
+	const settledBefore = new Date(
+		clock.now().getTime() - PIPELINE.REFLECTION_GIVE_UP_MS,
+	);
 	const targets = await db
 		.select()
 		.from(intents)
@@ -363,6 +368,7 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
 			and(
 				inArray(intents.status, ["active", "paused"]),
 				isNotNull(intents.embeddedAt),
+				lte(intents.embeddedAt, settledBefore),
 				isNull(intents.vectorDeletedAt),
 			),
 		)
@@ -381,7 +387,11 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
 					continue;
 				}
 				try {
-					if ((await runEmbeddingStage(env, row, clock)) === "embedded") {
+					if (
+						(await runEmbeddingStage(env, row, clock, {
+							emitCompleted: false,
+						})) === "embedded"
+					) {
 						recovered += 1;
 					}
 				} catch (error) {
