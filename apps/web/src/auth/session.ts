@@ -33,8 +33,9 @@ interface RefreshResponse {
 /**
  * リフレッシュ1回の結果。
  * - success: 応答を受け・新しいトークンを得た
- * - rejected: 応答は受けたがサーバーが明示拒否(!ok)=保存値が無効と判断できる
- * - network_error: fetch例外・応答本文が読めない等で判断できない(一時的なオフライン含む)
+ * - rejected: サーバーの明示の拒否=401、または400で本文のerror.codeがVALIDATION_FAILED(LATCH形式)。保存値が無効と判断できる
+ * - network_error: fetch例外・応答本文が読めない等で判断できない(一時的なオフライン含む)。
+ *   中継の404・408・429・5xx・LATCH形式でない400もここへ入れる(保存値を捨てない)
  */
 export type RefreshOutcome = "success" | "rejected" | "network_error";
 
@@ -111,6 +112,24 @@ const notifyUserChange = (userChanged: boolean): void => {
 	}
 };
 
+/** 400の本文がLATCHのエラー形式で、error.codeがVALIDATION_FAILEDか(読めなければfalse) */
+const isValidationFailed = async (response: Response): Promise<boolean> => {
+	try {
+		const body: unknown = await response.json();
+		const error =
+			typeof body === "object" && body !== null
+				? (body as { error?: unknown }).error
+				: undefined;
+		return (
+			typeof error === "object" &&
+			error !== null &&
+			(error as { code?: unknown }).code === "VALIDATION_FAILED"
+		);
+	} catch {
+		return false;
+	}
+};
+
 /** リフレッシュを1回実行する(成功時は回転後のトークンで上書きする) */
 const performRefresh = async (): Promise<RefreshOutcome> => {
 	const stored = readStoredRefreshToken();
@@ -129,8 +148,15 @@ const performRefresh = async (): Promise<RefreshOutcome> => {
 		return "network_error";
 	}
 	if (!response.ok) {
-		// サーバーが明示拒否(401等)=保存値は無効
-		return "rejected";
+		// 保存値が無効と判断できるのは401とLATCH形式の400(VALIDATION_FAILED)だけ。
+		// 中継の404・5xx等では有効なトークンを捨てない
+		if (response.status === 401) {
+			return "rejected";
+		}
+		if (response.status === 400 && (await isValidationFailed(response))) {
+			return "rejected";
+		}
+		return "network_error";
 	}
 	try {
 		const data = (await response.json()) as RefreshResponse;

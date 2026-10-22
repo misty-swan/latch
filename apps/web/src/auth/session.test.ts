@@ -106,6 +106,52 @@ describe("authSession", () => {
 		expect(localStorage.getItem(REFRESH_KEY)).toBe("refresh-1");
 	});
 
+	it("restoreは中継の404ではlocalStorageのトークンを残す", async () => {
+		localStorage.setItem(REFRESH_KEY, "refresh-1");
+		fetchMock.mockResolvedValueOnce(new Response("Not Found", { status: 404 }));
+
+		await expect(authSession.restore()).resolves.toBe(false);
+
+		expect(localStorage.getItem(REFRESH_KEY)).toBe("refresh-1");
+	});
+
+	it("restoreは503ではトークンを残す", async () => {
+		localStorage.setItem(REFRESH_KEY, "refresh-1");
+		fetchMock.mockResolvedValueOnce(new Response("down", { status: 503 }));
+
+		await expect(authSession.restore()).resolves.toBe(false);
+
+		expect(localStorage.getItem(REFRESH_KEY)).toBe("refresh-1");
+	});
+
+	it("restoreはLATCH形式でない400ではトークンを残す", async () => {
+		localStorage.setItem(REFRESH_KEY, "refresh-1");
+		fetchMock.mockResolvedValueOnce(
+			new Response("<html>Bad Request</html>", { status: 400 }),
+		);
+
+		await expect(authSession.restore()).resolves.toBe(false);
+
+		expect(localStorage.getItem(REFRESH_KEY)).toBe("refresh-1");
+	});
+
+	it("restoreはLATCH形式の400(VALIDATION_FAILED)ではトークンを除去する", async () => {
+		localStorage.setItem(REFRESH_KEY, "refresh-1");
+		fetchMock.mockResolvedValueOnce(
+			jsonResponse(400, {
+				error: {
+					code: "VALIDATION_FAILED",
+					message: "リクエストボディが不正です",
+					details: {},
+				},
+			}),
+		);
+
+		await expect(authSession.restore()).resolves.toBe(false);
+
+		expect(localStorage.getItem(REFRESH_KEY)).toBeNull();
+	});
+
 	it("restoreの成功時は保存値を除去しない", async () => {
 		localStorage.setItem(REFRESH_KEY, "refresh-1");
 		fetchMock.mockResolvedValueOnce(
