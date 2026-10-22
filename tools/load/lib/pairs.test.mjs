@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	BURST_LEAD_SEC,
 	baseStartMs,
+	CHAT_PAIR_SPACING_MS,
 	maxDurationSec,
 	PAIR_SPACING_MS,
 	pairStartMs,
@@ -55,6 +56,21 @@ describe("pairStartMs", () => {
 		const last = pairStartMs(baseStartMs(now), 29);
 		expect(last - now).toBeLessThan(7 * 24 * HOUR);
 	});
+	it("(c)は間隔2時間を渡せ、50組の最後の開始でも7日以内に収まる", () => {
+		const now = Date.UTC(2026, 9, 22, 15, 30);
+		const base = baseStartMs(now);
+		expect(pairStartMs(base, 1, CHAT_PAIR_SPACING_MS)).toBe(base + 2 * HOUR);
+		expect(pairStartMs(base, 49, CHAT_PAIR_SPACING_MS) - now).toBeLessThan(
+			7 * 24 * HOUR,
+		);
+		// 3時間の間隔のままでは上限を超える
+		expect(pairStartMs(base, 49) - now).toBeGreaterThan(7 * 24 * HOUR);
+	});
+	it("(c)の隣の組とは重なりが0分(Layer 1の下限15分を下回る)", () => {
+		const base = Date.UTC(2026, 9, 23, 16);
+		const end0 = pairStartMs(base, 0, CHAT_PAIR_SPACING_MS) + 2 * HOUR;
+		expect(pairStartMs(base, 1, CHAT_PAIR_SPACING_MS)).toBe(end0);
+	});
 });
 
 describe("pairSubjects", () => {
@@ -73,6 +89,17 @@ describe("pairSubjects", () => {
 			"load-202610221530-d3",
 			"load-202610221530-d4",
 		]);
+	});
+	it("(c)はcの印", () => {
+		expect(pairSubjects("202610221530", "chat", 0)).toEqual([
+			"load-202610221530-c1",
+			"load-202610221530-c2",
+		]);
+	});
+	it("知らない種類は例外", () => {
+		expect(() => pairSubjects("202610221530", "x", 0)).toThrow(
+			"組の種類が不正です(x)",
+		);
 	});
 });
 

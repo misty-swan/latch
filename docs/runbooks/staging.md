@@ -270,3 +270,29 @@ node tools/load/cleanup.mjs
 - 結果の表の`proposal_delivered`が通知の届いた人数、`proposal_missing`が待ちの上限(`PROPOSAL_WAIT_SEC`・既定60秒)までに届かなかった人数である。`THRESHOLDS`の`proposal_missing`の`count<1`が✗なら、届かない人がいたことを示す
 - 小さく試すときは`-e LOAD_SCALE=0.2`を足す(6組=12人)
 - 不具合#7(GitHubのissue)が直るまでは、stagingで新しい意思の索引の登録が毎回失敗し、毎分の定期処理の取りこぼし回収で5〜10分後に評価される。それまでは`-e PROPOSAL_WAIT_SEC=900`を足して待ちを延ばす(k6の1回の実行の上限は、待ちの上限から自動で決まる)
+
+### 7.7 シナリオ(c) チャット同時接続
+
+準備で1対1のつながりを50組(100人)成立させ、100人が同時にチャットのWebSocket(サーバーとつなぎっぱなしにして双方向にやり取りする通信)で接続し、5分間、5秒ごとに送り合う。送信から相手への到着までのp95と、接続の失敗の割合を測る(01 §20に目標値は無く、参考値として報告書に載せる)。スクリプトは`tools/load/scenarios/c-chat.js`。
+
+- 準備は通常のAPIで行う。組の作り方は(b)と同じで、組ごとに同じ話題の機会Intentを保存し、提案のアプリ内通知が届いたら2人とも[参加する](`POST /v1/latches/{id}/response`の`yes`)で参加し、成立(matched)を確かめる。50組を機会の開始の上限(7日以内)に収めるため、組と組の間隔は(b)の3時間ではなく2時間にする(隣の組とは時間帯の端が接するだけで、重なりの下限15分を下回るため提案されない)
+- 試験用の利用者のsubjectは`load-<RUN_ID>-c<連番>`(組kは連番2k+1と2k+2)
+- 本体では各人がチケット(`POST /v1/ws-ticket`)を取って接続し、`{type:"message", body:"t=<送った時刻>", client_id:"<VUの番号>-<連番>"}`を送る。25秒ごとに`ping`を送る。WebSocketのURLは宛先のURLから作り(`https`→`wss`)、表示しない
+- WebSocketにはk6の`k6/websockets`を使う。k6 v1.8.1で読み込めること、stagingのチャットへ接続して送受信できることを確かめた(10 §5の「WebSocket対応は実施時に再確認」)
+
+```bash
+export LATCH_LOAD_BASE_URL=<stagingのURL>
+RUN_ID=$(date -u +%Y%m%d%H%M)
+node tools/load/cleanup.mjs
+node tools/load/run.mjs tools/load/scenarios/c-chat.js -e RUN_ID=$RUN_ID \
+  --summary-export tools/load/results/$RUN_ID-c.json
+node tools/load/cleanup.mjs
+```
+
+(後始末→包みを通した(c)の実行→後始末の順に動く。k6は準備で100人を登録し、50組の意思を保存して提案を待ち、2人とも参加させてから、100人を同時に接続して5分間送り合い、最後に結果の表を出す)
+
+- 結果の表の`chat_delivery_ms`が送信から相手への到着までのミリ秒(自分の送信の折り返しは除く。`count`が相手から届いた発言の数)、`chat_connect_failed`が接続の失敗(チケットの発行の失敗を含む)の割合、`chat_messages_sent`が送った件数、`chat_pairs_unmatched`が準備で成立できなかった組数である。`THRESHOLDS`の`chat_connect_failed`の`rate<0.01`・`chat_pairs_unmatched`の`count<1`が✗なら、接続できない人か成立できない組があったことを示す
+- 準備の上限(setupTimeout)は、提案待ちの上限(`PROPOSAL_WAIT_SEC`)+300秒+組数×6秒で自動で決まる
+- 小さく試すときは`-e LOAD_SCALE=0.1`を足す(5組=10人・接続を30秒保つ。2026-10-22の試しでは10接続すべて成功し、相手への到着は50件・p95 0.63秒だった)
+- 不具合#7が直るまでは、(b)と同じく`-e PROPOSAL_WAIT_SEC=900`を足して提案の待ちを延ばす
+- 成立したつながりとチャットの発言は、後始末の後もstagingのD1に残る(消すAPIが無い)。後始末が消すのは意思だけで、次の回は別の実行の印の利用者で行うため、試験の妨げにはならない

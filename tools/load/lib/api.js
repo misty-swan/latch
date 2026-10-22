@@ -5,6 +5,7 @@
  * - signIn: テスト用サインイン→登録(subject=`load-<runId>-<連番>`)
  * - parseIntent・saveIntent・createOccasion: 意思の読み解き・保存
  * - waitForProposal: 提案のアプリ内通知が届くまで待つ
+ * - respondLatch・wsTicket: 提案への回答・チャットのWebSocketのチケット((c)で使う)
  * 各リクエストにはk6のタグ`name`を付け、閾値と集計をこの名前で絞る。
  * 宛先のURLは表示しない(stagingのURLはログに残さない・設計 §2.1)。
  */
@@ -165,4 +166,29 @@ export function waitForProposal(baseUrl, token, maxWaitSec) {
 		if (Date.now() >= deadline) return null;
 		sleep(1);
 	}
+}
+
+/**
+ * 提案への回答(POST /v1/latches/{id}/response)。200なら操作後のLatchDTOを、
+ * それ以外はnullを返す
+ */
+export function respondLatch(baseUrl, token, latchId, response) {
+	const res = http.post(
+		`${baseUrl}/v1/latches/${latchId}/response`,
+		json({ response }),
+		{ headers: headers(token), tags: { name: "latch_response" } },
+	);
+	check(res, { 回答が200: (r) => r.status === 200 });
+	return res.status === 200 ? res.json() : null;
+}
+
+/** チャットのWebSocketのチケット(POST /v1/ws-ticket・60秒・1回限り)。無ければnull */
+export function wsTicket(baseUrl, token, latchId) {
+	const res = http.post(
+		`${baseUrl}/v1/ws-ticket`,
+		json({ scope: "chat", latch_id: latchId }),
+		{ headers: headers(token), tags: { name: "ws_ticket" } },
+	);
+	check(res, { チケットの発行が200: (r) => r.status === 200 });
+	return res.status === 200 ? res.json().ticket : null;
 }

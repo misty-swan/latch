@@ -1,11 +1,13 @@
 /**
- * シナリオ(b)(d)の組の決め方の純関数(F8b設計 §3.3)。k6とvitestの両方から読むため、
+ * シナリオ(b)(c)(d)の組の決め方の純関数(F8b設計 §3.3)。k6とvitestの両方から読むため、
  * k6やNodeに固有の部品をimportしない。
  * - parseMode: MODE(staggered=(b)・burst=(d))
  * - baseStartMs・pairStartMs: 組kの機会Intentの開始時刻(基準+k×3時間・2時間の幅)。
  *   組どうしは時間帯が重ならないため、Layer 1の時間の重なりの条件(time_no_overlap)で
  *   相手の組と外れる(stubのJevは常に高い値を返すため、ずらさないと組どうしが混ざる)
- * - pairSubjects: 組kの2人のsubject(`load-<runId>-b<n>`・(d)は`-d<n>`)
+ *   (c)は組が50組と多く、3時間の間隔では最後の組が機会の開始の上限(7日以内)を超えるため、
+ *   間隔CHAT_PAIR_SPACING_MS(2時間)を渡す(隣の組との重なりは0分で、下限15分を下回り外れる)
+ * - pairSubjects: 組kの2人のsubject(`load-<runId>-b<n>`・(c)は`-c<n>`・(d)は`-d<n>`)
  * - maxDurationSec: k6のシナリオのmaxDuration(提案待ちを途中で切らない長さ)
  */
 
@@ -14,6 +16,13 @@ const MS_PER_HOUR = 3_600_000;
 const BASE_LEAD_MS = 24 * MS_PER_HOUR;
 /** 組と組の開始時刻の間隔(意思の時間の幅2時間より長く、重ならない) */
 export const PAIR_SPACING_MS = 3 * MS_PER_HOUR;
+/**
+ * (c)の組と組の開始時刻の間隔。意思の幅2時間と同じで、隣の組とは端が接するだけ
+ * (重なり0分<Layer 1の下限15分)。50組でも最後の開始が実行時刻+7日以内に収まる
+ */
+export const CHAT_PAIR_SPACING_MS = 2 * MS_PER_HOUR;
+/** 組の種類ごとのsubjectの印(staggered=(b)・chat=(c)・burst=(d)) */
+const SUBJECT_TAGS = { staggered: "b", chat: "c", burst: "d" };
 /** (b)の組ごとの投入の間隔(秒) */
 export const STAGGER_SEC = 2;
 /** (d)でsetupの終わりから一斉投入までに置く間(秒)。全VUが起動してsleepに入る余裕 */
@@ -35,14 +44,20 @@ export function baseStartMs(nowMs) {
 	return Math.ceil((nowMs + BASE_LEAD_MS) / MS_PER_HOUR) * MS_PER_HOUR;
 }
 
-/** 組k(0始まり)の開始時刻(ミリ秒) */
-export function pairStartMs(baseMs, k) {
-	return baseMs + k * PAIR_SPACING_MS;
+/** 組k(0始まり)の開始時刻(ミリ秒)。間隔の既定はPAIR_SPACING_MS((b)(d)) */
+export function pairStartMs(baseMs, k, spacingMs = PAIR_SPACING_MS) {
+	return baseMs + k * spacingMs;
 }
 
-/** 組k(0始まり)の2人のsubject。連番は1始まりで、組kは2k+1と2k+2 */
-export function pairSubjects(runId, mode, k) {
-	const tag = mode === "burst" ? "d" : "b";
+/**
+ * 組k(0始まり)の2人のsubject。連番は1始まりで、組kは2k+1と2k+2。
+ * kindはstaggered((b))・chat((c))・burst((d))。それ以外は例外
+ */
+export function pairSubjects(runId, kind, k) {
+	const tag = SUBJECT_TAGS[kind];
+	if (!tag) {
+		throw new Error(`組の種類が不正です(${kind})`);
+	}
 	return [
 		`load-${runId}-${tag}${2 * k + 1}`,
 		`load-${runId}-${tag}${2 * k + 2}`,
