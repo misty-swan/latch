@@ -4,9 +4,9 @@
  * (100人×5件。1人のActive Intent上限5件に収まる)。読み解き確認の[預ける]と同じ呼び方。
  * k6が測るもの: Intent保存のp95(目標0.5秒)・Parserのp95(目標3秒・stubでの値)。
  *
- * 実行(手順書 docs/runbooks/staging.md 7章):
- *   k6 run -e LATCH_LOAD_BASE_URL=<stagingのURL> -e RUN_ID=<YYYYMMDDHHmm> \
- *     --summary-export tools/load/results/<RUN_ID>-a.json tools/load/scenarios/a-intent-burst.js
+ * 実行(手順書 docs/runbooks/staging.md 7章。k6の出力のURLを伏せる包みrun.mjsを通す):
+ *   LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/run.mjs tools/load/scenarios/a-intent-burst.js \
+ *     -e RUN_ID=<YYYYMMDDHHmm> --summary-export tools/load/results/<RUN_ID>-a.json
  * LOAD_SCALE(既定1)はrate・人数・時間に掛ける倍率(試しは0.1=10件/分を30秒)。
  */
 

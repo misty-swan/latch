@@ -188,13 +188,27 @@ k6 version
 
 (`k6 v1.8.1 (...)`のように版が出る。F8bの試し実行はv1.8.1で行った)
 
-### 7.2 環境変数
+### 7.2 k6は包み(run.mjs)を通して動かす
 
-k6には`-e 名前=値`で渡す。
+k6は通信に失敗したとき(名前が引けない・接続が切れた・時間切れ)、`WARN Request Failed error="Post \"https://…/v1/intents\": …"`のように宛先のURLをそのまま出す。stagingのURLを画面や記録に残さないため、k6は直接動かさず、必ず包みのスクリプト`tools/load/run.mjs`から動かす。
+
+```bash
+LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/run.mjs <シナリオ.js> [k6 runの引数...]
+```
+
+(k6を起動して`-e LATCH_LOAD_BASE_URL`を渡し、k6の出力の中の宛先のURL・ホスト名・workers.devのURLを`<url伏せ>`に置き換えて表示する。終わったときの終了コードはk6のものをそのまま返す)
+
+- k6の場所は環境変数`K6_BIN`で指定する(既定は`k6`=PATHの通った場所にあるもの)
+- 報告書や記録へ貼るのは、包みを通した出力だけにする。k6を直接動かしたときの生の出力は貼らない
+- 中断はCtrl+Cで行う(k6が途中までの結果をまとめて終わる)
+
+### 7.3 環境変数
+
+k6には`-e 名前=値`で渡す(`LATCH_LOAD_BASE_URL`だけは包みが渡す)。
 
 | 名前 | 既定 | 意味 |
 |---|---|---|
-| `LATCH_LOAD_BASE_URL` | (必須) | 宛先=`<stagingのURL>`。後始末(`cleanup.mjs`)にはシェルの環境変数として渡す |
+| `LATCH_LOAD_BASE_URL` | (必須) | 宛先=`<stagingのURL>`。包み(`run.mjs`)と後始末(`cleanup.mjs`)にシェルの環境変数として渡す |
 | `RUN_ID` | 実行時刻(UTCの`YYYYMMDDHHmm`) | 実行の印。試験用の利用者のsubjectは`load-<RUN_ID>-<連番>`になり、集計はこの印で絞る。12桁の数字のみ |
 | `LOAD_SCALE` | `1` | 規模の倍率。rate(1分あたりの件数)・人数・時間に掛ける(試しは`0.1`) |
 | `PROPOSAL_WAIT_SEC` | `60` | 提案の通知を待つ上限の秒数((b)〜(d)で使う) |
@@ -202,7 +216,7 @@ k6には`-e 名前=値`で渡す。
 - 宛先を誤らないよう、各シナリオは最初にテスト用サインイン(`POST /v1/dev/idp-token`)を呼び、200でなければ「宛先がstagingではありません」で止まる(本番では404になる)
 - 結果のJSON(`--summary-export`の出力)は`tools/load/results/`に置く。このフォルダはgitの管理外で、最初に`mkdir -p tools/load/results`で作る
 
-### 7.3 後始末
+### 7.4 後始末
 
 試験の前と後に、試験用の利用者(subjectが`load-`で始まる)の意思をすべて消す。
 
@@ -216,19 +230,20 @@ LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/cleanup.mjs
 - 実行の印を問わず`load-`の利用者を全員拾うため、途中で止まった回の残りも消える。利用者の行そのものは残る(次の回は別の印で作り直す)
 - まれにwranglerの問い合わせが「The given account is not valid or is not authorized」(code 7403)で失敗することがある。時間を置いてもう一度実行する
 
-### 7.4 シナリオ(a) 作成の集中
+### 7.5 シナリオ(a) 作成の集中
 
 読み解き(`POST /v1/intents/parse`)→保存(`POST /v1/intents`・status=active)を、合計100件/分で5分間繰り返す(100人×5件。1人のActive Intent上限5件に収まる)。読み解き確認の画面の[預ける]と同じ呼び方である。Intent保存のp95(目標0.5秒)とParserのp95(目標3秒・stubでの値)を測る。
 
 ```bash
+export LATCH_LOAD_BASE_URL=<stagingのURL>
 RUN_ID=$(date -u +%Y%m%d%H%M)
-LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/cleanup.mjs
-k6 run -e LATCH_LOAD_BASE_URL=<stagingのURL> -e RUN_ID=$RUN_ID \
-  --summary-export tools/load/results/$RUN_ID-a.json tools/load/scenarios/a-intent-burst.js
-LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/cleanup.mjs
+node tools/load/cleanup.mjs
+node tools/load/run.mjs tools/load/scenarios/a-intent-burst.js -e RUN_ID=$RUN_ID \
+  --summary-export tools/load/results/$RUN_ID-a.json
+node tools/load/cleanup.mjs
 ```
 
-(1行目で実行の印を決め、後始末→(a)の実行→後始末の順に動く。k6は準備で100人を登録してから5分間リクエストを送り、最後に結果の表を出す)
+(1〜2行目で宛先と実行の印を決め、後始末→包みを通した(a)の実行→後始末の順に動く。k6は準備で100人を登録してから5分間リクエストを送り、最後に結果の表を出す)
 
 - 結果の表の`THRESHOLDS`に、目標(`http_req_duration{name:intent_save}`の`p(95)<500`・`http_req_duration{name:parse}`の`p(95)<3000`・失敗の割合`http_req_failed`の`rate<0.01`)ごとに✓か✗が出る。1つでも✗ならk6は失敗(0以外)で終わる。合否の正本は報告書(`docs/reports/f8b-load-test.md`)の集計である
 - 小さく試すときは`-e LOAD_SCALE=0.1`を足す(10人・10件/分を30秒。保存は6件前後になる)
