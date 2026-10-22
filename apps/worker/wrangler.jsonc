@@ -154,21 +154,21 @@
 				{
 					"binding": "DB",
 					"database_name": "latch-db-staging",
-					// provision-staging.mjs --write で実IDへ差し替え
-					"database_id": "00000000-0000-0000-0000-000000000000",
+					// 実ID(provision-staging.mjs --write が書き込む)
+					"database_id": "e847caf8-1989-4028-af59-045c25afd1c5",
 					"migrations_dir": "migrations"
 				}
 			],
 			"kv_namespaces": [
 				{
 					"binding": "REVOCATION_KV",
-					// provision-staging.mjs --write で実IDへ差し替え
-					"id": "00000000000000000000000000000000"
+					// 実ID(provision-staging.mjs --write が書き込む)
+					"id": "7161f1879cf347d1a7286db069f7f8fb"
 				},
 				{
 					"binding": "PIPELINE_KV",
-					// provision-staging.mjs --write で実IDへ差し替え
-					"id": "00000000000000000000000000000000"
+					// 実ID(provision-staging.mjs --write が書き込む)
+					"id": "42e39118765848bebad7f531f972d1f4"
 				}
 			],
 			"r2_buckets": [
