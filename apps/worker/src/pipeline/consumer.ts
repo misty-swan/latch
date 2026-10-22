@@ -350,6 +350,15 @@ const handleDlqBatch = async (
 };
 
 /**
+ * DLQのキュー名か。環境ごとに名前の後ろへ印が付く(local・prod=match-events-dlq・
+ * staging=match-events-dlq-staging・wrangler.jsonc)。consumerのキュー名は実行時に
+ * バインディングから読めないため、名前の形で判別する。主キュー(match-events・
+ * match-events-staging)は「-dlq」を含まないので外れる(docs/06 §5)
+ */
+export const isDlqQueue = (queueName: string): boolean =>
+	/^match-events-dlq(-[a-z0-9]+)?$/.test(queueName);
+
+/**
  * Queuesのバッチ消費の入口(index.tsのqueueハンドラから呼ぶ)。
  * キュー名はbatch.queueで判別し、例外を外へ出さない(=全メッセージack)。
  * batch全体のretryは使わない設計で、失敗はイベント行のstatusで記録する(06 §5)
@@ -361,7 +370,7 @@ export const handleQueueBatch = async (
 	clock: Clock,
 ): Promise<void> => {
 	try {
-		if (batch.queue === "match-events-dlq") {
+		if (isDlqQueue(batch.queue)) {
 			await handleDlqBatch(env, batch);
 			return;
 		}

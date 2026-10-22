@@ -35,7 +35,7 @@ import { intents, matchEvents, users } from "../src/db/schema";
 // ルート・handleQueueBatchが受け取るEnv(src/env.ts・生成型Envの宣言部分型)
 import type { Env as WorkerEnv } from "../src/env";
 import { stubEmbedding } from "../src/llm/stub/embedding";
-import { handleQueueBatch } from "../src/pipeline/consumer";
+import { handleQueueBatch, isDlqQueue } from "../src/pipeline/consumer";
 import { buildNormalizedText } from "../src/pipeline/normalize";
 import {
 	memoryVectorStore,
@@ -367,6 +367,27 @@ describe("DLQの消費(docs/06 §5: dead反映と警報)", () => {
 			.from(matchEvents)
 			.where(eq(matchEvents.id, eventId));
 		expect(origin?.status).toBe("dead");
+	});
+
+	it("stagingのDLQ(match-events-dlq-staging)のメッセージもstatus=deadへ更新しackする", async () => {
+		const { eventId } = await seedEvent();
+
+		const result = await runBatch("match-events-dlq-staging", [eventId]);
+		expectAcked(result);
+
+		const [origin] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		expect(origin?.status).toBe("dead");
+	});
+
+	it("isDlqQueueは環境ごとのDLQ名だけを真とし、主キューは偽とする", () => {
+		expect(isDlqQueue("match-events-dlq")).toBe(true);
+		expect(isDlqQueue("match-events-dlq-staging")).toBe(true);
+		expect(isDlqQueue("match-events")).toBe(false);
+		expect(isDlqQueue("match-events-staging")).toBe(false);
+		expect(isDlqQueue("other-dlq")).toBe(false);
 	});
 });
 

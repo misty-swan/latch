@@ -48,7 +48,9 @@ jobs:
   # mainへのpushでstagingへ自動デプロイする(F8b設計 §2・docs/04 §6・docs/runbooks/staging.md 4〜5章)。
   # シークレットの登録前に赤くならないよう、リポジトリ変数STAGING_DEPLOY_ENABLEDが
   # 'true'のときだけ動く。手順はscripts/deploy-staging.mjsと同じで、どこで落ちたかを
-  # 記録で分かるよう1手順ずつ別のstepにしている。URLはシークレットなので記録に残らない
+  # 記録で分かるよう1手順ずつ別のstepにしている。URLはシークレットなので記録に残らない。
+  # シークレットはjob全体には置かず、使うstepだけに渡す(pnpm installの依存の処理や
+  # 他者のactionへトークンを見せない)。wranglerの出力はrun-redacted.mjsでURLを伏せる
   deploy-staging:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.STAGING_DEPLOY_ENABLED == 'true'
     needs: [ci, web-e2e]
@@ -57,10 +59,6 @@ jobs:
     concurrency:
       group: staging-deploy
       cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      LATCH_STAGING_URL: ${{ secrets.LATCH_STAGING_URL }}
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -73,6 +71,14 @@ jobs:
       - run: pnpm --filter web build
         env:
           VITE_DEV_AUTH: "1"
-      - run: pnpm --filter worker exec wrangler d1 migrations apply DB --env staging --remote
-      - run: pnpm --filter worker exec wrangler deploy --env staging
+      - run: node apps/worker/scripts/run-redacted.mjs pnpm --filter worker exec wrangler d1 migrations apply DB --env staging --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - run: node apps/worker/scripts/run-redacted.mjs pnpm --filter worker exec wrangler deploy --env staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - run: node apps/worker/scripts/staging-smoke.mjs
+        env:
+          LATCH_STAGING_URL: ${{ secrets.LATCH_STAGING_URL }}
