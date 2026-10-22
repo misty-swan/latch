@@ -17,6 +17,8 @@ export interface StoredVector {
 		status: string;
 		category: string | null;
 		user_id: string;
+		/** upsert時点のIntent version。反映確認(同version以上か)に使う。不在はundefined */
+		version?: number;
 	};
 }
 

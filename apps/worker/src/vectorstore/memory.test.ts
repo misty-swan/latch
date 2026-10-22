@@ -7,7 +7,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../env";
 import { createVectorStore } from "./index";
-import { memoryVectorStore, resetMemoryVectorStore } from "./memory";
+import {
+	holdMemoryVectorWrites,
+	memoryVectorStore,
+	releaseMemoryVectorWrites,
+	resetMemoryVectorStore,
+} from "./memory";
 import type { StoredVector } from "./types";
 
 /** metadataを補完するヘルパー(form/statusのみ上書きできる) */
@@ -50,6 +55,30 @@ describe("memoryVectorStore(docs/05 §2.3・docs/06 Layer 2)", () => {
 		expect(hits[0]?.score).toBeCloseTo(1, 12);
 		expect(hits[1]?.score).toBeCloseTo(Math.SQRT1_2, 12);
 		expect(hits[2]?.score).toBeCloseTo(0, 12);
+	});
+
+	it("hold中のupsertはgetByIds・queryから見えず、releaseで見える", async () => {
+		const store = memoryVectorStore();
+		holdMemoryVectorWrites();
+		await store.upsert([makeVector("held", [1, 0])]);
+		const filter = { form: "occasion", status: "active" };
+		expect(await store.getByIds(["held"])).toEqual([null]);
+		expect(await store.query([1, 0], { topK: 10, filter })).toEqual([]);
+
+		releaseMemoryVectorWrites();
+		expect((await store.getByIds(["held"]))[0]?.id).toBe("held");
+		expect(await store.query([1, 0], { topK: 10, filter })).toHaveLength(1);
+	});
+
+	it("hold中のupsertはresetで破棄され、以降のupsertは即時に見える", async () => {
+		const store = memoryVectorStore();
+		holdMemoryVectorWrites();
+		await store.upsert([makeVector("held", [1, 0])]);
+		resetMemoryVectorStore();
+		releaseMemoryVectorWrites();
+		expect(await store.getByIds(["held"])).toEqual([null]);
+		await store.upsert([makeVector("now", [1, 0])]);
+		expect((await store.getByIds(["now"]))[0]?.id).toBe("now");
 	});
 
 	it("query: topKで切り詰める", async () => {

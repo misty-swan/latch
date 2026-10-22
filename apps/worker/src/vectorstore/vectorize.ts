@@ -14,14 +14,17 @@ import type { StoredVector, VectorStore } from "./types";
  */
 const toVectorizeMetadata = (
 	m: StoredVector["metadata"],
-): Record<string, string> => {
-	const metadata: Record<string, string> = {
+): Record<string, string | number> => {
+	const metadata: Record<string, string | number> = {
 		form: m.form,
 		status: m.status,
 		user_id: m.user_id,
 	};
 	if (m.category !== null) {
 		metadata.category = m.category;
+	}
+	if (m.version !== undefined) {
+		metadata.version = m.version;
 	}
 	return metadata;
 };
@@ -41,6 +44,7 @@ const toStoredVector = (v: {
 			status: meta.status as string,
 			category: (meta.category as string | undefined) ?? null,
 			user_id: meta.user_id as string,
+			version: typeof meta.version === "number" ? meta.version : undefined,
 		},
 	};
 };

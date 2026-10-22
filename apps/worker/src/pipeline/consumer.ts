@@ -1,15 +1,15 @@
 /**
  * match-eventsキューの消費(第1段)とDLQのdead反映(docs/06 §2・§5)。
  * 第1段: intent_created/intent_updated → Embedding計算 → VectorStoreへの
- * upsert → 反映確認(getByIds) → intents.embedding_model/embedded_at更新 →
- * embedding_completedイベントの再投入(同version・即時)。
+ * upsert(反映は待たない) → intents.embedding_model/embedded_at更新 →
+ * 計算したベクトルを載せたembedding_completedイベントの再投入(同version・即時)。
+ * 第2段は載せられたベクトルで自分を検索するため、upsertの反映待ちは不要。
  * 消費は例外を外へ出さない(=全メッセージack)。失敗はイベント行のstatusで
  * 記録し、Embedding失敗は再試行せずCronのバックフィルが回収する(06 §5)。
  * embedding_completedの消費(第2段)はevaluateIntent(pipeline/evaluate.ts)へ
  * 委譲し、戻り値の計測結果を起点イベントのpayloadへ記録する(06 §7)。
  */
 import type { MatchQueueMessage } from "@latch/shared";
-import { PIPELINE } from "@latch/shared";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Clock } from "../clock/clock";
@@ -20,9 +20,8 @@ import { createLogger } from "../logging/logger";
 import { flushPush } from "../push/dispatch";
 import { pushSenderOf } from "../push/sender";
 import { createVectorStore } from "../vectorstore";
-import type { VectorStore } from "../vectorstore/types";
 import { errorCodeOf } from "./errors";
-import { evaluateIntent } from "./evaluate";
+import { evaluateIntent, type Stage2Result } from "./evaluate";
 import { emitMatchEvent } from "./events";
 import { buildNormalizedText } from "./normalize";
 
@@ -34,46 +33,9 @@ export type IntentRow = typeof intents.$inferSelect;
 /** 第1段の本体の結果。failed=Embedding系の失敗(再試行なし・06 §5) */
 export type EmbeddingStageResult = "embedded" | "failed";
 
-/** 実時間のsleep(反映確認のポーリング間隔用) */
-const sleep = (ms: number): Promise<void> =>
-	new Promise((resolve) => setTimeout(resolve, ms));
-
 /**
- * VectorStoreへのupsert反映を確認する(docs/06 §2: upsert完了を確認してから
- * embedding_completedを投入)。EMBED_CONFIRM_INTERVAL_MS間隔でgetByIdsを詰め、
- * EMBED_CONFIRM_TIMEOUT_MSを超過したら未反映(false)と判定する。
- * インメモリ実装(local・単体試験)は即時に反映されるため初回で確定する。
- * 反復回数にも上限を設け、時刻が進まないclockとの組合せでも停止するようにする
- */
-const waitUntilReflected = async (
-	store: VectorStore,
-	vectorId: string,
-	clock: Clock,
-): Promise<boolean> => {
-	const startedAt = clock.now().getTime();
-	const maxAttempts =
-		Math.floor(
-			PIPELINE.EMBED_CONFIRM_TIMEOUT_MS / PIPELINE.EMBED_CONFIRM_INTERVAL_MS,
-		) + 1;
-	for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-		const [hit] = await store.getByIds([vectorId]);
-		if (hit !== null) {
-			return true;
-		}
-		if (
-			clock.now().getTime() - startedAt >=
-			PIPELINE.EMBED_CONFIRM_TIMEOUT_MS
-		) {
-			return false;
-		}
-		await sleep(PIPELINE.EMBED_CONFIRM_INTERVAL_MS);
-	}
-	return false;
-};
-
-/**
- * 第1段の本体(docs/06 §2)。埋め込み→VectorStoreへのupsert→反映確認→
- * intents.embedding_model/embedded_atの更新→embedding_completedイベントの投入
+ * 第1段の本体(docs/06 §2)。埋め込み→VectorStoreへのupsert(反映は待たない)→
+ * intents.embedding_model/embedded_atの更新→embedding_completedイベント(vector付き)の投入
  * (同version・即時)までを行い、成功("embedded")/失敗("failed")を返す。
  * 失敗(throw/timeout)は再試行せず、呼び出し側が起点イベントをfailedへ倒す
  * (06 §5: 再試行なし・Cronのバックフィルが回収)。Cronのバックフィル
@@ -106,15 +68,10 @@ export const runEmbeddingStage = async (
 					status: "active",
 					category: intent.category,
 					user_id: intent.userId,
+					version: intent.version,
 				},
 			},
 		]);
-		// 反映確認(06 §2: upsert反映は秒単位で遅れ得るため完了を待ってから再投入)
-		if (!(await waitUntilReflected(store, intent.id, clock))) {
-			throw new Error(
-				"EMBED_CONFIRM_TIMEOUT: upsert反映確認がタイムアウト(06 §2・Cronのバックフィルで回収)",
-			);
-		}
 		const db = drizzle(env.DB);
 		await db
 			.update(intents)
@@ -129,7 +86,7 @@ export const runEmbeddingStage = async (
 					intentId: intent.id,
 					version: intent.version,
 				},
-				undefined,
+				{ vector: values },
 				clock,
 			);
 		}
@@ -148,6 +105,34 @@ export const runEmbeddingStage = async (
 		return "failed";
 	}
 };
+
+/** 第2段の計測結果を起点イベントのpayloadへ載せる形にする(docs/06 §7・順序は試験で固定) */
+export const stage2Payload = (
+	result: Stage2Result,
+): Record<string, unknown> => ({
+	retrieval_count: result.retrievalCount,
+	l1_pass: result.l1Pass,
+	l1_exclusions: result.exclusions,
+	l3_pass: result.l3Pass,
+	l4_skipped_history: result.l4SkippedHistory,
+	jev_calls: result.jevCalls,
+	jev_reused: result.jevReused,
+	jev_held: result.jevHeld,
+	jev_latency: result.jevLatencyMs,
+	l5_over_threshold: result.l5OverThreshold,
+	proposed: result.proposed,
+	held_proposals: result.held,
+	l4_skipped_participants: result.l4SkippedParticipants,
+	group_pool: result.groupPool,
+	group_sets: result.groupSets,
+	group_jev_calls: result.groupJevCalls,
+	group_held_sets: result.groupHeldSets,
+	group_over_threshold: result.groupOverThreshold,
+	group_proposed: result.groupProposed,
+	group_held_proposals: result.groupHeldProposals,
+	group_failed: result.groupFailed,
+	retrieval_ms: result.retrievalMs,
+});
 
 /**
  * 起点イベントをprocessedへ倒す。payloadの上書きがあれば合わせて記録する
@@ -186,6 +171,7 @@ const consumeEvent = async (
 	env: Env,
 	eventId: string,
 	clock: Clock,
+	vector?: number[],
 ): Promise<void> => {
 	const db = drizzle(env.DB);
 	// イベント行の取得。無ければ何もせずack(送信だけが先行したメッセージ・Task 6引継ぎ)
@@ -208,7 +194,9 @@ const consumeEvent = async (
 	if (event.eventType === "embedding_completed") {
 		let result: Awaited<ReturnType<typeof evaluateIntent>>;
 		try {
-			result = await evaluateIntent(env, event.sourceIntentId, clock);
+			result = await evaluateIntent(env, event.sourceIntentId, clock, {
+				vector,
+			});
 		} catch (error) {
 			// 第2段の失敗は第1段のログと分けて記録し、起点イベントをfailedへ倒す
 			// (再試行なし・06 §5。Cronの未評価回収が拾う)
@@ -223,32 +211,7 @@ const consumeEvent = async (
 			env,
 			event.id,
 			clock,
-			result === null
-				? { skipped: "suppressed" }
-				: {
-						retrieval_count: result.retrievalCount,
-						l1_pass: result.l1Pass,
-						l1_exclusions: result.exclusions,
-						l3_pass: result.l3Pass,
-						l4_skipped_history: result.l4SkippedHistory,
-						jev_calls: result.jevCalls,
-						jev_reused: result.jevReused,
-						jev_held: result.jevHeld,
-						jev_latency: result.jevLatencyMs,
-						l5_over_threshold: result.l5OverThreshold,
-						proposed: result.proposed,
-						held_proposals: result.held,
-						l4_skipped_participants: result.l4SkippedParticipants,
-						group_pool: result.groupPool,
-						group_sets: result.groupSets,
-						group_jev_calls: result.groupJevCalls,
-						group_held_sets: result.groupHeldSets,
-						group_over_threshold: result.groupOverThreshold,
-						group_proposed: result.groupProposed,
-						group_held_proposals: result.groupHeldProposals,
-						group_failed: result.groupFailed,
-						retrieval_ms: result.retrievalMs,
-					},
+			result === null ? { skipped: "suppressed" } : stage2Payload(result),
 		);
 		return;
 	}
@@ -312,7 +275,13 @@ const handleMainQueueBatch = async (
 			continue;
 		}
 		try {
-			await consumeEvent(env, eventId, clock);
+			const body = message.body;
+			const vector =
+				Array.isArray(body.vector) &&
+				body.vector.every((v) => typeof v === "number")
+					? body.vector
+					: undefined;
+			await consumeEvent(env, eventId, clock, vector);
 		} catch (error) {
 			// 個別消費の失敗は再試行せずack(06 §5の設計)。intent_idはこの時点で
 			// 特定できないため記録しない(許可フィールドのみ・docs/08 §6)

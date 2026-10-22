@@ -87,6 +87,7 @@ export const MATCH_EVENT_TYPES = [
 	"intent_expired",
 	"bucket_arrived",
 	"embedding_completed",
+	"vector_reflection",
 ] as const;
 export type MatchEventType = (typeof MATCH_EVENT_TYPES)[number];
 
@@ -243,10 +244,11 @@ export const PIPELINE = {
 	BACKFILL_GRACE_MS: 5 * 60_000,
 	// Embedding呼び出しのtimeout(5秒・再試行なし)。docs/07 §4
 	EMBEDDING_TIMEOUT_MS: 5_000,
-	// Vectorizeのupsert完了確認のポーリング間隔。docs/06 §2
-	EMBED_CONFIRM_INTERVAL_MS: 500,
-	// Vectorizeのupsert完了確認のtimeout(超過時はバックフィルで回収)。docs/06 §2
-	EMBED_CONFIRM_TIMEOUT_MS: 5_000,
+	// 自分のベクトルが他の評価から見えるまでの確認の間隔(秒・遅延配信の送り直し)。
+	// 第1段は反映を待たず、vector_reflectionイベントがこの間隔で確認する
+	REFLECTION_DELAYS_S: [2, 4, 8, 16, 30],
+	// 反映確認を諦めるまでの上限(5分・超過はfailedにしてCronの回収へ)
+	REFLECTION_GIVE_UP_MS: 5 * 60_000,
 	// Cron各処理の1実行あたり処理上限。docs/04 §4
 	CRON_BATCH_LIMIT: 500,
 } as const;
@@ -335,6 +337,8 @@ export type ReportTargetValue = (typeof REPORT_TARGETS)[number];
 /** Queuesのキューメッセージ本体。event_type等の詳細はD1のmatch_events行から読む */
 export interface MatchQueueMessage {
 	event_id: string;
+	/** 第1段が計算した起点Intentのベクトル(第2段が反映を待たず評価に使う) */
+	vector?: number[];
 }
 
 /** Embeddingモデル識別子(real=Workers AI)。intents.embedding_modelへ記録する。docs/07 §4 */

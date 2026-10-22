@@ -99,6 +99,10 @@ export interface Stage2Result {
 /** evaluateIntentの差し替え口(試験用)。jevはLayer 4へそのまま渡す */
 export interface EvaluateOptions {
 	jev?: { primary: JevFn; fallback: JevFn };
+	/** 第1段が計算した自分のベクトル。あればgetByIdsで読まずLayer 2へ使う */
+	vector?: number[];
+	/** trueなら30分再評価抑制の確認だけを飛ばす(送り直しの評価用) */
+	ignoreSuppression?: boolean;
 }
 
 /** スコア降順・同点はULID昇順(docs/06 §3の同点の規律)の比較関数 */
@@ -140,6 +144,7 @@ export const evaluateIntent = async (
 	}
 	// 30分再評価抑制(docs/06 §4): 抑制中は一切書かずに抜ける
 	if (
+		options?.ignoreSuppression !== true &&
 		intent.lastEvaluatedAt !== null &&
 		now.getTime() - intent.lastEvaluatedAt.getTime() <
 			PIPELINE.REEVALUATION_SUPPRESSION_MS
@@ -154,9 +159,13 @@ export const evaluateIntent = async (
 	}
 	const store = createVectorStore(env);
 	// 起点Intent自身のベクトル(無ければ埋め込み未完了=バックフィル対象外パス・06 §2)
-	const [vector] = await store.getByIds([intentId]);
-	if (vector === null) {
-		return null;
+	let ownValues = options?.vector;
+	if (ownValues === undefined) {
+		const [vector] = await store.getByIds([intentId]);
+		if (vector === null) {
+			return null;
+		}
+		ownValues = vector.values;
 	}
 	const startedAtMs = now.getTime();
 	// Layer 2 Candidate Retrieval(docs/06 §3): filter={form, status:"active"}付きで
@@ -164,7 +173,7 @@ export const evaluateIntent = async (
 	// 所要時間は処理時間の計測でありClockを使う時刻依存のロジックではないため
 	// performance.now()で測る
 	const retrievalStart = performance.now();
-	const hits = await store.query(vector.values, {
+	const hits = await store.query(ownValues, {
 		topK: PIPELINE.TOP_K_RETRIEVAL,
 		filter: { form, status: "active" },
 	});

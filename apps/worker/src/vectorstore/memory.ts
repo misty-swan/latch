@@ -11,6 +11,13 @@ import type { StoredVector, VectorStore } from "./types";
 /** シングルトンの実体(モジュール内Map) */
 const store = new Map<string, StoredVector>();
 
+/**
+ * 試験専用: 反映の遅れ(Vectorizeはupsertが数秒後に見える)を再現する保留。
+ * hold中のupsertはpendingに溜まり、query・getByIdsから見えない
+ */
+const pending = new Map<string, StoredVector>();
+let holding = false;
+
 /** score降順・同点はid昇順(メモリ実装の結果順を決定的に保つ) */
 const byScoreDescThenIdAsc = (
 	a: { id: string; score: number },
@@ -33,7 +40,7 @@ const singleton: VectorStore = {
 	upsert: async (vectors) => {
 		// 同一idは上書き(Vectorizeのupsertと同じセマンティクス)
 		for (const v of vectors) {
-			store.set(v.id, v);
+			(holding ? pending : store).set(v.id, v);
 		}
 	},
 	query: async (vector, opts) => {
@@ -71,4 +78,20 @@ export const memoryVectorStore = (): VectorStore => singleton;
  */
 export const resetMemoryVectorStore = (): void => {
 	store.clear();
+	pending.clear();
+	holding = false;
+};
+
+/** 試験専用: 以降のupsertを保留する(query・getByIdsから見えない)。index.tsからは再exportしない */
+export const holdMemoryVectorWrites = (): void => {
+	holding = true;
+};
+
+/** 試験専用: 保留を解いて保留中のupsertを反映する */
+export const releaseMemoryVectorWrites = (): void => {
+	holding = false;
+	for (const [id, v] of pending) {
+		store.set(id, v);
+	}
+	pending.clear();
 };

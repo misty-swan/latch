@@ -38,7 +38,9 @@ import { stubEmbedding } from "../src/llm/stub/embedding";
 import { handleQueueBatch, isDlqQueue } from "../src/pipeline/consumer";
 import { buildNormalizedText } from "../src/pipeline/normalize";
 import {
+	holdMemoryVectorWrites,
 	memoryVectorStore,
+	releaseMemoryVectorWrites,
 	resetMemoryVectorStore,
 } from "../src/vectorstore/memory";
 
@@ -63,6 +65,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	releaseMemoryVectorWrites();
 	vi.restoreAllMocks();
 });
 
@@ -134,6 +137,7 @@ const runBatch = async (
 	queueName: string,
 	eventIds: string[],
 	targetEnv: WorkerEnv = testEnv,
+	vector?: number[],
 ) => {
 	const batch = createMessageBatch<MatchQueueMessage>(
 		queueName,
@@ -141,7 +145,10 @@ const runBatch = async (
 			id: `msg-${index}`,
 			timestamp: clock.now(),
 			attempts: 1,
-			body: { event_id: eventId },
+			body:
+				vector === undefined
+					? { event_id: eventId }
+					: { event_id: eventId, vector },
 		})),
 	);
 	const ctx = createExecutionContext();
@@ -165,7 +172,7 @@ const eventsOf = (
 	db.select().from(matchEvents).where(eq(matchEvents.sourceIntentId, intentId));
 
 describe("第1段の消費(intent_created・docs/06 §2)", () => {
-	it("Embedding→upsert→反映確認→intents更新→embedding_completed投入→起点processed", async () => {
+	it("Embedding→upsert→intents更新→embedding_completed投入(vector付き)→起点processed", async () => {
 		const { userId, intentId, eventId } = await seedEvent();
 		const send = spySend();
 
@@ -188,6 +195,7 @@ describe("第1段の消費(intent_created・docs/06 §2)", () => {
 			status: "active",
 			category: "学び・語学",
 			user_id: userId,
+			version: 1,
 		});
 
 		// intents.embedding_model/embedded_atが更新されている(stub・fixedClock時刻)
@@ -205,7 +213,10 @@ describe("第1段の消費(intent_created・docs/06 §2)", () => {
 		// embedding_completedは即時投入(delaySeconds未指定=第2引数なしのsend)
 		expect(send).toHaveBeenCalledTimes(1);
 		expect(send.mock.calls[0]).toHaveLength(1);
-		expect(send.mock.calls[0]?.[0]).toEqual({ event_id: completed[0]?.id });
+		expect(send.mock.calls[0]?.[0]).toEqual({
+			event_id: completed[0]?.id,
+			vector: expectedValues,
+		});
 
 		// 起点イベントはprocessed(payloadに件数等は載せない)
 		const [origin] = await db
@@ -215,6 +226,85 @@ describe("第1段の消費(intent_created・docs/06 §2)", () => {
 		expect(origin?.status).toBe("processed");
 		expect(origin?.processedAt?.getTime()).toBe(clock.now().getTime());
 		expect(origin?.payload).toEqual({});
+	});
+
+	it("ストアの反映が遅れていても(hold中)第1段はprocessedになりvector付きで第2段へ渡す", async () => {
+		const { intentId, eventId } = await seedEvent();
+		const send = spySend();
+		holdMemoryVectorWrites();
+
+		expectAcked(await runBatch("match-events", [eventId]));
+
+		const [origin] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		expect(origin?.status).toBe("processed");
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		const expectedValues = await stubEmbedding(buildNormalizedText(row));
+		expect(send).toHaveBeenCalledTimes(1);
+		expect(send.mock.calls[0]?.[0]).toMatchObject({ vector: expectedValues });
+		// 反映後に読むと、upsertしたmetadataにversion: 1がある
+		releaseMemoryVectorWrites();
+		const [stored] = await memoryVectorStore().getByIds([intentId]);
+		expect(stored?.metadata.version).toBe(1);
+	});
+
+	it("embedding_completedはメッセージのvectorで評価し、getByIdsを呼ばない", async () => {
+		const { intentId, eventId } = await seedEvent({
+			eventType: "embedding_completed",
+		});
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		const values = await stubEmbedding(buildNormalizedText(row));
+		const getByIds = vi.spyOn(memoryVectorStore(), "getByIds");
+
+		expectAcked(await runBatch("match-events", [eventId], testEnv, values));
+
+		expect(getByIds).not.toHaveBeenCalled();
+		const [origin] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		expect(origin?.status).toBe("processed");
+		expect(origin?.payload).toHaveProperty("retrieval_count");
+	});
+
+	it("vectorの無いembedding_completedは従来どおりgetByIdsで評価する", async () => {
+		const { intentId, eventId } = await seedEvent({
+			eventType: "embedding_completed",
+		});
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		await memoryVectorStore().upsert([
+			{
+				id: intentId,
+				values: await stubEmbedding(buildNormalizedText(row)),
+				metadata: {
+					form: "connection",
+					status: "active",
+					category: row.category,
+					user_id: row.userId,
+				},
+			},
+		]);
+		const getByIds = vi.spyOn(memoryVectorStore(), "getByIds");
+
+		expectAcked(await runBatch("match-events", [eventId]));
+
+		expect(getByIds).toHaveBeenCalled();
+		const [origin] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		expect(origin?.payload).toHaveProperty("retrieval_count");
 	});
 
 	it("embedding_completedイベントは第2段の評価へ委譲されprocessedになる", async () => {

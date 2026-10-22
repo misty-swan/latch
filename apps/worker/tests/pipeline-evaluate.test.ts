@@ -992,6 +992,53 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 	});
 });
 
+describe("options.vector(第1段から渡されたベクトル)", () => {
+	it("options.vectorで照会し、ストアに自分のベクトルが無くても評価する", async () => {
+		const userA = ulid();
+		const userB = ulid();
+		await insertUserRow(userA);
+		await insertUserRow(userB);
+		const a = intentFixture({ id: ulid(), userId: userA });
+		const b = intentFixture({ id: ulid(), userId: userB });
+		await insertIntentRow(a);
+		await insertIntentRow(b);
+		// 自分(a)のベクトルはストアに置かず、相手(b)だけ置く
+		await upsertVector(b);
+		const own = await vectorFor(a);
+
+		const result = await evaluateIntent(testEnv, a.id, directClock, {
+			vector: own.values,
+		});
+
+		expect(result).not.toBeNull();
+		expect(result?.retrievalCount).toBeGreaterThanOrEqual(1);
+	});
+
+	it("ignoreSuppression=trueなら30分抑制を無視して評価する", async () => {
+		const userA = ulid();
+		const userB = ulid();
+		await insertUserRow(userA);
+		await insertUserRow(userB);
+		const a = intentFixture({
+			id: ulid(),
+			userId: userA,
+			lastEvaluatedAt: new Date(BASE - 5 * 60_000),
+		});
+		const b = intentFixture({ id: ulid(), userId: userB });
+		await insertIntentRow(a);
+		await insertIntentRow(b);
+		await upsertVector(a);
+		await upsertVector(b);
+
+		expect(await evaluateIntent(testEnv, a.id, directClock)).toBeNull();
+		expect(
+			await evaluateIntent(testEnv, a.id, directClock, {
+				ignoreSuppression: true,
+			}),
+		).not.toBeNull();
+	});
+});
+
 describe("30分抑制と対象外(docs/06 §4)", () => {
 	it("抑制: last_evaluated_atから30分未満は評価せず何も書かない", async () => {
 		const userId = ulid();

@@ -5,7 +5,7 @@
  * D1行を読める順序を保証する)。UNIQUE(event_type, source_intent_id, version)の
  * 衝突は同一イベントの再発行と見なして既存行のidでsendだけを行う(冪等)。
  */
-import type { MatchEventType } from "@latch/shared";
+import type { MatchEventType, MatchQueueMessage } from "@latch/shared";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Clock } from "../clock/clock";
@@ -30,6 +30,8 @@ export interface EmitMatchEventParams {
 export interface EmitMatchEventOptions {
 	/** Queuesの遅延配信(秒)。未指定は即時(docs/06 §2: 更新のみ10秒) */
 	delaySeconds?: number;
+	/** 第1段が計算したベクトル(embedding_completedのメッセージへ載せる) */
+	vector?: number[];
 }
 
 /**
@@ -52,16 +54,20 @@ const isUniqueViolation = (error: unknown): boolean => {
  * MATCH_QUEUEへ送信する。delaySeconds未指定は第2引数なしの即時送信
  * (docs/06 §2: 作成とdraft→active化は即時投入)。戻り値は送信したイベントのid
  */
-const sendToMatchQueue = async (
+export const sendToMatchQueue = async (
 	env: Env,
 	eventId: string,
 	opts?: EmitMatchEventOptions,
 ): Promise<string> => {
 	const delaySeconds = opts?.delaySeconds;
+	const body: MatchQueueMessage =
+		opts?.vector === undefined
+			? { event_id: eventId }
+			: { event_id: eventId, vector: opts.vector };
 	if (delaySeconds === undefined) {
-		await env.MATCH_QUEUE.send({ event_id: eventId });
+		await env.MATCH_QUEUE.send(body);
 	} else {
-		await env.MATCH_QUEUE.send({ event_id: eventId }, { delaySeconds });
+		await env.MATCH_QUEUE.send(body, { delaySeconds });
 	}
 	return eventId;
 };
