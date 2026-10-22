@@ -96,7 +96,7 @@
   4. `wrangler deploy --env staging`
   5. `GET /healthz`のスモーク確認(200でなければジョブを失敗させる)
 - GitHubのシークレット: `CLOUDFLARE_API_TOKEN`・`CLOUDFLARE_ACCOUNT_ID`・`LATCH_STAGING_URL`
-- URLを伏せる(合意#4)ための扱い: リポジトリは公開で、Actionsの記録も誰でも読める。stagingのURL(`latch-worker-staging.<アカウントのサブドメイン>.workers.dev`)は文書・wrangler.jsonc・報告書に書かず、CIでは変数ではなくシークレットとして持つ(GitHubはシークレットの値を記録の中で伏せ字にするため、`wrangler deploy`が表示するURLも伏せられる)。資源のIDは単独では使えないためwrangler.jsoncにコミットしてよい
+- URLを伏せる(合意#4)ための扱い: リポジトリは2026-10-22にオーナーの指示で非公開へ切り替えた。それでも将来の公開や共有に備え、stagingのURL(`latch-worker-staging.<アカウントのサブドメイン>.workers.dev`)は文書・wrangler.jsonc・報告書に書かず、CIでは変数ではなくシークレットとして持つ(GitHubはシークレットの値を記録の中で伏せ字にするため、`wrangler deploy`が表示するURLも伏せられる)。資源のIDは単独では使えないためwrangler.jsoncにコミットしてよい
 
 ### 2.2 手元からのデプロイ
 
