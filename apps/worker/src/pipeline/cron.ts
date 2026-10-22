@@ -837,6 +837,8 @@ export const runScheduledPipeline = async (
 	env: Env,
 	clock: Clock,
 ): Promise<void> => {
+	// この実行の中で作られた通知(Cronの評価で作った提案など)だけを後でその場で送るための起点
+	const startedAt = clock.now();
 	await runBucketSweep(env, clock);
 	await runCatchUpSweep(env, clock);
 	await runExpiryWindows(env, clock);
@@ -853,6 +855,13 @@ export const runScheduledPipeline = async (
 	await runIsolated("next_group", () =>
 		runNextGroupSweep(env, clock, deadlineClosedIds),
 	);
+	// この実行で作った通知のWeb Pushは30秒の回収を待たずに送る(#9)
+	await runIsolated("push_fresh", async () => {
+		await flushPush(drizzle(env.DB), pushSenderOf(env), clock, {
+			minAgeMs: 0,
+			createdFrom: startedAt,
+		});
+	});
 	await runIsolated("budget_alert", () => runBudgetAlert(env, clock));
 	await runIsolated("pending", () => runPendingSweep(env, clock));
 	await runIsolated("completion", async () => {

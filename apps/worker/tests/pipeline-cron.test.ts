@@ -1181,6 +1181,34 @@ describe("F7b: Intent期限切れのアプリ内通知とPushの回収(F7b設計
 		expect(after).toHaveLength(1);
 	});
 
+	it("Cronのバックフィルの評価で作られた提案の通知は、同じ実行の中で送信を試みる", async () => {
+		const ua = ulid();
+		const ub = ulid();
+		await insertUserRow(ua);
+		await insertUserRow(ub);
+		for (const userId of [ua, ub]) {
+			await insertIntentRow(
+				intentFixture({
+					id: ulid(),
+					userId,
+					updatedAt: new Date(BASE - 6 * MIN),
+				}),
+			);
+		}
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		const rows = await db
+			.select()
+			.from(notifications)
+			.where(eq(notifications.type, "proposal"));
+		expect(rows.length).toBeGreaterThan(0);
+		for (const r of rows) {
+			expect(r.pushAttemptedAt).not.toBeNull();
+			expect(r.pushState).not.toBe("pending");
+		}
+	});
+
 	it("runPushSweep: 40秒前のpendingはsent・11分前はfailed・20秒前はpendingのまま", async () => {
 		const userId = ulid();
 		await insertUserRow(userId);

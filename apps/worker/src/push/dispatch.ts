@@ -218,6 +218,7 @@ export async function dispatchPush(
 /**
  * 未送信のpendingを拾ってdispatchPushへ渡す(F7b設計 §5.1 手順2・§5.6)。
  * 対象=作成からminAgeMs以上かつ10分以内・未試行または試行から60秒以上・id昇順100件。
+ * createdFromがあればその時刻以降に作られた行だけを対象にする(Cronが自分の実行で作った通知を即送る)。
  * 開始から45秒を過ぎたら新しい行の順番を取らない(残りは後の送出・Cronの回収が拾う)。
  * 戻り値は順番取りを試みた件数
  */
@@ -225,7 +226,7 @@ export async function flushPush(
 	db: Db,
 	sender: PushSender,
 	clock: Clock,
-	opts: { minAgeMs: number },
+	opts: { minAgeMs: number; createdFrom?: Date },
 ): Promise<number> {
 	const now = clock.now();
 	const rows = await db
@@ -236,6 +237,9 @@ export async function flushPush(
 				eq(notifications.pushState, "pending"),
 				lte(notifications.createdAt, new Date(now.getTime() - opts.minAgeMs)),
 				gte(notifications.createdAt, new Date(now.getTime() - MAX_AGE_MS)),
+				...(opts.createdFrom
+					? [gte(notifications.createdAt, opts.createdFrom)]
+					: []),
 				or(
 					isNull(notifications.pushAttemptedAt),
 					lte(

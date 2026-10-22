@@ -400,6 +400,24 @@ describe("flushPush(F7b設計 §5.6)", () => {
 		expect((await notifOf(none)).pushState).toBe("none");
 	});
 
+	it("createdFromより前の行は拾わない", async () => {
+		const ua = await insertUser();
+		const before = await insertNotif(ua, await freshLatch(ua), {
+			createdAt: ago(40 * SEC),
+		});
+		const after = await insertNotif(ua, await freshLatch(ua), {
+			createdAt: ago(10 * SEC),
+		});
+		const { sender } = recorder();
+		const count = await flushPush(db, sender, CLOCK, {
+			minAgeMs: 0,
+			createdFrom: ago(20 * SEC),
+		});
+		expect(count).toBe(1);
+		expect((await notifOf(before)).pushState).toBe("pending");
+		expect((await notifOf(after)).pushState).toBe("no_subscription");
+	});
+
 	it("試行から60秒以上たった行は再び拾う", async () => {
 		const ua = await insertUser();
 		const n = await insertNotif(ua, await freshLatch(ua), {
