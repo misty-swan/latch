@@ -413,7 +413,7 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
 /**
  * (e) 埋め込みバックフィル(docs/06 §2(e))。active・埋め込み未完了で生成(更新)から
  * 5分(BACKFILL_GRACE_MS・ちょうどを含む)経過したIntentへ第1段(runEmbeddingStage:
- * 埋め込み→upsert確認→intents更新)を直接実行し、成功時のみ続けて評価する。
+ * 埋め込み→upsert→intents更新→反映確認の投入)を直接実行し、成功時のみ続けて評価する。
  * 直後に評価するためembedding_completedは投入しない(emitCompleted:false。投入すると
  * キュー経由の評価と二重になる)。失敗は再試行せず次のCronで回収する(docs/06 §5)。
  * Embeddingの失敗が連続BACKFILL_FAILURE_ABORT(5)件に達したら当回の走査を打ち切る

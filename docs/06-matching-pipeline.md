@@ -1,9 +1,9 @@
 # LATCH マッチングパイプライン設計書
 
-- 文書バージョン: v0.21
+- 文書バージョン: v0.22
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.21更新: 2026-10-22)
+- 作成日: 2026-10-17(v0.22更新: 2026-10-22)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。実行順(候補検索→硬絞り)の確定と取り出し幅の上限100件化・つながりIntentの取りこぼし回収と保留解放のトリガー追加・提案化の直列化と再提案規則(01裁定)の反映・グループ期限切れと予算不足の挙動を確定
 - v0.3の変更点: 前提文書欄の版数同期(F1実装に伴う04/05/10改版への追従)
 - v0.4の変更点: 前提文書欄の版数同期(F2実装に伴う05改版への追従)
@@ -24,7 +24,8 @@
 - v0.19の変更点: 前提文書欄の版数同期(F7c(安全と通知の画面)の完了とオーナー裁定(2026-10-21・01冒頭の決定記録)に伴う01・02・04・05改版への追従)。内容の変更はない
 - v0.20の変更点: 前提文書欄の版数同期(F8a(PWAと画面の仕上げ)の完了とオーナー合意(2026-10-21・01冒頭の決定記録(PWAと画面の仕上げ)・12 §2の決定記録(F8の2分割))に伴う01・02・04・05改版への追従)。内容の変更はない
 - v0.21の変更点: F8b(stagingの構築と負荷試験)の実装確定に伴い、§7へLayer 2 Candidate Retrievalの所要時間(retrieval_ms)の記録(match_events.payloadとAnalytics Engineのdata point・負荷試験の集計(02 #33・10 §5)に使う)を追記した。前提文書欄の版数同期(F8bの完了とオーナー決定(2026-10-22・01冒頭の決定記録(stagingと負荷試験))に伴う01・02・04・05改版への追従)
-- 前提文書: 01 要件定義書 v0.20 / 02 スコープ・受け入れ条件合意書 v0.14 / 04 アーキテクチャ設計書 v0.22 / 05 データモデル・API仕様書 v0.22
+- v0.22の変更点: 不具合の修正工程(issue #7・#8・#9・#10・2026-10-22オーナー合意・12 §2の決定記録(評価の流れ))に伴い、§1の図と§2の2段構成を、第1段はVectorizeへの反映を待たずに自分のベクトルを載せた`embedding_completed`を即時に投入し、別に反映確認のイベント`vector_reflection`(2・6・14・30秒、以後30秒ごと・5分で打ち切り)で新しいversionの反映を確かめてから1回だけ評価し直す順序に改めた。第2段が古いversionの`embedding_completed`を評価しないこと・Cronの(h)と反映確認の評価し直しを30分の再評価抑制の例外とすること(§2・§3・§4・§6)を書き足した。§4のWeb Pushの送出へ、Cronが評価で作った通知をその実行の中で送ること(issue #9)を書き足した。§7へ反映確認の計測(reflect_ms)と、Analytics Engineの第2段の記録を2件のdata point(`stage2`の数値15個・`stage2_group`の数値9個。1件の数値の上限20個を超えて評価全体が失敗した不具合#8の修正)に分けたことを追記した。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.20 / 02 スコープ・受け入れ条件合意書 v0.14 / 04 アーキテクチャ設計書 v0.23 / 05 データモデル・API仕様書 v0.23
 - 本書の位置づけ: 01第11〜16節(マッチングシステム)の実装仕様を確定する。5層の絞り込み・イベント駆動・提案化・失敗と縮退を、04のCloudflare構成(Queues・Vectorize・Cron)と05のテーブルの上に定める。LLM呼び出しの内容は07が担い、本書は「いつ・何回・どの層で呼ぶか」を定める
 
 ## 1. 全体像
@@ -32,13 +33,15 @@
 ```text
 api(POST/PATCH intents)  ※作成・draft→active化は即時投入/更新は10秒遅延
   → Queues(match_events: intent_created / intent_updated)      第1段
-      → Embedding計算(07) → Vectorize登録(upsert完了確認後)
-      → Queues(embedding_completed)                            第2段
+      → Embedding計算(07) → Vectorize登録(upsert・反映は待たない)
+      → Queues(embedding_completed・自分のベクトル付き・即時)   第2段
           → Layer 2 Candidate Retrieval(Vectorize・topK=100)  ← 実行順は検索が先
           → Layer 1 Hard Filter(コード+D1・通過分から上位K_v=50)
           → Layer 3 Cheap Judge(課金ゼロ・上位K_c=20)
           → Layer 4 Jev(07・予算管理・並列実行)
           → Layer 5 LATCH Engine → 提案化(proposed) → 通知
+      → Queues(vector_reflection・遅延付き)                   反映確認
+          → 反映を確かめたら第2段を1回だけ評価し直す(30分抑制の例外)
 
 Cron(毎分) → 機会: bucket到来・catch-up / 全Intent: 期限切れ /
              つながり: completed判定 / Embeddingバックフィル /
@@ -53,13 +56,15 @@ Cron(毎分) → 機会: bucket到来・catch-up / 全Intent: 期限切れ /
 
 ## 2. イベントとトリガー
 
-**2段構成。** 作成・更新は第1段でEmbedding要求までを処理し、Embedding完了を`embedding_completed`イベントとして再投入して第2段(Layer 1〜5)を走らせる。埋め込み未完了のIntentは生成元にも対象にもならない。Vectorizeへのupsert反映は秒単位の遅延があり得るため、**upsert完了を確認してから**`embedding_completed`を投入する順序を守る。
+**2段構成。** 作成・更新は第1段でEmbedding計算とVectorizeへのupsertまでを処理し、Embedding完了を`embedding_completed`イベントとして再投入して第2段(Layer 1〜5)を走らせる。埋め込み未完了のIntentは生成元にも対象にもならない。Vectorizeへのupsertの反映には秒から分の単位の遅延があり得るため、**第1段は反映を待たない**(2026-10-22オーナー合意・12 §2の決定記録(評価の流れ))。第1段の順序は、upsert(metadataに意思のversionを含める・05 §2.3)→intentsのembedding_model・embedded_atの更新→`embedding_completed`(同version)の即時の投入→反映確認のイベント`vector_reflection`(同version)の遅延付き(2秒)の投入とする。`embedding_completed`のキューのメッセージには自分のベクトルを載せ(bge-m3の1024次元で約20KB・Queuesの1メッセージの上限128KB以内。match_events行のpayloadには載せない)、第2段はLayer 2 Candidate Retrievalの照会にそれを使う。反映前でも評価でき、直した意思で古いベクトルを使うこともない。ベクトルの無いメッセージ(旧形式)はVectorizeから自分のベクトルを読む。第2段は、起点Intentの現行versionと異なる`embedding_completed`を評価せずstale_versionとして処理済みにする(古いversionで評価するとlast_evaluated_atが書かれ、新しいversionの評価が30分の再評価抑制にかかるため)。
+
+**反映確認(vector_reflection・不具合の修正工程で確定)。** 反映前に評価すると、同時に預けた相手のベクトルがまだ見えず、互いを見落とし得る。これを反映確認の評価し直しで拾う。消費のたびに、(1)意思が無い・versionが進んでいる・active以外なら評価せずskipped(not_found・stale_version・inactive)で処理済みにする。(2)自分のベクトルをVectorizeから読み、metadataのversionがイベントのversionと一致すれば反映済みとする(直した意思の古いベクトルを反映済みと誤らない)。(3)未反映で作成から5分未満なら、同じイベントを遅延付きで送り直す。確認の時点は作成から2・6・14・30秒、以後30秒ごととし、送り直しの回数はメッセージに持たず行の作成時刻からの経過で決める(定数はPIPELINE.REFLECTION_DELAYS_S・REFLECTION_GIVE_UP_MS)。(4)未反映のまま作成から5分に達したらfailed(error_code=REFLECTION_TIMEOUT)とし、以後の回収はCron(つながりIntentは(h))に委ねる。(5)反映済みなら、評価本体を**30分の再評価抑制の例外**として1回だけ呼び(照会には読んだベクトルを使う)、第2段と同じ計測項目とreflect_ms(§7)をpayloadへ記録して処理済みにする。1回きりはmatch_eventsのUNIQUE(event_type, source_intent_id, version)と処理済みの再消費スキップで保証する。同じ組のJevは同一version組のjev_resultの再利用(§3)で再実行しないため、Jevの呼び出しが増えるのは新しく見つかった組だけで、予算は通常どおり起点側に計上する(§6)。Cronのバックフィル(e)も、第1段の後に反映確認のイベントを投入する(`embedding_completed`は投入せず、評価本体を直接呼ぶ)。反映確認の投入の失敗は第1段を失敗にしない(ログだけを出し、Cronが拾う)。
 
 **投入の即時/遅延。** 作成とdraft→active化は即時投入する(初回提案のレイテンシ優先)。**更新のみ**10秒の遅延配信とし、消費側で起点Intentの現行versionと突き合わせて古ければ破棄する。
 
 **冪等性。** match_eventsのUNIQUE(event_type, source_intent_id, version)が二重投入を許さない。処理済みイベントの再消費はstatus=processedを確認してスキップする。
 
-**Cron(毎分・04 §4)。** (a)機会Intentのbucket到来(starts_atが属する30分Bucket到達の未評価Intent)の再評価、(b)catch-up(expires_atまで2時間以内かつlast_evaluated_atから30分以上経過のactiveな機会Intent)、(c)全active Intentの期限切れバッチ(expired化+ベクトル削除予約)、(d)LATCHのcompleted判定(matchedのつながりLATCHは最終メッセージ(0件ならmatched時刻)から90日経過・matchedの機会LATCHは対象時刻から3時間経過・01 §8)、(e)埋め込み未完了のIntentのバックフィル再試行、(f)usage_counters集計とJev予算アラート(80%)、(g)**埋め込み済みかつ未評価(embedded_at NOT NULL かつ last_evaluated_at NULL)のactive Intentの回収再評価**(キュー消失の安全網)、(h)**active化後10分経過のつながりIntentの1回きり遅延再評価**(upsert反映遅延による相互取りこぼしの安全網)、(i)**提案クローズ後続処理**(下記)。
+**Cron(毎分・04 §4)。** (a)機会Intentのbucket到来(starts_atが属する30分Bucket到達の未評価Intent)の再評価、(b)catch-up(expires_atまで2時間以内かつlast_evaluated_atから30分以上経過のactiveな機会Intent)、(c)全active Intentの期限切れバッチ(expired化+ベクトル削除予約)、(d)LATCHのcompleted判定(matchedのつながりLATCHは最終メッセージ(0件ならmatched時刻)から90日経過・matchedの機会LATCHは対象時刻から3時間経過・01 §8)、(e)埋め込み未完了のIntentのバックフィル再試行、(f)usage_counters集計とJev予算アラート(80%)、(g)**埋め込み済みかつ未評価(embedded_at NOT NULL かつ last_evaluated_at NULL)のactive Intentの回収再評価**(キュー消失の安全網)、(h)**active化後10分経過のつながりIntentの1回きり遅延再評価**(upsert反映遅延による相互取りこぼしの安全網。30分の再評価抑制の例外として評価する・§3)、(i)**提案クローズ後続処理**(下記)。
 
 **提案クローズ後続処理。** 提案がクローズ(matched / expired / rejected / cancelled)した時点で、当該ユーザー(機会Intentは当該Intent)の保留candidateを提示順(機会=対象時刻の近い順/つながり=LATCH Score降順)で通知上限までproposedへ昇格し、回答期限を再計算して通知する。グループの「次集合の評価」もこのトリガーで実行する。
 
@@ -116,7 +121,7 @@ Layer 1通過後、**類似度上位K_v=50**を次層へ渡す(同点はULID昇�
 - **実装確定(F4a)。** K_j=8は実呼び出し(フォールバックを含む)の枠である。各呼び出しの前に予算を加算して予約し、予約できた件だけを並列実行する(予算到達・circuit breakerのオープン・失敗・枠超過の分は保留として数える)。予算は**起点側(イベントを生じたIntentとそのユーザー)のみ**に計上する(相手側の予算を他人の行動で消費させないため・§6)。1対1への最低4回保証の配分はF4bで実装した(次項)。提案履歴により現時点で提案できない相手(既存行があり再提案不可=つながり・機会でdeferred/expired以外、または機会の再提案の抑制期間中)はLayer 4へ渡さず、Jevの枠と予算を使わない(除外件数はpayloadのl4_skipped_history・§7)。この除外はLayer 1の恒久排除(matched・rejected)とは別に数え、提案化の時点の履歴判定も並行時の正として残す。照会は相手ユーザー48件のチャンクで行う。Jevの呼び出しが例外を投げた場合は失敗種別otherとして扱い(フォールバック対象外)、予約済みの実行を含む評価全体を失敗させない
 - **実装確定(F4b)。** 人数の条件: 人数nの提案は、nが全メンバーのparticipants区間[min, max]に入るときだけ作る。1対1(n=2)にも適用し、双方のparticipants.minが2でない候補(どちらかがmin≥3)は1対1のLayer 4へ渡さず、Jevの枠と予算を使わない(除外件数はl4_skipped_participants・§7。Layer 1の人数判定=区間の共通部分は従来どおり)。配分: 1対1の対象(提案履歴で除外されず人数の条件を満たす候補・Layer 3降順)のうちjev_resultの無い件数をN₁とし、グループの枠を 8 − min(4, N₁) とする。集合を安価な順位(Layer 5)の上から見て、jev_resultが無くまだ予定に入っていないペアの数が残りの枠に収まる集合だけを予定に入れ、収まらない集合は部分評価せず保留する(group_held_sets)。1対1には 8 − 予定に入れたグループのペア数 の枠を、未判定の対象のLayer 3降順に割り当てる(1対1の未判定分は最低min(4, N₁)回が保証される)。起点を含むペアが1対1の対象と重なる場合は1対1側の対象として1回だけ数え、共用する(二重に呼ばない)。グループ候補が無ければ8回すべてを1対1に使い、1対1の対象が4件未満なら余りをグループへ回す。1対1とグループの予定は1つの対象列(1対1を先・グループを後)にしてJevを1回だけ実行し、予算・circuit breaker・並列・フォールバックは共通部のまま起点側のみに計上する。集合を構成する他人どうしのペアもmatch_candidatesへupsertし(a<b正規化・現在のversion組・retrieval_score=Pool全員のベクトルのコサイン類似度・cheap_judge_score=Layer 3と同じ式)、jev_resultとlatch_score(Jev値・H=1)を保存して次のイベントで再利用する(保留した集合はこれで完結できる)
 - 1ペア=1リクエスト(7軸を並列評価・07 §5)
-- **jev_resultの再利用**: 同一バージョン組(両Intentが未更新)のmatch_candidates既存行にjev_resultがあれば再実行しない。30分再評価抑制(intents.last_evaluated_at)は別規則として併用する。ただしactive Intentの意味フィールド(topic・time・geo・participants・budget・constraints=intent_updatedを発行する変更・§2)の更新ではlast_evaluated_atをnullへ戻して抑制を解除する(表示系だけの変更では解除しない。オーナー裁定 2026-10-20・05 §3.3)。抑制は同じ内容の繰り返し評価を防ぐためのもので、条件変更で進行中の提案が取り消された直後の再提案を最大30分遅らせないためである
+- **jev_resultの再利用**: 同一バージョン組(両Intentが未更新)のmatch_candidates既存行にjev_resultがあれば再実行しない。30分再評価抑制(intents.last_evaluated_at)は別規則として併用する。ただしactive Intentの意味フィールド(topic・time・geo・participants・budget・constraints=intent_updatedを発行する変更・§2)の更新ではlast_evaluated_atをnullへ戻して抑制を解除する(表示系だけの変更では解除しない。オーナー裁定 2026-10-20・05 §3.3)。抑制は同じ内容の繰り返し評価を防ぐためのもので、条件変更で進行中の提案が取り消された直後の再提案を最大30分遅らせないためである。**抑制の例外(不具合の修正工程で確定)。** 反映確認の評価し直し(§2)とCronの(h)の遅延再評価は、抑制にかからず評価する(どちらも1回きりで、埋め込みの直後の評価に抑制されると取りこぼしの回収が空振りになるため)
 
 ### Layer 5 LATCH Engine
 
@@ -132,7 +137,9 @@ Layer 1通過後、**類似度上位K_v=50**を次層へ渡す(同点はULID昇�
 
 **回答期限の導出。** 機会= `min( max(通知+15分, min(通知+2時間, 対象時刻−60分)), 参加Intent期限の最小値 )`。つながり= `min(通知+24時間, 参加Intent期限の最小値)`(01 §8)。対象時刻まで75分を切った機会提案は通知しない。
 
-**通知の上限と保留。** 1ユーザー1日6件・1Intent同時進行3件。超過分は破棄せず保留(candidate保持)。提示順は**機会=対象時刻の近い順/つながり=LATCH Score降順**(01 §10)。保留の解放は提案クローズ後続処理(§2)が担う。提示時に回答期限を再計算する。**上限の判定と通知の書き込みは同一文ではないため、並行消費で上限を1件程度超え得る(許容・F4a実装確定)。** 重複通知の防止として、通知ステップの前にlatch.statusを再確認し(proposed反映済みなら送信スキップ)、notificationsはUNIQUE(latch_id, user_id, type)で保護する。**Web Pushの送出(F7b実装確定)。** 通知行のうちproposal(提示・保留の解放)とmatched(成立)は送信の状態push_state=pendingで書き、主キューのバッチの後(DLQは除く)とLATCH・Intent・安全のAPIの変更系の応答の後に、同じWorker内で送出する(waitUntil・2026-10-21オーナー裁定・04 §4)。送出の失敗はキューの消費とAPIの応答に影響させず、送れていない行はCronの回収走査(§2)が拾う。notification_level=mutedの参加Intentを持つ本人にはWeb Pushを送らず、アプリ内通知の行と通知上限の数え方は変えない(01冒頭の決定記録(2026-10-21・通知のAPI))。
+**通知の上限と保留。** 1ユーザー1日6件・1Intent同時進行3件。超過分は破棄せず保留(candidate保持)。提示順は**機会=対象時刻の近い順/つながり=LATCH Score降順**(01 §10)。保留の解放は提案クローズ後続処理(§2)が担う。提示時に回答期限を再計算する。**上限の判定と通知の書き込みは同一文ではないため、並行消費で上限を1件程度超え得る(許容・F4a実装確定)。** 重複通知の防止として、通知ステップの前にlatch.statusを再確認し(proposed反映済みなら送信スキップ)、notificationsはUNIQUE(latch_id, user_id, type)で保護する。**Web Pushの送出(F7b実装確定)。** 通知行のうちproposal(提示・保留の解放)とmatched(成立)は送信の状態push_state=pendingで書き、主キューのバッチの後(DLQは除く)とLATCH・Intent・安全のAPIの変更系の応答の後に、同じWorker内で送出する(waitUntil・2026-10-21オーナー裁定・04 §4)。送出の失敗はキューの消費とAPIの応答に影響させず、送れていない行はCronの回収走査(§2)が拾う。毎分Cronが評価本体を直接呼んで作った通知((a)(b)(e)(g)(h)・保留の解放・次集合の提案)は、それらの走査の後に、その回のCronの開始以後に作られたpending行をその実行の中で送る(30秒以上たった行を拾う回収走査は送り損ねの安全網として残す。他の走査と隔離する・issue #9・不具合の修正工程で確定)。notification_level=mutedの参加Intentを持つ本人にはWeb Pushを送らず、アプリ内通知の行と通知上限の数え方は変えない(01冒頭の決定記録(2026-10-21・通知のAPI))。
+
+**反映を待つ提案(不具合の修正工程で確定)。** 同時に預けた2人の提案は、先に評価した側から相手がまだ見えないとき、反映確認の評価し直し(§2)で作られる。このとき提案はVectorizeの反映にかかった時間だけ遅れる(反映の時間はreflect_ms・§7)。評価し直しは30分の再評価抑制の例外(§3)であり、通知上限・保留・回答期限の規則は通常の評価と同じに当てる。
 
 **同時通知・開示。** 必要人数全員へ同時通知。不成立時の開示は「この提案は成立しませんでした」の一文のみ。
 
@@ -154,7 +161,7 @@ Layer 1通過後、**類似度上位K_v=50**を次層へ渡す(同点はULID昇�
 
 ## 6. コスト保護(3層)と予算計上
 
-API源流レート制限・Jev予算(1Intentあたり1日40回・1ユーザーあたり1日120回・30分抑制(意味フィールドの更新で解除・§3))・実行回数上限(1日30,000回・1か月600,000回・80%アラート)は04 §5の表どおり、usage_countersで実装する。**実API呼び出し(フォールバック切替を含む)をすべて計上する**規則を適用する。1Intentあたり・1ユーザーあたりの予算は**起点側(イベントを生じたIntentとそのユーザー)のみ**に計上する(相手側の予算を他人の行動で消費させない・F4a実装確定)。
+API源流レート制限・Jev予算(1Intentあたり1日40回・1ユーザーあたり1日120回・30分抑制(意味フィールドの更新で解除・反映確認の評価し直しと(h)は例外・§3))・実行回数上限(1日30,000回・1か月600,000回・80%アラート)は04 §5の表どおり、usage_countersで実装する。**実API呼び出し(フォールバック切替を含む)をすべて計上する**規則を適用する。1Intentあたり・1ユーザーあたりの予算は**起点側(イベントを生じたIntentとそのユーザー)のみ**に計上する(相手側の予算を他人の行動で消費させない・F4a実装確定)。
 
 ## 7. 観測(Analytics Engine+D1集計)
 
@@ -166,7 +173,9 @@ API源流レート制限・Jev予算(1Intentあたり1日40回・1ユーザー�
 
 **実装確定(F4b)。** payload(とAnalytics Engineのdata point)にグループの項目を加える: l4_skipped_participants(人数の条件で1対1のLayer 4へ渡さなかった件数・§3) / group_pool(Poolの件数。グループを組み立てない・グループ部分の失敗では0) / group_sets(列挙で得た有効な集合の数) / group_jev_calls(グループのペアとしてJevへ渡した件数。1対1の対象と重なるペアは1対1側で数える) / group_held_sets(判定しきれず保留した集合の数=配分の枠に収まらなかった集合+Jevの判定が欠けた集合) / group_over_threshold(aggregate>0.60の集合の数) / group_proposed(提示した集合の数=0または1) / group_held_proposals(通知上限で保留した集合の数=0または1) / group_failed(グループ部分で例外が起きたら1)。jev_reusedはLayer 4へ渡した行のうちjev_resultを再利用した件数だけを数える(集合の点数の計算で既存のjev_resultを読む分は数えない)。#24の証拠はこの記録とLATCH・提案履歴の観測(05 §3.3のdev専用API)が担う。
 
-**実装確定(F8b)。** payload(とAnalytics Engineのdata pointの最後の数値)にLayer 2 Candidate Retrievalの所要時間を加える: retrieval_ms(Vectorizeへの問い合わせ(topK=100・§3)の所要時間・ミリ秒)。所要時間は処理時間の計測であり時刻依存のロジックではないため、Clockではなく`performance.now()`の差で測る。Cronが評価本体を直接呼ぶ経路(§2)では、payloadへは書かれずAnalytics Engineのdata pointにだけ載る。負荷試験(02 #33・10 §5)のCandidate Retrieval p95 1秒の集計はこの値を使う。D1の形は変わらない(マイグレーションは無い)
+**実装確定(F8b)。** payload(とAnalytics Engineの`stage2`のdata pointの最後の数値)にLayer 2 Candidate Retrievalの所要時間を加える: retrieval_ms(Vectorizeへの問い合わせ(topK=100・§3)の所要時間・ミリ秒)。所要時間は処理時間の計測であり時刻依存のロジックではないため、Clockではなく`performance.now()`の差で測る。Cronが評価本体を直接呼ぶ経路(§2)では、payloadへは書かれずAnalytics Engineのdata pointにだけ載る。負荷試験(02 #33・10 §5)のCandidate Retrieval p95 1秒の集計はこの値を使う。D1の形は変わらない(マイグレーションは無い)
+
+**実装確定(不具合の修正工程)。** Analytics Engineの1つのdata pointは数値(doubles)を20個までしか持てず、超えると書き込みが例外を投げて評価全体が失敗する(issue #8。F4bの項目とF8bのretrieval_msで24個になっていた)。第2段の記録はイベントごとに2件のdata pointに分ける: `stage2`(文字列=処理段の識別・Layer 1の除外理由別内訳。数値=層通過件数(Vectorize取得→L1→L3)・処理時間・Jev(呼び出し・再利用・保留の理由別4項目・処理時間)・L5閾値超過・提示・保留・retrieval_msの15個)と、`stage2_group`(数値=F4bのグループの9項目)。反映確認(§2)のmatch_events行のpayloadには、評価し直した結果の第2段と同じ項目と、reflect_ms(反映確認のイベントの作成から反映を確かめるまでのミリ秒)を記録する(評価しなかったときはskipped=not_evaluatedとreflect_ms)。reflect_msは負荷試験の集計(10 §5)で本物のVectorizeの反映時間の参考値として使い、01 §20に目標値は無いため合否は付けない。D1の形は変わらない(event_typeはCHECK制約の無いTEXT列のため、`vector_reflection`の追加にマイグレーションは要らない・05 §2.2)
 
 ## 8. 未決事項(本書ローカル)
 
