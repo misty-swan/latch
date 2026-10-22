@@ -262,4 +262,19 @@ test("ホーム画面追加の要件(manifestとアイコン)を満たす", asyn
 	const touchIcon = await request.get("/apple-touch-icon.png");
 	expect(touchIcon.status(), "GET /apple-touch-icon.png").toBe(200);
 	expect(touchIcon.headers()["content-type"]).toContain("image/png");
+
+	// DevToolsの「square icons」警告は画像の固有サイズ(0x0)が原因なので、SVGの幅と高さを直接確かめる(#6)
+	const svg = await (await request.get("/icon.svg")).text();
+	const svgRoot = svg.match(/<svg\b[^>]*>/)?.[0] ?? "";
+	expect(svgRoot).toContain('width="512"');
+	expect(svgRoot).toContain('height="512"');
+
+	// Chromiumが実際に解釈したマニフェストの警告(#6)。screenshotsの警告は検査しない
+	const cdp = await page.context().newCDPSession(page);
+	const parsed = (await cdp.send("Page.getAppManifest")) as {
+		errors: { message: string }[];
+	};
+	const messages = parsed.errors.map((error) => error.message);
+	expect(messages.filter((m) => m.includes("icon.svg"))).toEqual([]);
+	expect(messages.filter((m) => m.includes("square icons"))).toEqual([]);
 });
