@@ -1065,8 +1065,45 @@ describe("30分抑制と対象外(docs/06 §4)", () => {
 	});
 });
 
+/**
+ * 本番のAnalytics Engineと同じ上限で検査する偽物(1つのdata pointにblobs 20・doubles 20・
+ * index 1まで)。ローカルの模擬(miniflare)のwriteDataPointは何もしないため、上限を
+ * 超えても試験では例外にならない。stagingでは超えるとTypeError
+ * 「writeDataPoint(): Maximum of 20 doubles supported.」となり、評価全体が失敗した(#8)
+ */
+const strictAx = () => {
+	const points: { blobs: string[]; doubles: number[]; indexes: string[] }[] =
+		[];
+	return {
+		points,
+		writeDataPoint: vi.fn(
+			(point: { blobs?: string[]; doubles?: number[]; indexes?: string[] }) => {
+				const blobs = point.blobs ?? [];
+				const doubles = point.doubles ?? [];
+				const indexes = point.indexes ?? [];
+				if (doubles.length > 20) {
+					throw new TypeError(
+						"writeDataPoint(): Maximum of 20 doubles supported.",
+					);
+				}
+				if (blobs.length > 20) {
+					throw new TypeError(
+						"writeDataPoint(): Maximum of 20 blobs supported.",
+					);
+				}
+				if (indexes.length > 1) {
+					throw new TypeError(
+						"writeDataPoint(): Maximum of 1 index supported.",
+					);
+				}
+				points.push({ blobs, doubles, indexes });
+			},
+		),
+	};
+};
+
 describe("計測(Analytics Engine・docs/06 §7)", () => {
-	it("層通過のdata pointを書き・PIPELINE_AX未バインドでも例外を出さない", async () => {
+	it("層通過のdata pointを本番の上限内で書き・PIPELINE_AX未バインドでも例外を出さない", async () => {
 		const userA = ulid();
 		const userB = ulid();
 		await insertUserRow(userA);
@@ -1078,11 +1115,12 @@ describe("計測(Analytics Engine・docs/06 §7)", () => {
 		await upsertVector(a);
 		await upsertVector(b);
 
-		const fakeAx = { writeDataPoint: vi.fn() };
+		const fakeAx = strictAx();
 		const envWithAx = {
 			...testEnv,
 			PIPELINE_AX: fakeAx,
 		} as unknown as WorkerEnv;
+		// 上限を超えるdata pointを書くと例外になり、評価がここで失敗する(#8)
 		const result = await evaluateIntent(envWithAx, a.id, directClock);
 		expect(result).toEqual({
 			retrievalCount: 2,
@@ -1093,25 +1131,27 @@ describe("計測(Analytics Engine・docs/06 §7)", () => {
 			...ONE_PROPOSED,
 			...NO_GROUP,
 		});
-		expect(fakeAx.writeDataPoint).toHaveBeenCalledTimes(1);
-		const point = fakeAx.writeDataPoint.mock.calls[0][0] as {
-			blobs: string[];
-			doubles: number[];
-		};
-		// blob=処理段の識別・doubles=層通過件数(Vectorize取得→L1→L3)・処理時間・
-		// Jev(呼び出し・再利用・保留4理由・処理時間)・L5閾値超過・提示・保留
+		// 1対1の層通過("stage2")とグループの項目("stage2_group")の2つのdata pointに分ける
+		expect(fakeAx.writeDataPoint).toHaveBeenCalledTimes(2);
+		const [stage2, group] = fakeAx.points;
+		// blob=処理段の識別・Layer 1の除外理由別内訳(JSON)。doubles=層通過件数
+		// (Vectorize取得→L1→L3)・処理時間・Jev(呼び出し・再利用・保留4理由・処理時間)・
+		// L5閾値超過・提示・保留、最後にretrievalMs(Layer 2の所要時間・実時間のため値は固定しない)
 		// (fixedClockのため処理時間は0・retrievalCount=2は自id含む取得件数)
-		expect(point.blobs[0]).toBe("stage2");
-		// 末尾にF4bの項目(l4_skipped_participants・group_pool・group_sets・group_jev_calls・
-		// group_held_sets・group_over_threshold・group_proposed・group_held_proposals・
-		// group_failed)が続く
-		// 最後にretrievalMs(Layer 2の所要時間・実時間のため値は固定しない)が続く
-		expect(point.doubles).toHaveLength(24);
-		expect(point.doubles.slice(0, 23)).toEqual([
-			2, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		expect(stage2?.blobs).toEqual(["stage2", "{}"]);
+		expect(stage2?.indexes).toEqual(["stage2"]);
+		expect(stage2?.doubles).toHaveLength(15);
+		expect(stage2?.doubles.slice(0, 14)).toEqual([
+			2, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0,
 		]);
-		expect(point.doubles[23]).toBeGreaterThanOrEqual(0);
-		expect(point.doubles[23]).toBe(result?.retrievalMs);
+		expect(stage2?.doubles[14]).toBeGreaterThanOrEqual(0);
+		expect(stage2?.doubles[14]).toBe(result?.retrievalMs);
+		// F4bの項目(l4_skipped_participants・group_pool・group_sets・group_jev_calls・
+		// group_held_sets・group_over_threshold・group_proposed・group_held_proposals・
+		// group_failed)
+		expect(group?.blobs).toEqual(["stage2_group"]);
+		expect(group?.indexes).toEqual(["stage2_group"]);
+		expect(group?.doubles).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
 		// PIPELINE_AXが未バインドの環境(単体試験等)でも評価自体は完走する
 		const envWithoutAx = {
@@ -1120,7 +1160,7 @@ describe("計測(Analytics Engine・docs/06 §7)", () => {
 		} as unknown as WorkerEnv;
 		const second = await evaluateIntent(envWithoutAx, b.id, directClock);
 		expect(second).not.toBeNull();
-		expect(fakeAx.writeDataPoint).toHaveBeenCalledTimes(1);
+		expect(fakeAx.writeDataPoint).toHaveBeenCalledTimes(2);
 	});
 });
 

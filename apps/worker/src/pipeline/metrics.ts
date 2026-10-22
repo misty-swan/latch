@@ -57,13 +57,16 @@ export interface Stage2MetricsData {
 }
 
 /**
- * 第2段の計測を1件のdata pointとして書く(docs/06 §7の層別通過記録)。
- * blob[0]=処理段の識別("stage2")・blob[1]=Layer 1の除外理由別内訳(JSON)。
+ * 第2段の計測を2件のdata pointとして書く(docs/06 §7の層別通過記録)。
+ * Analytics Engineの1つのdata pointはdoubles 20個まで(超えるとwriteDataPointが
+ * TypeErrorを投げ、評価全体が失敗する・#8)のため、1対1の層通過とグループの項目を分ける。
+ * 1件目: blob[0]=処理段の識別("stage2")・blob[1]=Layer 1の除外理由別内訳(JSON)。
  * doubles=層通過件数(Vectorize取得→L1→L3)・処理時間・Jev(呼び出し・再利用・
- * 保留の理由別 budget/breaker/failed/cap・処理時間)・L5閾値超過・提示・保留の順。
- * その後にF4bの項目(人数条件の除外・Pool・集合・グループ用Jev・集合の保留・
- * 集合の閾値超過・集合の提示・集合の保留・グループ部分の失敗)を同順で続け、最後にLayer 2
- * Candidate Retrievalの所要時間(retrievalMs)を置く(F4b設計 §5・F8b)
+ * 保留の理由別 budget/breaker/failed/cap・処理時間)・L5閾値超過・提示・保留の順で、
+ * 最後にLayer 2 Candidate Retrievalの所要時間(retrievalMs・F8b)を置く(15個)。
+ * 2件目: blob[0]=処理段の識別("stage2_group")。doubles=F4bの項目(人数条件の除外・Pool・集合・
+ * グループ用Jev・集合の保留・集合の閾値超過・集合の提示・集合の保留・グループ部分の
+ * 失敗)の順(9個・F4b設計 §5)
  */
 export const writeStage2Metrics = (env: Env, data: Stage2MetricsData): void => {
 	if (env.PIPELINE_AX === undefined) {
@@ -86,6 +89,13 @@ export const writeStage2Metrics = (env: Env, data: Stage2MetricsData): void => {
 			data.l5OverThreshold,
 			data.proposed,
 			data.held,
+			data.retrievalMs,
+		],
+		indexes: ["stage2"],
+	});
+	env.PIPELINE_AX.writeDataPoint({
+		blobs: ["stage2_group"],
+		doubles: [
 			data.l4SkippedParticipants,
 			data.groupPool,
 			data.groupSets,
@@ -95,8 +105,7 @@ export const writeStage2Metrics = (env: Env, data: Stage2MetricsData): void => {
 			data.groupProposed,
 			data.groupHeldProposals,
 			data.groupFailed,
-			data.retrievalMs,
 		],
-		indexes: ["stage2"],
+		indexes: ["stage2_group"],
 	});
 };
