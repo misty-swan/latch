@@ -21,6 +21,7 @@
 | #8 | 提案・LATCHのあるactiveの意思を直すと第2段`embedding_completed`がINTERNALで失敗する | worker |
 | #9 | Cronが直接評価した提案のWeb Pushがその場で送られず、30秒以上遅れる | worker |
 | #10 | Cronの遅延再評価(h)が30分の再評価抑制に止められ、実際には評価しない | worker |
+| #13 | Cronのmetadata整合の修復が反映待ちの意思を埋め込み直す(本工程の§2.1による退行・§2.6) | worker |
 
 #10は本工程の設計中(#7の検討)に見つけて登録した。
 
@@ -104,6 +105,15 @@ Cronのバックフィル(e)は第1段を`emitCompleted=false`で呼び、直後
 - 単体・統合(worker vitest): 第2段がメッセージのベクトルで照会し`getByIds`を呼ばない/反映確認の各分岐(未反映の送り直しの遅延・5分の打ち切り・version不一致を未反映とみなす・反映済みで抑制を越えて1回評価・stale/非activeのskipped)/同時に預けた2件が反映確認の再評価で提案される/(h)の通常状態での評価
 - インメモリのVectorStoreは即時に反映されるため、反映の遅れは試験用の遅れる実装(またはgetByIdsの差し替え)で再現する
 - worker E2E(既存47本)が緑のままであること
+
+### 2.6 #13 Cronのmetadata整合の修復が反映待ちの意思を埋め込み直す(本工程で追加・2026-10-22オーナー合意)
+
+stagingでの確認(§5)で見つかった、§2.1の変更による退行。第1段が反映を待たずに`embedded_at`を書くようになったため、毎分Cronのmetadata整合の修復(`cron.ts`の`repairVectorMetadata`)が、反映待ち(本物のVectorizeで65〜156秒を観測)の意思を「ベクトル欠損」とみなし、埋め込みをやり直していた(Workers AIの呼び出しとupsertが余分に増え、Cronから`embedding_completed`も投入していた)。
+
+- 修復の対象から、`embedded_at`が現在から`REFLECTION_GIVE_UP_MS`(5分)以内の意思を外す(反映確認の打ち切りまでは反映待ちが正常のため)
+- 欠損とみなして埋め込み直すときは`runEmbeddingStage`を`emitCompleted: false`で呼び、Cronから`embedding_completed`を投入しない(06 §2「Cronからは新たな起点イベントを発行しない」)
+- 試験: 埋め込みから5分以内でベクトルが見えない意思は埋め込み直さない/5分を過ぎて欠損している意思は埋め込み直し、`embedding_completed`を投入しない
+- 文書: 06 §2の修復の記述に対象の除外を書き足す
 
 ## 3. #8・#9
 

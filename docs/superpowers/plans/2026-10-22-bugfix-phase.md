@@ -231,6 +231,23 @@ superpowers:systematic-debuggingに従う。
 - [ ] **Step 6: #9を確かめる** — Cron経由の提案(埋め込みを止めずに作るのは難しいため、反映確認の評価し直しかCronの評価でできた提案)の`push_attempted_at − created_at`が5秒以内。Cron経由の提案を作れなければ、その旨と単体試験で確かめた範囲をissueへ書く
 - [ ] **Step 7: 後始末と記録** — Task 1 Step 7と同じ後始末。各issueへ結果(URLは書かない)を書き、確かめられたものを閉じる。#2・#4・#5・#6はオーナーの実機確認(設計書 §5.3)を依頼して開いたままにする(#6はTask 9の自動の試験で確かめたので閉じてよい)
 
+### Task 11a: Cronのmetadata整合の修復が反映待ちの意思を埋め込み直さないようにする(#13)
+
+**Files:**
+- Modify: `apps/worker/src/pipeline/cron.ts`(`repairVectorMetadata`)・`docs/06-matching-pipeline.md`(§2の修復の記述・版数・00 §1の版数表・前提文書欄)
+- Test: `apps/worker/tests/pipeline-cron.test.ts`
+
+**Interfaces:**
+- 修復の照会に`embedded_at <= now − PIPELINE.REFLECTION_GIVE_UP_MS`を足す(5分以内の意思は点検しない)
+- 欠損の埋め込み直しは`runEmbeddingStage(env, row, clock, { emitCompleted: false })`
+
+- [ ] **Step 1: 失敗する試験を書く** — `pipeline-cron.test.ts`: 「埋め込みから5分以内でベクトルが見えない意思は埋め込み直さない」(`holdMemoryVectorWrites`か、ベクトルを置かずに`embeddedAt`を4分前にする。Embedderの呼び出しやupsertが起きないこと)/「5分を過ぎてベクトルが欠損している意思は埋め込み直し、`embedding_completed`を投入しない」(`MATCH_QUEUE.send`をspyし、`embedding_completed`の送信が無いこと)
+- [ ] **Step 2: 失敗を確かめる** — Run: `pnpm --filter worker exec vitest run tests/pipeline-cron.test.ts` / Expected: FAIL
+- [ ] **Step 3: 実装する** — Interfacesのとおり。06 §2の修復の記述へ除外と理由を書き足し、版数の運用に従う
+- [ ] **Step 4: 通ることを確かめる** — Run: Step 2と同じ / Expected: PASS。続けて `pnpm lint && pnpm typecheck && pnpm test`
+- [ ] **Step 5: コミット** — `不具合修正: Cronの修復が反映待ちの意思を埋め込み直さないようにする(#13)`
+- [ ] **Step 6: stagingへ出して確かめる(コントローラー)** — mainをpushしてCIとデプロイを待ち、新しい意思を1件預けて、反映までの間に`cron.recovered`が出ないこと・`pipeline.stage1.completed`が1回であることを`wrangler tail`で確かめる。後始末をしてissue #13へ記録して閉じる
+
 ### Task 12: F8b Task 10 負荷試験の全規模の計測と報告書
 
 **Files:**
