@@ -92,6 +92,16 @@ export const jwtSecret = (env: Env): string => {
 	return env.JWT_SECRET ?? DEV_FALLBACK_JWT_SECRET;
 };
 
+/** VAPIDのsubが仮の送信者か(mailto:で、@の後が.invalidで終わるかexample.com/org/net。大文字小文字を区別しない) */
+const isPlaceholderVapidSubject = (subject: string): boolean => {
+	if (!subject.toLowerCase().startsWith("mailto:")) return false;
+	const domain = subject.slice(subject.lastIndexOf("@") + 1).toLowerCase();
+	return (
+		domain.endsWith(".invalid") ||
+		["example.com", "example.org", "example.net"].includes(domain)
+	);
+};
+
 /** 環境変数からVAPID鍵一式を作る(未設定は例外・F7b設計 §5.5) */
 export const vapidKeysOf = (env: Env): VapidKeys => {
 	if (
@@ -161,6 +171,11 @@ export const assertEnvSafety = (env: Env): void => {
 	if (env.VAPID_PUBLIC_KEY === TEST_VAPID_PUBLIC_KEY) {
 		throw new Error(
 			"ENV_UNSAFE_TEST_KEY: prod環境でテスト用VAPID鍵が設定されている(docs/10 §2)",
+		);
+	}
+	if (isPlaceholderVapidSubject(env.VAPID_SUBJECT)) {
+		throw new Error(
+			"ENV_PLACEHOLDER_VAPID_SUBJECT: prod環境でVAPID_SUBJECTが仮の送信者(.invalid・example.com/org/net)のまま。実在する連絡先のmailto:を設定する(docs/10 §2)",
 		);
 	}
 };

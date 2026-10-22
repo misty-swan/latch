@@ -51,7 +51,7 @@ export default defineConfig(async () => {
 						LATCH_TEST_IDP_PRIVATE_JWKS: testIdpPrivateJwk,
 						VAPID_PUBLIC_KEY: testVapid.publicKey,
 						VAPID_PRIVATE_KEY: JSON.stringify(testVapid.privateJwk),
-						VAPID_SUBJECT: "mailto:dev@latch.invalid",
+						VAPID_SUBJECT: "mailto:dev@example.com",
 						// キューの自動消費を止める印(src/env.ts・index.tsのqueueハンドラ参照)。
 						// テストがsendしたメッセージの消費による副作用を防ぎ、消費の試験は
 						// createMessageBatchでhandleQueueBatchを直接呼んで行う

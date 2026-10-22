@@ -39,6 +39,7 @@ echo 'LATCH_PUSH_MODE=real' >> apps/worker/.dev.vars
 
 - 設定ファイルを作り直すと中身が上書きされるため、必ず 1 行目の後に 2 行目を実行する。
 - 通知の鍵(VAPID 鍵)は、コミット済みのテスト用の鍵がこの設定ファイルに入る。本番の鍵は F10 で発行する。
+- 通知の送信者(`VAPID_SUBJECT`)の既定は `mailto:dev@example.com`。`.invalid` などの予約ドメインを使うと Apple が 403 `BadJwtToken` で拒否する。
 - `.dev.vars` は Git の管理外のファイル。コミットしない。
 - 指定しない場合(既定の `stub`)は、通知を送った扱いにするだけで実際には送らないため、スマホには届かない。
 

@@ -8,7 +8,7 @@ import { realPushSender } from "./sender";
 const keys = {
 	publicKey: testVapid.publicKey,
 	privateJwk: testVapid.privateJwk as JsonWebKey,
-	subject: "mailto:dev@latch.invalid",
+	subject: "mailto:dev@example.com",
 };
 
 const b64u = (b: Uint8Array) => Buffer.from(b).toString("base64url");

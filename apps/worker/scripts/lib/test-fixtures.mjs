@@ -34,5 +34,5 @@ export const testVapid = JSON.parse(
 	readFileSync(path.join(workerDir, "tests/fixtures/test-vapid.json"), "utf8"),
 );
 
-/** VAPIDの連絡先(テスト用の無効ドメイン) */
-export const vapidSubject = "mailto:dev@latch.invalid";
+/** VAPIDの連絡先(Appleは.invalid等の予約ドメインを403 BadJwtTokenで拒否するためexample.comを使う) */
+export const vapidSubject = "mailto:dev@example.com";

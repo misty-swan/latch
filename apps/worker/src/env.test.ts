@@ -20,7 +20,7 @@ const PUSH_OK = {
 	LATCH_PUSH_MODE: "real",
 	VAPID_PUBLIC_KEY: "B".repeat(87),
 	VAPID_PRIVATE_KEY: "{}",
-	VAPID_SUBJECT: "mailto:ops@example.com",
+	VAPID_SUBJECT: "mailto:ops@latch.app",
 } satisfies Partial<Env>;
 
 describe("assertEnvSafety(docs/04 §4・docs/10 §2: prodテスト鍵起動ガード)", () => {
@@ -78,6 +78,47 @@ describe("assertEnvSafety(docs/04 §4・docs/10 §2: prodテスト鍵起動ガ�
 	it("env.tsのテスト公開鍵定数はfixtureの公開鍵と一致する", () => {
 		expect(TEST_VAPID_PUBLIC_KEY).toBe(JSON.parse(testVapidText).publicKey);
 	});
+
+	it.each([
+		"mailto:dev@latch.invalid",
+		"mailto:dev@example.com",
+		"mailto:x@EXAMPLE.ORG",
+		"mailto:y@example.net",
+	])("prodで仮の送信者%sは例外(ENV_PLACEHOLDER_VAPID_SUBJECT)", (subject) => {
+		expect(() =>
+			assertEnvSafety(
+				makeEnv({
+					LATCH_ENV: "production",
+					JWT_SECRET: SECRET_32,
+					...PUSH_OK,
+					VAPID_SUBJECT: subject,
+				}),
+			),
+		).toThrow("ENV_PLACEHOLDER_VAPID_SUBJECT");
+	});
+
+	it("prodで実在しうる送信者mailto:ops@latch.appは通る", () => {
+		expect(() =>
+			assertEnvSafety(
+				makeEnv({ LATCH_ENV: "production", JWT_SECRET: SECRET_32, ...PUSH_OK }),
+			),
+		).not.toThrow();
+	});
+
+	it.each(["local", "staging"])(
+		"%sではmailto:dev@example.comでも例外にならない",
+		(e) => {
+			expect(() =>
+				assertEnvSafety(
+					makeEnv({
+						LATCH_ENV: e as Env["LATCH_ENV"],
+						JWT_SECRET: SECRET_32,
+						VAPID_SUBJECT: "mailto:dev@example.com",
+					}),
+				),
+			).not.toThrow();
+		},
+	);
 
 	it("vapidKeysOfは環境変数からVapidKeysを作る(未設定は例外)", () => {
 		const keys = vapidKeysOf(
