@@ -3,6 +3,7 @@ import {
 	buildQueries,
 	judgeFromRows,
 	notifyFromRows,
+	reflectionFromRows,
 	retrievalFromRows,
 } from "./queries.mjs";
 
@@ -21,9 +22,14 @@ describe("buildQueries", () => {
 			expect(() => buildQueries(bad)).toThrow("実行の印");
 		}
 	});
-	it("3つのSQLを返し、どれも実行の印の利用者((b)(d))で絞る", () => {
+	it("4つのSQLを返し、どれも実行の印の利用者((b)(d))で絞る", () => {
 		const q = buildQueries("202610220442");
-		expect(Object.keys(q).sort()).toEqual(["judge", "notify", "retrieval"]);
+		expect(Object.keys(q).sort()).toEqual([
+			"judge",
+			"notify",
+			"reflection",
+			"retrieval",
+		]);
 		for (const sql of Object.values(q)) {
 			expect(sql).toContain("u.auth_subject LIKE 'load-202610220442-%'");
 			expect(sql).toContain("u.auth_subject LIKE 'load-202610220442-b%'");
@@ -87,5 +93,26 @@ describe("retrievalFromRows", () => {
 				{ intent_id: "D", has_event: 1, retrieval_ms: "x" },
 			]),
 		).toEqual({ durations: [42, null, null, null], withoutEvent: 1 });
+	});
+});
+
+describe("反映時間", () => {
+	it("SQL: vector_reflectionの行のreflect_msとstatusを(b)(d)の利用者で絞って取る", () => {
+		const { reflection } = buildQueries("202610221200");
+		expect(reflection).toContain("event_type = 'vector_reflection'");
+		expect(reflection).toContain("json_extract(me.payload, '$.reflect_ms')");
+		expect(reflection).toContain("me.status");
+		expect(reflection).toContain("u.auth_subject LIKE 'load-202610221200-b%'");
+		expect(reflection).toContain("u.auth_subject LIKE 'load-202610221200-d%'");
+	});
+	it("processed以外・値の無い行はnull(欠け)", () => {
+		expect(
+			reflectionFromRows([
+				{ status: "processed", reflect_ms: 1200 },
+				{ status: "failed", reflect_ms: null },
+				{ status: "processed", reflect_ms: null },
+				{ status: "failed", reflect_ms: 5 },
+			]),
+		).toEqual([1200, null, null, null]);
 	});
 });

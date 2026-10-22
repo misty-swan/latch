@@ -21,9 +21,10 @@ import {
 	buildQueries,
 	judgeFromRows,
 	notifyFromRows,
+	reflectionFromRows,
 	retrievalFromRows,
 } from "./lib/queries.mjs";
-import { renderTable, summarize } from "./lib/stats.mjs";
+import { renderReferenceTable, renderTable, summarize } from "./lib/stats.mjs";
 
 /** 01 §20の目標(ミリ秒) */
 const TARGET_MS = {
@@ -38,7 +39,7 @@ const TARGET_MS = {
  * 報告の本文を組み立てる(純粋関数)
  * @param {string} runId
  * @param {{ a: object | null, c: object | null }} k6 シナリオごとのk6の結果(無ければnull)
- * @param {{ judge: object[], notify: object[], retrieval: object[] }} rows D1の行
+ * @param {{ judge: object[], notify: object[], retrieval: object[], reflection?: object[] }} rows D1の行
  * @returns {string}
  */
 export function buildReport(runId, k6, rows) {
@@ -61,9 +62,15 @@ export function buildReport(runId, k6, rows) {
 		"",
 		renderChatTable(m),
 		"",
+		renderReferenceTable(
+			"Vectorizeの反映",
+			reflectionFromRows(rows.reflection ?? []),
+		),
+		"",
 		`- k6の結果のファイル: ${found}。Intent保存・Parserは(a)、チャットは(c)の結果から読む(k6のsummaryはp95だけを持つため、件数の欄は—)`,
 		"- Candidate Retrieval・初期判定・通知は、stagingのD1の(b)(d)の利用者の行から集計する。「欠け」は計測できなかった件数(提案の通知が無い・送信試行が無い・イベント行が無い)。欠けが1件でもあれば、計測した分のp95が目標以内でも判定は「—(欠けあり)」(合格としない)。目標を超えれば欠けがあっても不合格",
 		`- embedding_completedのイベント行が無い意思: ${retrieval.withoutEvent}件(埋め込みを毎分Cronのバックフィルで行った意思はこの行を持たず、Candidate Retrievalの欠けになる)`,
+		"- Vectorizeの反映は、意思のversionごとの反映確認の行(vector_reflection)の作成から反映の確認までの時間である。01 §20に目標値は無く、合否は付けず実測だけを出す。「欠け」は確認できず諦めた(failed)・古い版などで値の無い行の数",
 		"- 初期判定の起点は有効化のイベント行(intent_created)の作成時刻で、有効化の保存の直後に応答の後の処理(waitUntil)で書かれる。保存のコミットよりわずかに後の時刻を起点にしている",
 		"- 送信記録(push_attempted_at)は送信の順番を取った時刻である。試験用の利用者は購読を持たないためno_subscriptionで確定し、暗号化と送信の時間は含まれない",
 		"- 「(stub)」の行はLLMをstubで動かした値である(Parser・Jev)",
@@ -108,6 +115,7 @@ function main() {
 		judge: queryRows(sql.judge),
 		notify: queryRows(sql.notify),
 		retrieval: queryRows(sql.retrieval),
+		reflection: queryRows(sql.reflection),
 	};
 	console.log(buildReport(runId, k6, rows));
 }

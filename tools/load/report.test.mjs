@@ -4,6 +4,27 @@ import { buildReport } from "./report.mjs";
 const empty = { judge: [], notify: [], retrieval: [] };
 
 describe("buildReport", () => {
+	it("Vectorizeの反映の行(件数・欠け・p50・p95・最大)を出し、合否は付けない", () => {
+		const out = buildReport(
+			"202610221200",
+			{ a: null, c: null },
+			{
+				...empty,
+				reflection: [
+					{ status: "processed", reflect_ms: 1000 },
+					{ status: "processed", reflect_ms: 3000 },
+					{ status: "failed", reflect_ms: null },
+				],
+			},
+		);
+		expect(out).toContain(
+			"| Vectorizeの反映 | 3 | 1 | 1.00秒 | 3.00秒 | 3.00秒 |",
+		);
+		const none = buildReport("202610221200", { a: null, c: null }, empty);
+		expect(none).toContain(
+			"| Vectorizeの反映 | 0 | 0 | 計測なし | 計測なし | 計測なし |",
+		);
+	});
 	it("結果のファイルもD1の行も無くても表を出す(計測なし・NaNを出さない)", () => {
 		const out = buildReport("202610220442", { a: null, c: null }, empty);
 		expect(out).toContain("| Intent保存 | 0.50秒 | — | — | — | 計測なし | — |");

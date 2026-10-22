@@ -9,7 +9,7 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 /**
  * 集計のSQLを返す。runIdは12桁の数字のみ(SQLへ文字列として差し込むため、それ以外は例外)
  * @param {string} runId
- * @returns {{ judge: string, notify: string, retrieval: string }}
+ * @returns {{ judge: string, notify: string, retrieval: string, reflection: string }}
  */
 export function buildQueries(runId) {
 	if (typeof runId !== "string" || !/^\d{12}$/.test(runId)) {
@@ -31,6 +31,12 @@ export function buildQueries(runId) {
 			"SELECT n.id AS notification_id, n.created_at AS created_at, n.push_attempted_at AS push_attempted_at",
 			"FROM notifications n JOIN users u ON u.id = n.user_id",
 			`WHERE n.type = 'proposal' AND ${subject}`,
+		].join(" "),
+		// Vectorizeの反映: vector_reflectionの行(意思のversionごとに1行)のstatusとpayloadのreflect_ms
+		reflection: [
+			"SELECT me.status AS status, json_extract(me.payload, '$.reflect_ms') AS reflect_ms",
+			"FROM match_events me JOIN intents i ON i.id = me.source_intent_id JOIN users u ON u.id = i.user_id",
+			`WHERE me.event_type = 'vector_reflection' AND ${subject}`,
 		].join(" "),
 		// Candidate Retrieval: embedding_completedのpayloadのretrieval_ms(最新のversion)。
 		// イベント行の無いIntent(埋め込みを毎分Cronのバックフィルで行った場合など)はhas_event=0
@@ -80,4 +86,13 @@ export function retrievalFromRows(rows) {
 		durations: rows.map((r) => num(r.retrieval_ms)),
 		withoutEvent: rows.filter((r) => !r.has_event).length,
 	};
+}
+
+/**
+ * Vectorizeの反映の行→所要時間。processedで値のあるものだけ値、failed・skipped(値なし)はnull(欠け)
+ * @param {Array<{ status: unknown, reflect_ms: unknown }>} rows
+ * @returns {Array<number | null>}
+ */
+export function reflectionFromRows(rows) {
+	return rows.map((r) => (r.status === "processed" ? num(r.reflect_ms) : null));
 }

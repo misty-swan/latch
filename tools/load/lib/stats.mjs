@@ -39,6 +39,17 @@ export function summarize(name, targetMs, durations) {
 	};
 }
 
+/**
+ * 分位(最近順位法)。q=0.5でp50。n=0はnull
+ * @param {number[]} values
+ * @param {number} q
+ */
+function quantile(values, q) {
+	if (values.length === 0) return null;
+	const sorted = [...values].sort((a, b) => a - b);
+	return sorted[Math.max(0, Math.ceil(q * sorted.length) - 1)];
+}
+
 const sec = (ms) => `${(ms / 1000).toFixed(2)}秒`;
 
 /**
@@ -64,4 +75,19 @@ export function renderTable(summaries) {
 		);
 	}
 	return lines.join("\n");
+}
+
+/**
+ * 目標値の無い参考項目の行(件数・欠け・p50・p95・最大。合否なし)。nullは欠け
+ * @param {string} name
+ * @param {Array<number | null>} durations
+ */
+export function renderReferenceTable(name, durations) {
+	const values = durations.filter((d) => d !== null);
+	const cell = (v) => (v === null ? "計測なし" : sec(v));
+	return [
+		"| 項目(参考) | 件数 | 欠け | p50 | p95 | 最大 |",
+		"| --- | --- | --- | --- | --- | --- |",
+		`| ${name} | ${durations.length} | ${durations.length - values.length} | ${cell(quantile(values, 0.5))} | ${cell(p95(values))} | ${cell(values.length === 0 ? null : Math.max(...values))} |`,
+	].join("\n");
 }
