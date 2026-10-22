@@ -16,31 +16,15 @@
  * .dev.varsはgitignore済みの生成物として扱う
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-/** apps/worker(このスクリプトの1つ上) */
-const workerDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-
-/** JSON文字列を1行へ整える(キー順は元ファイルのまま=決定的) */
-const oneLineJson = (file) =>
-	JSON.stringify(JSON.parse(readFileSync(file, "utf8")));
-
-/** 公開JWKS(tests/fixtures) */
-const jwksOneLine = oneLineJson(
-	path.join(workerDir, "tests/fixtures/test-idp-jwks.json"),
-);
-
-/** 秘密JWK(tests/fixtures・devサインインの署名鍵) */
-const privateJwkOneLine = oneLineJson(
-	path.join(workerDir, "tests/fixtures/test-idp-private.jwk"),
-);
-
-/** テスト用VAPID鍵(公開鍵とJWK) */
-const testVapid = JSON.parse(
-	readFileSync(path.join(workerDir, "tests/fixtures/test-vapid.json"), "utf8"),
-);
+import {
+	jwksOneLine,
+	privateJwkOneLine,
+	testVapid,
+	vapidSubject,
+	workerDir,
+} from "./lib/test-fixtures.mjs";
 
 /** E2E専用の固定JWT署名鍵(32字以上・docs/10 §1の開発/テスト専用値) */
 const devJwtSecret = "latch-e2e-dev-jwt-secret-0123456789abcdef0123456789";
@@ -56,7 +40,7 @@ const content = [
 	`LATCH_TEST_IDP_PRIVATE_JWKS='${privateJwkOneLine}'`,
 	`VAPID_PUBLIC_KEY=${testVapid.publicKey}`,
 	`VAPID_PRIVATE_KEY='${JSON.stringify(testVapid.privateJwk)}'`,
-	"VAPID_SUBJECT=mailto:dev@latch.invalid",
+	`VAPID_SUBJECT=${vapidSubject}`,
 	"",
 ].join("\n");
 

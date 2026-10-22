@@ -134,5 +134,98 @@
 		"LATCH_EMBEDDING_MODE": "stub",
 		// 実行環境の識別(docs/10 §1)。local既定で、デプロイ時にstaging/productionへ上書き
 		"LATCH_ENV": "local"
+	},
+
+	// staging環境(F8b設計 §1・docs/04 §6)。wranglerの環境ではバインディングと
+	// varsが区画へ引き継がれないため、ここで全部書き直している(書き漏れは
+	// tests/wrangler-envs.test.tsが検出する)。main・assets・migrations(DO)・
+	// compatibility_*は引き継がれる。triggersは明示して毎分Cronを確実に載せる。
+	// 資源名は-staging付きの新規名(既存資源に触れない)。IDは
+	// scripts/provision-staging.mjs --write で実IDへ置き換える(IDは秘密ではない)
+	"env": {
+		"staging": {
+			"triggers": {
+				"crons": ["* * * * *"]
+			},
+			"observability": {
+				"enabled": true
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "latch-db-staging",
+					// provision-staging.mjs --write で実IDへ差し替え
+					"database_id": "00000000-0000-0000-0000-000000000000",
+					"migrations_dir": "migrations"
+				}
+			],
+			"kv_namespaces": [
+				{
+					"binding": "REVOCATION_KV",
+					// provision-staging.mjs --write で実IDへ差し替え
+					"id": "00000000000000000000000000000000"
+				},
+				{
+					"binding": "PIPELINE_KV",
+					// provision-staging.mjs --write で実IDへ差し替え
+					"id": "00000000000000000000000000000000"
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "ICONS",
+					"bucket_name": "latch-icons-staging"
+				}
+			],
+			"vectorize": [
+				{
+					"binding": "VECTORS",
+					"index_name": "latch-intents-staging"
+				}
+			],
+			"ai": {
+				"binding": "AI"
+			},
+			"queues": {
+				"producers": [
+					{
+						"binding": "MATCH_QUEUE",
+						"queue": "match-events-staging"
+					}
+				],
+				"consumers": [
+					{
+						"queue": "match-events-staging",
+						"max_retries": 3,
+						"dead_letter_queue": "match-events-dlq-staging"
+					},
+					{
+						"queue": "match-events-dlq-staging",
+						"max_retries": 1
+					}
+				]
+			},
+			"analytics_engine_datasets": [
+				{
+					"binding": "PIPELINE_AX",
+					"dataset": "latch_metrics_staging"
+				}
+			],
+			"durable_objects": {
+				"bindings": [
+					{
+						"name": "CHAT_DO",
+						"class_name": "ChatRoomDO"
+					}
+				]
+			},
+			"vars": {
+				"LATCH_ENV": "staging",
+				// Embeddingだけreal(Workers AI)。Parser/Jev/Pushはstub(F8b設計 §1.3)
+				"LATCH_EMBEDDING_MODE": "real",
+				"LATCH_LLM_MODE": "stub",
+				"LATCH_PUSH_MODE": "stub"
+			}
+		}
 	}
 }

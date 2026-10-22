@@ -1,0 +1,101 @@
+/**
+ * wrangler.jsoncのトップレベルとenv.stagingの整合の確認(F8b設計 §1.1・docs/04 §6)。
+ * wranglerの環境ではバインディングとvarsが区画へ引き継がれないため、書き漏れを
+ * 単体試験で防ぐ(workerd内からは実FSを読めないので?rawで文字列として読む)。
+ */
+import { parse } from "jsonc-parser";
+import { describe, expect, it } from "vitest";
+import raw from "../wrangler.jsonc?raw";
+
+interface Queues {
+	producers?: { binding: string; queue: string }[];
+	consumers?: {
+		queue: string;
+		max_retries?: number;
+		dead_letter_queue?: string;
+	}[];
+}
+interface Section {
+	d1_databases?: { binding: string; database_name: string }[];
+	kv_namespaces?: { binding: string }[];
+	r2_buckets?: { binding: string; bucket_name: string }[];
+	vectorize?: { binding: string; index_name: string }[];
+	queues?: Queues;
+	analytics_engine_datasets?: { binding: string; dataset: string }[];
+	durable_objects?: { bindings: { name: string }[] };
+	ai?: { binding: string };
+	vars?: Record<string, string>;
+	triggers?: { crons: string[] };
+}
+const config = parse(raw) as Section & { env?: { staging?: Section } };
+const top = config;
+const staging = config.env?.staging as Section;
+
+/** バインディング名の集合(種類ごと) */
+const bindingNames = (s: Section) => ({
+	d1: s.d1_databases?.map((b) => b.binding).sort(),
+	kv: s.kv_namespaces?.map((b) => b.binding).sort(),
+	r2: s.r2_buckets?.map((b) => b.binding).sort(),
+	vectorize: s.vectorize?.map((b) => b.binding).sort(),
+	producers: s.queues?.producers?.map((b) => b.binding).sort(),
+	ae: s.analytics_engine_datasets?.map((b) => b.binding).sort(),
+	do: s.durable_objects?.bindings.map((b) => b.name).sort(),
+});
+
+describe("wrangler.jsonc の env.staging", () => {
+	it("区画が存在する", () => {
+		expect(staging).toBeDefined();
+	});
+
+	it("バインディング名の集合がトップレベルと一致し、aiも両方にある", () => {
+		expect(bindingNames(staging)).toEqual(bindingNames(top));
+		expect(top.ai?.binding).toBe("AI");
+		expect(staging.ai?.binding).toBe("AI");
+	});
+
+	it("varsが設計 §1.3の4値に一致する", () => {
+		expect(staging.vars).toEqual({
+			LATCH_ENV: "staging",
+			LATCH_EMBEDDING_MODE: "real",
+			LATCH_LLM_MODE: "stub",
+			LATCH_PUSH_MODE: "stub",
+		});
+	});
+
+	it("資源名がトップレベルと異なり、設計 §1.2の名前である", () => {
+		expect(staging.d1_databases?.[0].database_name).toBe("latch-db-staging");
+		expect(staging.r2_buckets?.[0].bucket_name).toBe("latch-icons-staging");
+		expect(staging.vectorize?.[0].index_name).toBe("latch-intents-staging");
+		expect(staging.analytics_engine_datasets?.[0].dataset).toBe(
+			"latch_metrics_staging",
+		);
+		expect(staging.queues?.producers?.[0].queue).toBe("match-events-staging");
+		expect(staging.d1_databases?.[0].database_name).not.toBe(
+			top.d1_databases?.[0].database_name,
+		);
+		expect(staging.r2_buckets?.[0].bucket_name).not.toBe(
+			top.r2_buckets?.[0].bucket_name,
+		);
+		expect(staging.vectorize?.[0].index_name).not.toBe(
+			top.vectorize?.[0].index_name,
+		);
+		expect(staging.queues?.producers?.[0].queue).not.toBe(
+			top.queues?.producers?.[0].queue,
+		);
+	});
+
+	it("queuesのconsumerが-staging付きの名前とDLQ・再試行回数を持つ", () => {
+		expect(staging.queues?.consumers).toEqual([
+			{
+				queue: "match-events-staging",
+				max_retries: 3,
+				dead_letter_queue: "match-events-dlq-staging",
+			},
+			{ queue: "match-events-dlq-staging", max_retries: 1 },
+		]);
+	});
+
+	it("毎分Cronを持つ", () => {
+		expect(staging.triggers?.crons).toEqual(["* * * * *"]);
+	});
+});

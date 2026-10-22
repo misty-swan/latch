@@ -17,3 +17,9 @@ declare module "*.json?raw" {
 	const value: string;
 	export default value;
 }
+
+// テストがwrangler.jsoncをviteの?rawで文字列として読むための宣言(tests/wrangler-envs.test.ts)
+declare module "*.jsonc?raw" {
+	const value: string;
+	export default value;
+}
