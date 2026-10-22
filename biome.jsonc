@@ -15,6 +15,8 @@
 			// Playwrightの実行生成物(test-results・gitignore済み・test:e2e実行時に作られる)
 			"!apps/worker/test-results",
 			"!apps/web/test-results",
+			// k6の結果のJSON(--summary-export・gitignore済み・負荷試験の実行時に作られる)
+			"!tools/load/results",
 			// prototypeから不改変で移植したデザイン定義(docs/04 §3.2・D-A-07)。整形・リント対象外とする
 			"!apps/web/src/styles/latch.css",
 			// prototypeから不改変で移植したPWAアイコン(F2' Task 7)。整形・リント対象外とする

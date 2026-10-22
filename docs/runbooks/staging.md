@@ -171,4 +171,64 @@ pnpm --filter worker exec wrangler d1 execute DB --env staging --remote --file m
 
 ## 7. 負荷試験の実行
 
-(負荷試験の手順は後続の作業で書き足す)
+負荷試験は、たくさんの利用者が同時に使ったときの応答の速さを測る試験である(02 §4 #33・F8b設計 §3)。k6という負荷をかけるプログラムで、このPCからstagingへ大量のリクエスト(サーバーへの依頼)を送る。スクリプトは`tools/load/`にある。
+
+### 7.1 k6の入れ方
+
+k6は単体で動くプログラムで、pnpmの依存パッケージには入れない。次のどちらかで入れる。
+
+- **公式のリリースのバイナリ**: <https://github.com/grafana/k6/releases> から、v1系の`k6-v<版>-linux-amd64.tar.gz`(Linuxの場合)を取り、展開して出てくる`k6`をPATHの通った場所(例: `~/.local/bin`)に置く。同じページの`k6-v<版>-checksums.txt`で取ったファイルの`sha256sum`の値が一致することを確かめる
+- **パッケージマネージャー**: macOSは`brew install k6`、Debian/UbuntuはGrafanaの公式のaptの置き場から`sudo apt-get install k6`(手順は <https://grafana.com/docs/k6/latest/set-up/install-k6/>)
+
+入ったことは次で確かめる。
+
+```bash
+k6 version
+```
+
+(`k6 v1.8.1 (...)`のように版が出る。F8bの試し実行はv1.8.1で行った)
+
+### 7.2 環境変数
+
+k6には`-e 名前=値`で渡す。
+
+| 名前 | 既定 | 意味 |
+|---|---|---|
+| `LATCH_LOAD_BASE_URL` | (必須) | 宛先=`<stagingのURL>`。後始末(`cleanup.mjs`)にはシェルの環境変数として渡す |
+| `RUN_ID` | 実行時刻(UTCの`YYYYMMDDHHmm`) | 実行の印。試験用の利用者のsubjectは`load-<RUN_ID>-<連番>`になり、集計はこの印で絞る。12桁の数字のみ |
+| `LOAD_SCALE` | `1` | 規模の倍率。rate(1分あたりの件数)・人数・時間に掛ける(試しは`0.1`) |
+| `PROPOSAL_WAIT_SEC` | `60` | 提案の通知を待つ上限の秒数((b)〜(d)で使う) |
+
+- 宛先を誤らないよう、各シナリオは最初にテスト用サインイン(`POST /v1/dev/idp-token`)を呼び、200でなければ「宛先がstagingではありません」で止まる(本番では404になる)
+- 結果のJSON(`--summary-export`の出力)は`tools/load/results/`に置く。このフォルダはgitの管理外で、最初に`mkdir -p tools/load/results`で作る
+
+### 7.3 後始末
+
+試験の前と後に、試験用の利用者(subjectが`load-`で始まる)の意思をすべて消す。
+
+```bash
+LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/cleanup.mjs
+```
+
+(stagingのD1を読むだけの問い合わせで意思を持つ`load-`の利用者を探し、その利用者としてサインインし直して意思を削除APIで1件ずつ消す。「意思を持つload-の利用者 ◯人」「意思を◯件削除しました(失敗0件)」と出れば終わり)
+
+- 削除APIを通すのは、意思の索引(Vectorize)のベクトルも一緒に消すためである。データベースの行だけを書き換えるとベクトルが残り、次の回の候補の取り出しを汚す
+- 実行の印を問わず`load-`の利用者を全員拾うため、途中で止まった回の残りも消える。利用者の行そのものは残る(次の回は別の印で作り直す)
+- まれにwranglerの問い合わせが「The given account is not valid or is not authorized」(code 7403)で失敗することがある。時間を置いてもう一度実行する
+
+### 7.4 シナリオ(a) 作成の集中
+
+読み解き(`POST /v1/intents/parse`)→保存(`POST /v1/intents`・status=active)を、合計100件/分で5分間繰り返す(100人×5件。1人のActive Intent上限5件に収まる)。読み解き確認の画面の[預ける]と同じ呼び方である。Intent保存のp95(目標0.5秒)とParserのp95(目標3秒・stubでの値)を測る。
+
+```bash
+RUN_ID=$(date -u +%Y%m%d%H%M)
+LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/cleanup.mjs
+k6 run -e LATCH_LOAD_BASE_URL=<stagingのURL> -e RUN_ID=$RUN_ID \
+  --summary-export tools/load/results/$RUN_ID-a.json tools/load/scenarios/a-intent-burst.js
+LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/cleanup.mjs
+```
+
+(1行目で実行の印を決め、後始末→(a)の実行→後始末の順に動く。k6は準備で100人を登録してから5分間リクエストを送り、最後に結果の表を出す)
+
+- 結果の表の`THRESHOLDS`に、目標(`http_req_duration{name:intent_save}`の`p(95)<500`・`http_req_duration{name:parse}`の`p(95)<3000`・失敗の割合`http_req_failed`の`rate<0.01`)ごとに✓か✗が出る。1つでも✗ならk6は失敗(0以外)で終わる。合否の正本は報告書(`docs/reports/f8b-load-test.md`)の集計である
+- 小さく試すときは`-e LOAD_SCALE=0.1`を足す(10人・10件/分を30秒。保存は6件前後になる)
