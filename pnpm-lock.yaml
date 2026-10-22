@@ -296,6 +296,12 @@ importers:
         specifier: 4.1.12
         version: 4.1.12(@types/node@22.15.17)(happy-dom@21.0.3)(vite@8.3.4(@types/node@22.15.17)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15))
 
+  tools/load:
+    devDependencies:
+      vitest:
+        specifier: 4.1.12
+        version: 4.1.12(@types/node@22.15.17)(happy-dom@21.0.3)(vite@8.3.4(@types/node@22.15.17)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15))
+
 packages:
 
   '@apideck/better-ajv-errors@0.3.7':

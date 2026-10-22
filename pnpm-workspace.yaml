@@ -1,6 +1,7 @@
 packages:
   - "apps/*"
   - "packages/*"
+  - "tools/*"
 # workerd・esbuildのpostinstall(プラットフォームバイナリの準備)を許可する
 allowBuilds:
   esbuild: true

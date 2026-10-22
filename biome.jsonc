@@ -3,6 +3,7 @@
 	"files": {
 		"includes": [
 			"apps/**",
+			"tools/**",
 			"packages/**",
 			"!**/worker-configuration.d.ts",
 			// ビルド生成物(vite buildの出力。gitignore済みだがbiomeはファイルシステム直視のため除外)
