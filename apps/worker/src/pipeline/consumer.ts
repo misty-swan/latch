@@ -16,7 +16,7 @@
  * 委譲し、戻り値の計測結果を起点イベントのpayloadへ記録する(06 §7)。
  */
 import { type MatchQueueMessage, PIPELINE } from "@latch/shared";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Clock } from "../clock/clock";
 import { intents, matchEvents } from "../db/schema";
@@ -58,18 +58,30 @@ export type EmbeddingStageResult =
 /**
  * 第1段の後続イベントを投入する。embedding_completed(emitCompleted=trueのとき・同version・
  * 即時。vectorがあればメッセージに載せる)→vector_reflection(同version・遅延付き)の順。
- * embedding_completedの投入の失敗は例外のまま返す(呼び出し側がemitの段の失敗として
- * やり直す)。vector_reflectionの投入の失敗はログだけにする(Cronの(h)が拾う)。
- * どちらもUNIQUE(event_type, source_intent_id, version)で冪等なので、やり直しで行は増えない
+ * - skipの種別は投入しない(投入だけのやり直しで、送れている分を送り直さない)
+ * - キューの経路(reflectionRequired=true)は、どちらの投入の失敗も例外のまま返し、
+ *   呼び出し側がemitの段の失敗としてメッセージをretryする。使い切ったらDLQでdeadになり、
+ *   評価は未評価の回収(g)が拾う(設計 §4)。送れなかった行は消し、「行がある=送れた」を保つ
+ * - Cronの経路(reflectionRequired=false・やり直すメッセージが無い)はvector_reflectionの
+ *   投入の失敗をログだけにする(評価はCronが直後に直接行う)
  */
 const emitStage1Events = async (
 	env: Env,
 	intent: IntentRow,
 	clock: Clock,
-	options: { emitCompleted: boolean; vector?: number[] },
+	options: {
+		emitCompleted: boolean;
+		reflectionRequired: boolean;
+		vector?: number[];
+		skip?: ReadonlySet<"embedding_completed" | "vector_reflection">;
+	},
 ): Promise<void> => {
+	const discardOnSendFailure = options.reflectionRequired;
 	// 第2段への再投入(同version・即時・docs/06 §2)
-	if (options.emitCompleted) {
+	if (
+		options.emitCompleted &&
+		options.skip?.has("embedding_completed") !== true
+	) {
 		await emitMatchEvent(
 			env,
 			{
@@ -77,13 +89,15 @@ const emitStage1Events = async (
 				intentId: intent.id,
 				version: intent.version,
 			},
-			options.vector === undefined ? undefined : { vector: options.vector },
+			{ vector: options.vector, discardOnSendFailure },
 			clock,
 		);
 	}
+	if (options.skip?.has("vector_reflection") === true) {
+		return;
+	}
 	// 反映確認(同version・遅延付き・不具合の修正工程の設計 §2.1の4)。
-	// emitCompleted=false(Cronのバックフィル)でも投入し、同時投入の取りこぼしを拾う。
-	// 投入の失敗はログだけにして第1段の結果をfailedにしない(Cronの(h)が拾う)
+	// emitCompleted=false(Cronのバックフィル・修復)でも投入し、同時投入の取りこぼしを拾う
 	try {
 		await emitMatchEvent(
 			env,
@@ -92,15 +106,52 @@ const emitStage1Events = async (
 				intentId: intent.id,
 				version: intent.version,
 			},
-			{ delaySeconds: PIPELINE.REFLECTION_DELAYS_S[0] },
+			{ delaySeconds: PIPELINE.REFLECTION_DELAYS_S[0], discardOnSendFailure },
 			clock,
 		);
 	} catch (error) {
+		if (options.reflectionRequired) {
+			throw error;
+		}
 		logger.warn("pipeline.reflection.emit_failed", {
 			error_code: errorCodeOf(error, "REFLECTION_EMIT_FAILED"),
 			intent_id: intent.id,
 		});
 	}
+};
+
+/**
+ * 同versionの後続イベントのうち、すでに行がある(pending/processed=送れている)種別。
+ * 投入だけのやり直しで、送れている分を飛ばすのに使う
+ */
+const emittedStage1Events = async (
+	env: Env,
+	intent: IntentRow,
+): Promise<Set<"embedding_completed" | "vector_reflection">> => {
+	const rows = await drizzle(env.DB)
+		.select({ eventType: matchEvents.eventType })
+		.from(matchEvents)
+		.where(
+			and(
+				eq(matchEvents.sourceIntentId, intent.id),
+				eq(matchEvents.version, intent.version),
+				inArray(matchEvents.eventType, [
+					"embedding_completed",
+					"vector_reflection",
+				]),
+				inArray(matchEvents.status, ["pending", "processed"]),
+			),
+		);
+	const emitted = new Set<"embedding_completed" | "vector_reflection">();
+	for (const row of rows) {
+		if (
+			row.eventType === "embedding_completed" ||
+			row.eventType === "vector_reflection"
+		) {
+			emitted.add(row.eventType);
+		}
+	}
+	return emitted;
 };
 
 /**
@@ -159,8 +210,11 @@ export const runEmbeddingStage = async (
 			.set({ embeddingModel: embedder.modelId, embeddedAt: clock.now() })
 			.where(eq(intents.id, intent.id));
 		layer = "emit";
+		// キューの経路(embedding_completedを投入する)だけが、投入の失敗をretryで
+		// やり直せる。Cronの経路はvector_reflectionの失敗をログだけにする
 		await emitStage1Events(env, intent, clock, {
 			emitCompleted,
+			reflectionRequired: emitCompleted,
 			vector: values,
 		});
 		// count=upsertしたベクトル数(1Intent=1ベクトル・06 §7の層別観測)・
@@ -329,7 +383,8 @@ const consumeEvent = async (
 				],
 		};
 		// 投入だけの失敗の再配信: このイベントの後に同versionの埋め込みが書かれていれば、
-		// 埋め込み・upsertを繰り返さず投入だけをやり直す。ベクトルは保持していないため
+		// 埋め込み・upsertを繰り返さず、まだ送れていない後続イベントだけを投入する
+		// (行がある種別は送れているので飛ばす)。ベクトルは保持していないため
 		// embedding_completedはvector無しで送る(第2段はgetByIdsで読み、未反映なら
 		// 何もしない。取りこぼしは反映確認の評価し直しが拾う)
 		if (
@@ -338,7 +393,11 @@ const consumeEvent = async (
 			current.embeddedAt.getTime() >= event.createdAt.getTime()
 		) {
 			try {
-				await emitStage1Events(env, current, clock, { emitCompleted: true });
+				await emitStage1Events(env, current, clock, {
+					emitCompleted: true,
+					reflectionRequired: true,
+					skip: await emittedStage1Events(env, current),
+				});
 			} catch (error) {
 				logger.warn("pipeline.stage1.failed", {
 					error_code: errorCodeOf(error, "EMBEDDING_FAILED"),

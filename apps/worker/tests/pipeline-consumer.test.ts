@@ -653,6 +653,12 @@ describe("第1段の失敗(段ごとの扱い・#17)", () => {
 		expect(await memoryVectorStore().getByIds([intentId])).not.toEqual([null]);
 		expect(run).toHaveBeenCalledTimes(1);
 		expect(upsertSpy).toHaveBeenCalledTimes(1);
+		// 送れなかったembedding_completedの行は残さない(残すと再配信で送ったものと見分けられない)
+		expect(
+			(await eventsOf(intentId)).filter(
+				(e) => e.eventType === "embedding_completed",
+			),
+		).toEqual([]);
 
 		// 2回目の配信: 投入(embedding_completedとvector_reflection)だけを行う
 		send.mockClear();
@@ -675,6 +681,59 @@ describe("第1段の失敗(段ごとの扱い・#17)", () => {
 			[{ event_id: completed[0]?.id }],
 			[{ event_id: reflection[0]?.id }, { delaySeconds: 2 }],
 		]);
+		expect((await originOf(eventId))?.status).toBe("processed");
+	});
+
+	it("vector_reflectionの投入だけの失敗もretryし、再配信では送れていないvector_reflectionだけを投入する", async () => {
+		const { intentId, eventId } = await seedEvent();
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const { aiEnv, run } = fakeAiEnv({ fail: false });
+		// 1回目の配信: embedding_completedは送れ、vector_reflectionの送信だけが失敗する
+		const send = vi
+			.spyOn(testEnv.MATCH_QUEUE, "send")
+			.mockResolvedValueOnce(sendResponse())
+			.mockRejectedValueOnce(new Error("Queue send failed: 一時的な失敗"))
+			.mockResolvedValue(sendResponse());
+
+		const first = await runStage1(eventId, aiEnv, 1);
+
+		expect(first.retrySpy).toHaveBeenCalledWith({ delaySeconds: 10 });
+		expect((await originOf(eventId))?.status).toBe("pending");
+		const afterFirst = await eventsOf(intentId);
+		expect(
+			afterFirst.filter((e) => e.eventType === "embedding_completed"),
+		).toHaveLength(1);
+		expect(
+			afterFirst.filter((e) => e.eventType === "vector_reflection"),
+		).toEqual([]);
+
+		// 2回目の配信: vector_reflectionがまた失敗する → 30秒でretry(embedding_completedは送り直さない)
+		send.mockClear();
+		send.mockRejectedValueOnce(new Error("Queue send failed: 一時的な失敗"));
+		const second = await runStage1(eventId, aiEnv, 2);
+
+		expect(second.retrySpy).toHaveBeenCalledWith({ delaySeconds: 30 });
+		expect(send).toHaveBeenCalledTimes(1);
+		expect(send.mock.calls[0]?.[1]).toEqual({ delaySeconds: 2 });
+		expect((await originOf(eventId))?.status).toBe("pending");
+
+		// 3回目の配信: vector_reflectionだけを投入して終わる
+		send.mockClear();
+		const third = await runStage1(eventId, aiEnv, 3);
+
+		expect(third.result.retryMessages).toEqual([]);
+		const events = await eventsOf(intentId);
+		const reflection = events.filter(
+			(e) => e.eventType === "vector_reflection",
+		);
+		expect(reflection).toHaveLength(1);
+		expect(send.mock.calls).toEqual([
+			[{ event_id: reflection[0]?.id }, { delaySeconds: 2 }],
+		]);
+		expect(
+			events.filter((e) => e.eventType === "embedding_completed"),
+		).toHaveLength(1);
+		expect(run).toHaveBeenCalledTimes(1);
 		expect((await originOf(eventId))?.status).toBe("processed");
 	});
 

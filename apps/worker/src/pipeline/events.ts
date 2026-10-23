@@ -35,6 +35,12 @@ export interface EmitMatchEventOptions {
 	delaySeconds?: number;
 	/** 第1段が計算したベクトル(embedding_completedのメッセージへ載せる) */
 	vector?: number[];
+	/**
+	 * trueなら、新しく作った行の送信が失敗したときにその行を消してから例外を返す。
+	 * 第1段の投入のやり直しは「行がある=送れた」として送れていない分だけを投入するため、
+	 * 送れなかった行を残さない(消すのに失敗したら行は残り、pending残留の掃査がfailedにする)
+	 */
+	discardOnSendFailure?: boolean;
 }
 
 /**
@@ -123,5 +129,16 @@ export const emitMatchEvent = async (
 		}
 		return await sendToMatchQueue(env, existing.id, opts);
 	}
-	return await sendToMatchQueue(env, eventId, opts);
+	try {
+		return await sendToMatchQueue(env, eventId, opts);
+	} catch (error) {
+		if (opts?.discardOnSendFailure === true) {
+			try {
+				await db.delete(matchEvents).where(eq(matchEvents.id, eventId));
+			} catch {
+				// 消せなければ行は残る(送信の失敗のほうを呼び出し側へ返す)
+			}
+		}
+		throw error;
+	}
 };
