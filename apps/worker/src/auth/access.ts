@@ -54,6 +54,10 @@ const refreshKeys = async (
 			// 読めない鍵は無視する(該当kidの証明はinvalidになる)
 		}
 	}
+	// 空の鍵集合では既存の鍵を捨てない(一時的な異常で全kidが失効するのを避ける)
+	if (keys.size === 0) {
+		return keyCache.get(teamDomain) ?? keys;
+	}
 	keyCache.set(teamDomain, keys);
 	return keys;
 };
@@ -68,10 +72,15 @@ export const verifyAccessRequest = async (
 	if (token === null || token === "") {
 		return { ok: false, reason: "missing" };
 	}
-	const teamDomain = env.ACCESS_TEAM_DOMAIN;
 	const audience = env.ACCESS_AUD;
-	if (teamDomain === undefined || audience === undefined) {
-		// 設定欠落は到達させない(assertEnvSafetyが先に拒むが念のため)
+	// 入力ミス(前後の空白・末尾のスラッシュ)を正規化し、JWKSのURLとissの両方に使う
+	const teamDomain = env.ACCESS_TEAM_DOMAIN?.trim().replace(/\/+$/, "");
+	if (
+		teamDomain === undefined ||
+		audience === undefined ||
+		!teamDomain.startsWith("https://")
+	) {
+		// 設定の欠落・不正は到達させない(fail-closed。assertEnvSafetyが先に欠落を拒む)
 		return { ok: false, reason: "invalid" };
 	}
 	try {

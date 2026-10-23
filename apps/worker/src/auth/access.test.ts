@@ -120,6 +120,85 @@ describe("verifyAccessRequest", () => {
 	});
 });
 
+describe("verifyAccessRequest(設定の正規化・境界)", () => {
+	beforeEach(() => resetAccessKeyCacheForTest());
+
+	it("ACCESS_TEAM_DOMAINの末尾スラッシュ・空白があってもokでJWKSのURLは二重スラッシュにならない", async () => {
+		const key = await makeKey("k1");
+		const f = jwksFetch(key);
+		const e = {
+			ACCESS_AUD: AUD,
+			ACCESS_TEAM_DOMAIN: ` ${TEAM}// `,
+		} as unknown as Env;
+		expect(await verifyAccessRequest(req(await sign(key)), e, f)).toEqual({
+			ok: true,
+		});
+		expect(f).toHaveBeenCalledWith(`${TEAM}/cdn-cgi/access/certs`);
+	});
+
+	it("https://で始まらないチームのドメインは設定不正としてinvalid(fetchしない)", async () => {
+		const key = await makeKey("k1");
+		const f = jwksFetch(key);
+		const e = {
+			ACCESS_AUD: AUD,
+			ACCESS_TEAM_DOMAIN: "fake-team.cloudflareaccess.com",
+		} as unknown as Env;
+		expect(await verifyAccessRequest(req(await sign(key)), e, f)).toEqual({
+			ok: false,
+			reason: "invalid",
+		});
+		expect(f).not.toHaveBeenCalled();
+	});
+
+	it("ACCESS_*が欠けていればinvalid", async () => {
+		const key = await makeKey("k1");
+		const f = jwksFetch(key);
+		const token = await sign(key);
+		for (const e of [
+			{ ACCESS_AUD: AUD },
+			{ ACCESS_TEAM_DOMAIN: TEAM },
+		] as unknown as Env[]) {
+			expect(await verifyAccessRequest(req(token), e, f)).toEqual({
+				ok: false,
+				reason: "invalid",
+			});
+		}
+	});
+
+	it("kidの無いヘッダーはinvalid", async () => {
+		const key = await makeKey("k1");
+		const f = jwksFetch(key);
+		const token = await new SignJWT({})
+			.setProtectedHeader({ alg: "RS256" })
+			.setIssuer(TEAM)
+			.setAudience([AUD])
+			.setExpirationTime("5m")
+			.sign(key.privateKey);
+		expect(await verifyAccessRequest(req(token), env, f)).toEqual({
+			ok: false,
+			reason: "invalid",
+		});
+	});
+
+	it("取り直しが空の鍵集合でも既存の鍵を捨てない", async () => {
+		const k1 = await makeKey("k1");
+		const k9 = await makeKey("k9");
+		await verifyAccessRequest(req(await sign(k1)), env, jwksFetch(k1));
+		const empty = jwksFetch();
+		// 未知kidで取り直し→空→invalid
+		expect(await verifyAccessRequest(req(await sign(k9)), env, empty)).toEqual({
+			ok: false,
+			reason: "invalid",
+		});
+		// 既存のk1は再取得なしで通る
+		const f = jwksFetch();
+		expect(await verifyAccessRequest(req(await sign(k1)), env, f)).toEqual({
+			ok: true,
+		});
+		expect(f).not.toHaveBeenCalled();
+	});
+});
+
 describe("assertEnvSafety(staging)", () => {
 	const base = { LATCH_ENV: "staging" } as unknown as Env;
 	it("stagingでACCESS_*が欠けると例外", () => {
