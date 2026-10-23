@@ -3,6 +3,16 @@
 // 初期判定・通知・Candidate Retrievalは(b)(d)で測る項目のため、実行の印の利用者のうち
 // (b)(d)のsubject(`load-<runId>-b<連番>`・`load-<runId>-d<連番>`)だけに絞る。
 
+/**
+ * 反映確認の行のうち反映を確かめたもの(payload.skippedが無いかnot_evaluated)の条件。
+ * skippedはstatus=processedのまま記録される(not_found・stale_version・inactiveは反映を確かめていない)
+ */
+const REFLECTED_SKIP =
+	"(json_extract(me.payload, '$.skipped') IS NULL OR json_extract(me.payload, '$.skipped') = 'not_evaluated')";
+
+/** 反映確認のpayload.skippedのうち、反映を確かめた値(評価だけが抑制された) */
+const REFLECTED_SKIPPED_VALUE = "not_evaluated";
+
 /** 数(有限)ならその値、そうでなければnull */
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
@@ -20,10 +30,13 @@ export function buildQueries(runId) {
 		// 初期判定: 有効化のイベント行の作成時刻(起点)→そのIntentを含むLATCHの、
 		// そのIntentの利用者への提案の通知の最小のpush_attempted_at(提案が無ければnull)。
 		// 相手が先に反映済みかの振り分け(splitJudgeRows)のため、利用者のsubjectと、
-		// そのIntentの反映確認(processed)の最小のprocessed_atも取る
+		// そのIntentの反映確認の最小のprocessed_atも取る。反映確認のskipped(payload.skipped)の
+		// うち反映を確かめたのはnot_evaluated(評価が抑制された)だけで、not_found・stale_version・
+		// inactiveは反映を確かめずにprocessedになるため数えない
 		judge: [
 			"SELECT i.id AS intent_id, u.auth_subject AS auth_subject,",
-			"(SELECT min(me.processed_at) FROM match_events me WHERE me.source_intent_id = i.id AND me.event_type = 'vector_reflection' AND me.status = 'processed') AS reflected_at,",
+			"(SELECT min(me.processed_at) FROM match_events me WHERE me.source_intent_id = i.id AND me.event_type = 'vector_reflection' AND me.status = 'processed'",
+			`AND ${REFLECTED_SKIP}) AS reflected_at,`,
 			"(SELECT min(me.created_at) FROM match_events me WHERE me.source_intent_id = i.id AND me.event_type = 'intent_created') AS activated_at,",
 			"(SELECT min(n.push_attempted_at) FROM latches l JOIN json_each(l.intent_ids) j JOIN notifications n ON n.latch_id = l.id",
 			"WHERE j.value = i.id AND n.user_id = i.user_id AND n.type = 'proposal') AS push_attempted_at",
@@ -35,9 +48,10 @@ export function buildQueries(runId) {
 			"FROM notifications n JOIN users u ON u.id = n.user_id",
 			`WHERE n.type = 'proposal' AND ${subject}`,
 		].join(" "),
-		// Vectorizeの反映: vector_reflectionの行(意思のversionごとに1行)のstatusとpayloadのreflect_ms
+		// Vectorizeの反映: vector_reflectionの行(意思のversionごとに1行)のstatusとpayloadのreflect_ms・skipped
 		reflection: [
-			"SELECT me.status AS status, json_extract(me.payload, '$.reflect_ms') AS reflect_ms",
+			"SELECT me.status AS status, json_extract(me.payload, '$.reflect_ms') AS reflect_ms,",
+			"json_extract(me.payload, '$.skipped') AS skipped",
 			"FROM match_events me JOIN intents i ON i.id = me.source_intent_id JOIN users u ON u.id = i.user_id",
 			`WHERE me.event_type = 'vector_reflection' AND ${subject}`,
 		].join(" "),
@@ -140,15 +154,21 @@ export function splitJudgeRows(rows) {
 }
 
 /**
- * 反映の行の欠けの内訳。processedで値のある行は数えず、failed・skipped・それ以外(processedで値なしなど)を分ける
- * @param {Array<{ status: unknown, reflect_ms: unknown }>} rows
+ * 反映の行の欠けの内訳。processedで値のある行(not_evaluatedを含む)は数えず、failed・
+ * skipped(processedでpayload.skippedがnot_evaluated以外)・それ以外(processedで値なしなど)を分ける
+ * @param {Array<{ status: unknown, reflect_ms: unknown, skipped?: unknown }>} rows
  * @returns {{ skipped: number, failed: number, other: number }}
  */
 export function reflectionBreakdown(rows) {
 	const out = { skipped: 0, failed: 0, other: 0 };
 	for (const r of rows) {
 		if (r.status === "processed" && num(r.reflect_ms) !== null) continue;
-		if (r.status === "skipped") out.skipped += 1;
+		if (
+			r.status === "processed" &&
+			typeof r.skipped === "string" &&
+			r.skipped !== REFLECTED_SKIPPED_VALUE
+		)
+			out.skipped += 1;
 		else if (r.status === "failed") out.failed += 1;
 		else out.other += 1;
 	}
@@ -156,14 +176,22 @@ export function reflectionBreakdown(rows) {
 }
 
 /**
- * GET /v1/dev/match-eventsの項目に、反映確認(vector_reflection)のprocessedがあるか((b)の先に保存した側の反映待ち)
- * @param {Array<{ event_type?: unknown, status?: unknown }> | undefined} items
+ * GET /v1/dev/match-eventsの項目に、反映を確かめた反映確認(vector_reflectionのprocessedで、
+ * payload.skippedが無いかnot_evaluated)があるか((b)の先に保存した側の反映待ち)
+ * @param {Array<{ event_type?: unknown, status?: unknown, payload?: unknown }> | undefined} items
  */
 export function isReflected(items) {
 	return (
 		Array.isArray(items) &&
-		items.some(
-			(e) => e.event_type === "vector_reflection" && e.status === "processed",
-		)
+		items.some((e) => {
+			if (e.event_type !== "vector_reflection" || e.status !== "processed") {
+				return false;
+			}
+			const skipped =
+				e.payload !== null && typeof e.payload === "object"
+					? e.payload.skipped
+					: undefined;
+			return skipped == null || skipped === REFLECTED_SKIPPED_VALUE;
+		})
 	);
 }

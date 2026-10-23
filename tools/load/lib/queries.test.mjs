@@ -182,6 +182,40 @@ describe("初期判定の振り分け", () => {
 	});
 });
 
+describe("反映確認のskipped(payload.skipped)", () => {
+	it("judgeのreflected_atと反映のSQLは、payload.skippedを見てnot_evaluatedだけを反映済みとする", () => {
+		const { judge, reflection } = buildQueries("202610221200");
+		expect(judge).toContain(
+			"AND (json_extract(me.payload, '$.skipped') IS NULL OR json_extract(me.payload, '$.skipped') = 'not_evaluated')",
+		);
+		expect(reflection).toContain(
+			"json_extract(me.payload, '$.skipped') AS skipped",
+		);
+	});
+	it("内訳: processedでskipped(not_found・stale_version・inactive)の行をskippedに数え、not_evaluated(値あり)は反映済み", () => {
+		expect(
+			reflectionBreakdown([
+				{ status: "processed", reflect_ms: 5, skipped: "not_evaluated" },
+				{ status: "processed", reflect_ms: null, skipped: "not_found" },
+				{ status: "processed", reflect_ms: null, skipped: "stale_version" },
+				{ status: "processed", reflect_ms: null, skipped: "inactive" },
+				{ status: "processed", reflect_ms: null, skipped: null },
+			]),
+		).toEqual({ skipped: 3, failed: 0, other: 1 });
+	});
+	it("isReflected: processedでもskipped(not_evaluated以外)なら反映済みとしない", () => {
+		const item = (skipped) => ({
+			event_type: "vector_reflection",
+			status: "processed",
+			payload: skipped === undefined ? {} : { skipped, reflect_ms: 1 },
+		});
+		expect(isReflected([item("not_found")])).toBe(false);
+		expect(isReflected([item("stale_version"), item("inactive")])).toBe(false);
+		expect(isReflected([item("not_evaluated")])).toBe(true);
+		expect(isReflected([item(undefined)])).toBe(true);
+	});
+});
+
 describe("反映の欠けの内訳", () => {
 	it("processedで値の無い行はその他、failedとskippedを分けて数える", () => {
 		expect(
@@ -189,7 +223,7 @@ describe("反映の欠けの内訳", () => {
 				{ status: "processed", reflect_ms: 1 },
 				{ status: "failed", reflect_ms: null },
 				{ status: "failed", reflect_ms: null },
-				{ status: "skipped", reflect_ms: null },
+				{ status: "processed", reflect_ms: null, skipped: "not_found" },
 				{ status: "processed", reflect_ms: null },
 			]),
 		).toEqual({ skipped: 1, failed: 2, other: 1 });
