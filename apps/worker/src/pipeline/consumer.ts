@@ -6,9 +6,12 @@
  * 第2段は載せられたベクトルで自分を検索するため、upsertの反映待ちは不要。
  * 続けて反映確認のvector_reflection(同version・遅延付き)を投入し、反映後に
  * 1回だけ評価し直す(pipeline/reflection.ts・同時に預けた相手の取りこぼしを拾う)。
- * 消費は例外を外へ出さない(既定はack・反映確認の送り直しの失敗だけメッセージを
- * retryする)。失敗はイベント行のstatusで
- * 記録し、Embedding失敗は再試行せずCronのバックフィルが回収する(06 §5)。
+ * 消費は例外を外へ出さない(既定はack)。第1段の失敗(埋め込み・upsert・embedded_atの
+ * 更新・投入)と反映確認の送り直しの失敗だけ、受け取ったメッセージを遅延付きでretryする。
+ * 第1段の失敗は起点の行をpendingのまま残し、STAGE1_RETRY_DELAYS_S(10秒・30秒・60秒)で
+ * やり直す。max_retriesを超えたものはDLQでdeadになり、Cronのバックフィル(e)が回収する
+ * (06 §5・不具合の修正工程(第2回)の設計 §4)。投入だけの失敗の再配信は、埋め込み・
+ * upsertを繰り返さず投入だけをやり直す。
  * embedding_completedの消費(第2段)はevaluateIntent(pipeline/evaluate.ts)へ
  * 委譲し、戻り値の計測結果を起点イベントのpayloadへ記録する(06 §7)。
  */
@@ -41,17 +44,73 @@ export type IntentRow = typeof intents.$inferSelect;
  */
 export type ConsumeOutcome = { retryDelaySeconds: number } | undefined;
 
-/** 第1段の本体の結果。failed=Embedding系の失敗(再試行なし・06 §5) */
-export type EmbeddingStageResult = "embedded" | "failed";
+/** 第1段の段(埋め込み・upsert・embedded_atの更新・後続イベントの投入) */
+export type EmbeddingStageLayer = "embed" | "upsert" | "d1" | "emit";
+
+/**
+ * 第1段の本体の結果。embedded=計算したベクトル(直後の評価に渡す)・
+ * failed=失敗した段(呼び出し側がやり直し方を決める・設計 §4)
+ */
+export type EmbeddingStageResult =
+	| { status: "embedded"; vector: number[] }
+	| { status: "failed"; layer: EmbeddingStageLayer };
+
+/**
+ * 第1段の後続イベントを投入する。embedding_completed(emitCompleted=trueのとき・同version・
+ * 即時。vectorがあればメッセージに載せる)→vector_reflection(同version・遅延付き)の順。
+ * embedding_completedの投入の失敗は例外のまま返す(呼び出し側がemitの段の失敗として
+ * やり直す)。vector_reflectionの投入の失敗はログだけにする(Cronの(h)が拾う)。
+ * どちらもUNIQUE(event_type, source_intent_id, version)で冪等なので、やり直しで行は増えない
+ */
+const emitStage1Events = async (
+	env: Env,
+	intent: IntentRow,
+	clock: Clock,
+	options: { emitCompleted: boolean; vector?: number[] },
+): Promise<void> => {
+	// 第2段への再投入(同version・即時・docs/06 §2)
+	if (options.emitCompleted) {
+		await emitMatchEvent(
+			env,
+			{
+				eventType: "embedding_completed",
+				intentId: intent.id,
+				version: intent.version,
+			},
+			options.vector === undefined ? undefined : { vector: options.vector },
+			clock,
+		);
+	}
+	// 反映確認(同version・遅延付き・不具合の修正工程の設計 §2.1の4)。
+	// emitCompleted=false(Cronのバックフィル)でも投入し、同時投入の取りこぼしを拾う。
+	// 投入の失敗はログだけにして第1段の結果をfailedにしない(Cronの(h)が拾う)
+	try {
+		await emitMatchEvent(
+			env,
+			{
+				eventType: "vector_reflection",
+				intentId: intent.id,
+				version: intent.version,
+			},
+			{ delaySeconds: PIPELINE.REFLECTION_DELAYS_S[0] },
+			clock,
+		);
+	} catch (error) {
+		logger.warn("pipeline.reflection.emit_failed", {
+			error_code: errorCodeOf(error, "REFLECTION_EMIT_FAILED"),
+			intent_id: intent.id,
+		});
+	}
+};
 
 /**
  * 第1段の本体(docs/06 §2)。埋め込み→VectorStoreへのupsert(反映は待たない)→
  * intents.embedding_model/embedded_atの更新→embedding_completedイベント(vector付き)の投入
  * (同version・即時)→vector_reflectionの投入(同version・遅延付き)までを行い、
- * 成功("embedded")/失敗("failed")を返す。
- * 失敗(throw/timeout)は再試行せず、呼び出し側が起点イベントをfailedへ倒す
- * (06 §5: 再試行なし・Cronのバックフィルが回収)。Cronのバックフィル
- * (docs/12 Task 12(e))からも再利用するためexportする。
+ * 成功(計算したベクトル付き)/失敗(失敗した段付き)を返す。例外は外へ出さない。
+ * 失敗の扱いは呼び出し側が決める(キューはメッセージのretry・設計 §4)。Cronのバックフィル
+ * (docs/12 Task 12(e))からも再利用するためexportし、バックフィルは返ったベクトルで
+ * 直後に評価する(本人のベクトルの反映を待たない・#22)。
  * options.emitCompleted=false はembedding_completedを投入しない(既定true)。
  * Cronのバックフィルは直後にevaluateIntentを直接呼ぶため、投入すると二重評価になる
  * (docs/06 §2「Cronからは新たな起点イベントを発行しない」)。
@@ -71,7 +130,7 @@ export const runEmbeddingStage = async (
 	const source = options.source ?? "queue";
 	const startedAt = clock.now().getTime();
 	// いま実行中の段(embed/upsert/d1/emit)。失敗ログのlayerに載せて失敗した段を見分ける
-	let layer: "embed" | "upsert" | "d1" | "emit" = "embed";
+	let layer: EmbeddingStageLayer = "embed";
 	try {
 		const embedder = createEmbedder(env);
 		const values = await embedder.embed(buildNormalizedText(intent));
@@ -99,40 +158,11 @@ export const runEmbeddingStage = async (
 			.update(intents)
 			.set({ embeddingModel: embedder.modelId, embeddedAt: clock.now() })
 			.where(eq(intents.id, intent.id));
-		// 第2段への再投入(同version・即時・docs/06 §2)
 		layer = "emit";
-		if (emitCompleted) {
-			await emitMatchEvent(
-				env,
-				{
-					eventType: "embedding_completed",
-					intentId: intent.id,
-					version: intent.version,
-				},
-				{ vector: values },
-				clock,
-			);
-		}
-		// 反映確認(同version・遅延付き・不具合の修正工程の設計 §2.1の4)。
-		// emitCompleted=false(Cronのバックフィル)でも投入し、同時投入の取りこぼしを拾う。
-		// 投入の失敗はログだけにして第1段の結果をfailedにしない(Cronの(h)が拾う)
-		try {
-			await emitMatchEvent(
-				env,
-				{
-					eventType: "vector_reflection",
-					intentId: intent.id,
-					version: intent.version,
-				},
-				{ delaySeconds: PIPELINE.REFLECTION_DELAYS_S[0] },
-				clock,
-			);
-		} catch (error) {
-			logger.warn("pipeline.reflection.emit_failed", {
-				error_code: errorCodeOf(error, "REFLECTION_EMIT_FAILED"),
-				intent_id: intent.id,
-			});
-		}
+		await emitStage1Events(env, intent, clock, {
+			emitCompleted,
+			vector: values,
+		});
 		// count=upsertしたベクトル数(1Intent=1ベクトル・06 §7の層別観測)・
 		// layer=第1段を呼んだ経路(queue/backfill/repair)
 		logger.info("pipeline.stage1.completed", {
@@ -141,14 +171,14 @@ export const runEmbeddingStage = async (
 			layer: source,
 			latency: clock.now().getTime() - startedAt,
 		});
-		return "embedded";
+		return { status: "embedded", vector: values };
 	} catch (error) {
 		logger.warn("pipeline.stage1.failed", {
 			error_code: errorCodeOf(error, "EMBEDDING_FAILED"),
 			intent_id: intent.id,
 			layer,
 		});
-		return "failed";
+		return { status: "failed", layer };
 	}
 };
 
@@ -172,7 +202,7 @@ const markProcessed = async (
 		.where(eq(matchEvents.id, eventId));
 };
 
-/** 起点イベントをfailedへ倒す(Embedding失敗・再試行なし・06 §5)。processedAtは記録しない */
+/** 起点イベントをfailedへ倒す(第2段の評価の失敗・06 §5)。processedAtは記録しない */
 const markFailed = async (env: Env, eventId: string): Promise<void> => {
 	await drizzle(env.DB)
 		.update(matchEvents)
@@ -184,14 +214,16 @@ const markFailed = async (env: Env, eventId: string): Promise<void> => {
  * 通常キューの1メッセージを処理する(docs/06 §2の処理枝)。
  * 失敗はD1のイベント行statusで記録し、ここでは例外を握って呼び出し側へは
  * 正常復帰する(ackが原則・06 §5)。やり直すべき一時的な失敗だけを
- * { retryDelaySeconds }で返す(反映確認の送り直しの失敗・#23)
+ * { retryDelaySeconds }で返す(第1段の失敗・#17、反映確認の送り直しの失敗・#23)。
+ * attemptsはこのメッセージの配信の回数(1始まり)で、第1段の遅延の選択に使う
  */
 const consumeEvent = async (
 	env: Env,
 	eventId: string,
 	clock: Clock,
-	vector?: number[],
+	message: { vector?: number[]; attempts: number },
 ): Promise<ConsumeOutcome> => {
+	const { vector, attempts } = message;
 	const db = drizzle(env.DB);
 	// イベント行の取得。無ければ何もせずack(送信だけが先行したメッセージ・Task 6引継ぎ)
 	const [event] = await db
@@ -285,11 +317,42 @@ const consumeEvent = async (
 			await markProcessed(env, event.id, clock);
 			return;
 		}
-		const result = await runEmbeddingStage(env, current, clock);
-		if (result === "failed") {
-			// Embedding失敗は再試行しない(06 §5)。Cronのバックフィルが回収する
-			await markFailed(env, event.id);
+		// 第1段の失敗のやり直し(設計 §4)。起点の行はpendingのまま残し、配信の回数に
+		// 応じた遅延でretryする(max_retriesを超えたらDLQでdead→Cronのバックフィル(e))
+		const retry = {
+			retryDelaySeconds:
+				PIPELINE.STAGE1_RETRY_DELAYS_S[
+					Math.min(
+						Math.max(attempts, 1) - 1,
+						PIPELINE.STAGE1_RETRY_DELAYS_S.length - 1,
+					)
+				],
+		};
+		// 投入だけの失敗の再配信: このイベントの後に同versionの埋め込みが書かれていれば、
+		// 埋め込み・upsertを繰り返さず投入だけをやり直す。ベクトルは保持していないため
+		// embedding_completedはvector無しで送る(第2段はgetByIdsで読み、未反映なら
+		// 何もしない。取りこぼしは反映確認の評価し直しが拾う)
+		if (
+			current.version === event.version &&
+			current.embeddedAt !== null &&
+			current.embeddedAt.getTime() >= event.createdAt.getTime()
+		) {
+			try {
+				await emitStage1Events(env, current, clock, { emitCompleted: true });
+			} catch (error) {
+				logger.warn("pipeline.stage1.failed", {
+					error_code: errorCodeOf(error, "EMBEDDING_FAILED"),
+					intent_id: current.id,
+					layer: "emit",
+				});
+				return retry;
+			}
+			await markProcessed(env, event.id, clock);
 			return;
+		}
+		const result = await runEmbeddingStage(env, current, clock);
+		if (result.status === "failed") {
+			return retry;
 		}
 		await markProcessed(env, event.id, clock);
 		return;
@@ -321,7 +384,10 @@ const handleMainQueueBatch = async (
 				body.vector.every((v) => typeof v === "number")
 					? body.vector
 					: undefined;
-			const outcome = await consumeEvent(env, eventId, clock, vector);
+			const outcome = await consumeEvent(env, eventId, clock, {
+				vector,
+				attempts: message.attempts,
+			});
 			if (outcome !== undefined) {
 				message.retry({ delaySeconds: outcome.retryDelaySeconds });
 			}

@@ -3,7 +3,8 @@
  * LATCH_EMBEDDING_MODE=stub|real。EmbeddingだけはF3でreal(Workers AI bge-m3)へ
  * 接続できるため、Parser/JevのLATCH_LLM_MODEとは独立に切り替える。
  * 既定stubで、未設定・不正値もstubに倒す(resolveLlmModeと同じ規則・07 §2)。
- * realはtimeout 5秒・再試行なし(07 §4)。失敗は06 §5のバックフィルで回収する。
+ * realはtimeout 5秒・呼び出しの中では再試行しない(07 §4)。失敗はキューのメッセージの
+ * retry(10秒・30秒・60秒)でやり直し、使い切ったものは06 §5のバックフィルで回収する。
  */
 import {
 	EMBEDDING_MODEL_REAL,

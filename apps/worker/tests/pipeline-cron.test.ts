@@ -11,10 +11,12 @@
 
 import {
 	createExecutionContext,
+	createMessageBatch,
 	createScheduledController,
 	env,
+	getQueueResult,
 } from "cloudflare:test";
-import { LATCH, LIMITS, PIPELINE } from "@latch/shared";
+import { LATCH, LIMITS, type MatchQueueMessage, PIPELINE } from "@latch/shared";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
@@ -39,6 +41,7 @@ import type { Env as WorkerEnv } from "../src/env";
 import worker from "../src/index";
 import { MS_PER_DAY } from "../src/intents/expiry";
 import { stubEmbedding } from "../src/llm/stub/embedding";
+import { handleQueueBatch } from "../src/pipeline/consumer";
 import {
 	intentExpiredInsert,
 	runPushSweep,
@@ -46,6 +49,7 @@ import {
 } from "../src/pipeline/cron";
 import { buildNormalizedText } from "../src/pipeline/normalize";
 import {
+	holdMemoryVectorWrites,
 	memoryVectorStore,
 	resetMemoryVectorStore,
 	setMemoryVectorLimits,
@@ -1280,10 +1284,125 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 		]);
 	});
 
+	it("バックフィル(#22): 反映の遅れる下でも、埋め込み直後の評価で提案を作り、backfilledに数える", async () => {
+		const ua = ulid();
+		const ub = ulid();
+		await insertUserRow(ua);
+		await insertUserRow(ub);
+		const partner = intentFixture({
+			id: ulid(),
+			userId: ua,
+			embeddingModel: "stub-sha256-v1",
+			embeddedAt: new Date(BASE - 1 * MIN),
+			lastEvaluatedAt: new Date(BASE - 1 * MIN),
+		});
+		await insertIntentRow(partner);
+		await upsertVector(partner);
+		const target = intentFixture({
+			id: ulid(),
+			userId: ub,
+			updatedAt: new Date(BASE - 6 * MIN),
+		});
+		await insertIntentRow(target);
+		holdMemoryVectorWrites();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		const row = await rowOf(target.id);
+		expect(row?.embeddedAt).toEqual(FIXED_NOW);
+		expect(row?.lastEvaluatedAt).toEqual(FIXED_NOW);
+		// 本人のベクトルはまだ見えない(保留中)のに、相手との提案ができている
+		expect(await vectorOf(target.id)).toBeNull();
+		const members = await db
+			.select()
+			.from(latchMembers)
+			.where(eq(latchMembers.userId, ub));
+		expect(members).toHaveLength(1);
+		expect(logsOf(logSpy, "cron.backfilled")).toEqual([
+			{ level: "info", event: "cron.backfilled", count: 1 },
+		]);
+	});
+
+	it("バックフィル(#22): 評価がnull(30分の抑制中)ならbackfilledに数えない", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const target = intentFixture({
+			id: ulid(),
+			userId,
+			updatedAt: new Date(BASE - 6 * MIN),
+			lastEvaluatedAt: new Date(BASE - 1 * MIN),
+		});
+		await insertIntentRow(target);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		// 埋め込みはできたが、評価は抑制で何もしない
+		expect((await rowOf(target.id))?.embeddedAt).toEqual(FIXED_NOW);
+		expect(logsOf(logSpy, "cron.backfilled")).toEqual([]);
+	});
+
+	it("第1段の再試行を使い切った意思(#17): DLQでdeadになり、5分後のバックフィルが拾って評価する", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const target = intentFixture({ id: ulid(), userId });
+		await insertIntentRow(target);
+		const eventId = ulid();
+		await db.insert(matchEvents).values({
+			id: eventId,
+			eventType: "intent_created",
+			sourceIntentId: target.id,
+			version: 1,
+			payload: {},
+			status: "pending",
+			createdAt: FIXED_NOW,
+		});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const batchOf = (queue: string) =>
+			createMessageBatch<MatchQueueMessage>(queue, [
+				{
+					id: "msg-0",
+					timestamp: FIXED_NOW,
+					attempts: 4,
+					body: { event_id: eventId },
+				},
+			]);
+		// 最後の配信(attempts=4)でもupsertが失敗する。起点はpendingのままretry
+		const upsertSpy = vi
+			.spyOn(memoryVectorStore(), "upsert")
+			.mockRejectedValue(new Error("VECTOR_UPSERT_ERROR (code = 40012): x"));
+		const main = batchOf("match-events");
+		const mainCtx = createExecutionContext();
+		await handleQueueBatch(main, testEnv, mainCtx, directClock);
+		expect((await getQueueResult(main, mainCtx)).retryMessages).toEqual([
+			{ msgId: "msg-0" },
+		]);
+		// max_retriesを超えたメッセージはDLQへ移り、起点の行はdeadになる
+		const dlq = batchOf("match-events-dlq");
+		const dlqCtx = createExecutionContext();
+		await handleQueueBatch(dlq, testEnv, dlqCtx, directClock);
+		const [origin] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, eventId));
+		expect(origin?.status).toBe("dead");
+		upsertSpy.mockRestore();
+
+		// 5分後のCronのバックフィル(e)が埋め込みと評価を行う
+		const later = new Date(BASE + PIPELINE.BACKFILL_GRACE_MS);
+		await runScheduledPipeline(testEnv, fixedClock(later));
+
+		const row = await rowOf(target.id);
+		expect(row?.embeddedAt).toEqual(later);
+		expect(row?.lastEvaluatedAt).toEqual(later);
+		expect(await vectorOf(target.id)).not.toBeNull();
+	});
+
 	it("バックフィル: Embeddingが連続5件失敗したら当回の走査を打ち切る", async () => {
 		await insertBackfillTargets(10);
 		// stub Embeddingは失敗しないため、第1段のVectorStore.upsert(memory storeの
-		// シングルトン)を失敗させる。runEmbeddingStageは例外を握って"failed"を返す
+		// シングルトン)を失敗させる。runEmbeddingStageは例外を握ってfailed(layer=upsert)を返す
 		const upsertSpy = vi
 			.spyOn(memoryVectorStore(), "upsert")
 			.mockRejectedValue(new Error("UPSERT_FAILED: 試験用の失敗"));
@@ -1410,20 +1529,31 @@ describe("F7b: Intent期限切れのアプリ内通知とPushの回収(F7b設計
 		expect(after).toHaveLength(1);
 	});
 
-	it("Cronのバックフィルの評価で作られた提案の通知は、同じ実行の中で送信を試みる", async () => {
+	it("Cronのバックフィルの評価で作られた提案の通知は、反映の遅れる下でも同じ実行の中で送信を試みる(#9・#22)", async () => {
 		const ua = ulid();
 		const ub = ulid();
 		await insertUserRow(ua);
 		await insertUserRow(ub);
-		for (const userId of [ua, ub]) {
-			await insertIntentRow(
-				intentFixture({
-					id: ulid(),
-					userId,
-					updatedAt: new Date(BASE - 6 * MIN),
-				}),
-			);
-		}
+		// 相手: 埋め込み・反映・評価が済んだ意思(ベクトルは保留の前に書く)
+		const partner = intentFixture({
+			id: ulid(),
+			userId: ua,
+			embeddingModel: "stub-sha256-v1",
+			embeddedAt: new Date(BASE - 1 * MIN),
+			lastEvaluatedAt: new Date(BASE - 1 * MIN),
+		});
+		await insertIntentRow(partner);
+		await upsertVector(partner);
+		// 本人: 埋め込みが済んでいない意思(バックフィルの対象)
+		await insertIntentRow(
+			intentFixture({
+				id: ulid(),
+				userId: ub,
+				updatedAt: new Date(BASE - 6 * MIN),
+			}),
+		);
+		// 以降の書き込みは評価から見えない(Vectorizeの反映の遅れ)
+		holdMemoryVectorWrites();
 
 		await runScheduledPipeline(testEnv, directClock);
 

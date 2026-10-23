@@ -404,12 +404,11 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
 					continue;
 				}
 				try {
-					if (
-						(await runEmbeddingStage(env, row, clock, {
-							emitCompleted: false,
-							source: "repair",
-						})) === "embedded"
-					) {
+					const stage = await runEmbeddingStage(env, row, clock, {
+						emitCompleted: false,
+						source: "repair",
+					});
+					if (stage.status === "embedded") {
 						recovered += 1;
 					}
 				} catch (error) {
@@ -442,8 +441,10 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
  * (e) 埋め込みバックフィル(docs/06 §2(e))。active・埋め込み未完了で生成(更新)から
  * 5分(BACKFILL_GRACE_MS・ちょうどを含む)経過したIntentへ第1段(runEmbeddingStage:
  * 埋め込み→upsert→intents更新→反映確認の投入)を直接実行し、成功時のみ続けて評価する。
+ * 評価には第1段が返したベクトルを渡し、本人のベクトルの反映を待たない(#22)。評価が
+ * null(抑制・対象外)のときはbackfilledに数えない。
  * 直後に評価するためembedding_completedは投入しない(emitCompleted:false。投入すると
- * キュー経由の評価と二重になる)。失敗は再試行せず次のCronで回収する(docs/06 §5)。
+ * キュー経由の評価と二重になる)。当回の失敗はやり直さず次のCronで回収する(docs/06 §5)。
  * Embeddingの失敗が連続BACKFILL_FAILURE_ABORT(5)件に達したら当回の走査を打ち切る
  * (障害中に500件を空振りしない・docs/06 §4)。成功を挟めば連続数は0に戻る。
  */
@@ -470,7 +471,7 @@ const runBackfillSweep = async (env: Env, clock: Clock): Promise<void> => {
 				emitCompleted: false,
 				source: "backfill",
 			});
-			if (stage !== "embedded") {
+			if (stage.status !== "embedded") {
 				failed += 1;
 				consecutiveFailures += 1;
 				if (consecutiveFailures >= LATCH.BACKFILL_FAILURE_ABORT) {
@@ -481,8 +482,13 @@ const runBackfillSweep = async (env: Env, clock: Clock): Promise<void> => {
 				continue;
 			}
 			consecutiveFailures = 0;
-			await evaluateIntent(env, row.id, clock, { origin: "cron_backfill" });
-			backfilled += 1;
+			const evaluated = await evaluateIntent(env, row.id, clock, {
+				vector: stage.vector,
+				origin: "cron_backfill",
+			});
+			if (evaluated !== null) {
+				backfilled += 1;
+			}
 		} catch (error) {
 			logger.warn("cron.item.failed", {
 				intent_id: row.id,

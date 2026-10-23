@@ -6,7 +6,7 @@
  *   反映確認 → intents.embedding_model/embedded_at更新 → embedding_completed投入
  *   (同version・即時)→ 起点イベントprocessed
  * - 冪等(processed再消費スキップ)・stale_version破棄・非activeスキップ・
- *   Embedding失敗(status=failed・再試行なし・バッチはack)・DLQのdead反映
+ *   第1段の失敗(段ごとにpendingのままretry・投入だけの失敗は投入だけをやり直す・#17)・DLQのdead反映
  * 時刻はfixedClockで固定。ベクトル格納先はlocalのインメモリ実装
  * (wrangler varsのLATCH_ENV=local・vectorstore/index.ts)。
  * 消費対象の行はusers/intents/match_eventsを直接投入して作る
@@ -466,39 +466,233 @@ describe("冪等とスキップ条件(docs/06 §2)", () => {
 	});
 });
 
-describe("Embedding失敗(docs/06 §5: 再試行なし・バックフィル回収)", () => {
-	it("createEmbedderの構築失敗(real+AI無し)で起点イベントはfailed・バッチはack", async () => {
+/**
+ * 第1段の1メッセージを指定のattempts(配信の回数)で消費し、結果とretryの呼び出しを返す
+ * (retryの遅延秒はgetQueueResultに載らないため、メッセージのretryを見張る)
+ */
+const runStage1 = async (
+	eventId: string,
+	targetEnv: WorkerEnv = testEnv,
+	attempts = 1,
+) => {
+	const batch = createMessageBatch<MatchQueueMessage>("match-events", [
+		{
+			id: "msg-0",
+			timestamp: clock.now(),
+			attempts,
+			body: { event_id: eventId },
+		},
+	]);
+	const [message] = batch.messages;
+	const retrySpy = vi.spyOn(message as Message<MatchQueueMessage>, "retry");
+	const ctx = createExecutionContext();
+	await handleQueueBatch(batch, targetEnv, ctx, clock);
+	return { result: await getQueueResult(batch, ctx), retrySpy };
+};
+
+/**
+ * Workers AIの代わり(LATCH_EMBEDDING_MODE=real)。呼び出しを数え、
+ * failがtrueの間は例外にする(Embeddingの段の失敗の再現)
+ */
+const fakeAiEnv = (state: { fail: boolean }) => {
+	const run = vi.fn(async (_model: string, input: { text: string[] }) => {
+		if (state.fail) {
+			throw new Error("AiError: 3040: Capacity temporarily exceeded");
+		}
+		return { data: [await stubEmbedding(input.text[0] ?? "")] };
+	});
+	const aiEnv = {
+		...testEnv,
+		LATCH_EMBEDDING_MODE: "real",
+		AI: { run },
+	} as unknown as WorkerEnv;
+	return { aiEnv, run };
+};
+
+/** SQLの先頭がprefixに一致する問い合わせだけを例外にするD1(他はそのまま通す) */
+const failingDb = (prefix: string): D1Database =>
+	new Proxy(testEnv.DB, {
+		get(target, prop) {
+			if (prop === "prepare") {
+				return (sql: string) => {
+					if (sql.startsWith(prefix)) {
+						throw new Error("D1_ERROR: 試験用の書き込みの失敗");
+					}
+					return target.prepare(sql);
+				};
+			}
+			const value = Reflect.get(target, prop);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+
+/** 起点のイベント行 */
+const originOf = async (eventId: string) => {
+	const [origin] = await db
+		.select()
+		.from(matchEvents)
+		.where(eq(matchEvents.id, eventId));
+	return origin;
+};
+
+describe("第1段の失敗(段ごとの扱い・#17)", () => {
+	it("Embeddingの例外: 起点はpendingのまま、配信の回数に応じて10秒・30秒・60秒でretryする", async () => {
 		const { intentId, eventId } = await seedEvent();
-		// LATCH_EMBEDDING_MODE=real+AIバインディング無しのenvを部分上書きで構築
-		// (createEmbedderが構築時にthrowする状態・llm/embedding.ts)
+		spySend();
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const { aiEnv, run } = fakeAiEnv({ fail: true });
+
+		for (const [attempts, delaySeconds] of [
+			[1, 10],
+			[2, 30],
+			[3, 60],
+			[4, 60],
+		] as const) {
+			const { result, retrySpy } = await runStage1(eventId, aiEnv, attempts);
+			expect(result.retryMessages).toEqual([{ msgId: "msg-0" }]);
+			expect(retrySpy).toHaveBeenCalledWith({ delaySeconds });
+		}
+		expect(run).toHaveBeenCalledTimes(4);
+
+		// 起点はpendingのまま(failedにしない・processedAtも無い)
+		const origin = await originOf(eventId);
+		expect(origin?.status).toBe("pending");
+		expect(origin?.processedAt).toBeNull();
+		// intentsは未登録のまま・ベクトルも後続のイベントも無い
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		expect(row.embeddedAt).toBeNull();
+		expect(await memoryVectorStore().getByIds([intentId])).toEqual([null]);
+		expect((await eventsOf(intentId)).length).toBe(1);
+	});
+
+	it("createEmbedderの構築失敗(real+AI無し)も、起点はpendingのままretryする", async () => {
+		const { eventId } = await seedEvent();
+		vi.spyOn(console, "log").mockImplementation(() => {});
 		const brokenEnv = {
 			...testEnv,
 			LATCH_EMBEDDING_MODE: "real",
 			AI: undefined,
 		} as unknown as WorkerEnv;
 
-		const result = await runBatch("match-events", [eventId], brokenEnv);
+		const { result, retrySpy } = await runStage1(eventId, brokenEnv);
 
-		// 失敗でも再試行させずack(06 §5: Embedding失敗は再試行なし・Cronのバックフィルで回収)
-		expectAcked(result);
+		expect(result.retryMessages).toEqual([{ msgId: "msg-0" }]);
+		expect(retrySpy).toHaveBeenCalledWith({ delaySeconds: 10 });
+		expect((await originOf(eventId))?.status).toBe("pending");
+	});
 
-		// 起点イベントはfailed(processedAtは記録しない)
-		const [origin] = await db
-			.select()
-			.from(matchEvents)
-			.where(eq(matchEvents.id, eventId));
-		expect(origin?.status).toBe("failed");
-		expect(origin?.processedAt).toBeNull();
+	it("upsertの例外: 起点はpendingのままretryし、embedded_atを書かない", async () => {
+		const { intentId, eventId } = await seedEvent();
+		spySend();
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		vi.spyOn(memoryVectorStore(), "upsert").mockRejectedValue(
+			new Error("VECTOR_UPSERT_ERROR (code = 40012): x"),
+		);
 
-		// intentsは未登録のまま・ベクトルもembedding_completedも無い
+		const { result, retrySpy } = await runStage1(eventId, testEnv, 2);
+
+		expect(result.retryMessages).toEqual([{ msgId: "msg-0" }]);
+		expect(retrySpy).toHaveBeenCalledWith({ delaySeconds: 30 });
+		expect((await originOf(eventId))?.status).toBe("pending");
 		const [row] = await db
 			.select()
 			.from(intents)
 			.where(eq(intents.id, intentId));
-		expect(row.embeddingModel).toBeNull();
 		expect(row.embeddedAt).toBeNull();
-		expect(await memoryVectorStore().getByIds([intentId])).toEqual([null]);
 		expect((await eventsOf(intentId)).length).toBe(1);
+	});
+
+	it("embedded_atの更新の例外: 起点はpendingのままretryし、後続のイベントを投入しない", async () => {
+		const { intentId, eventId } = await seedEvent();
+		const send = spySend();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const brokenEnv = {
+			...testEnv,
+			DB: failingDb('update "intents" set "embedding_model"'),
+		} as unknown as WorkerEnv;
+
+		const { result, retrySpy } = await runStage1(eventId, brokenEnv, 3);
+
+		expect(result.retryMessages).toEqual([{ msgId: "msg-0" }]);
+		expect(retrySpy).toHaveBeenCalledWith({ delaySeconds: 60 });
+		expect((await originOf(eventId))?.status).toBe("pending");
+		expect(send).not.toHaveBeenCalled();
+		expect(logsOf(logSpy, "pipeline.stage1.failed")[0]?.layer).toBe("d1");
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		expect(row.embeddedAt).toBeNull();
+	});
+
+	it("投入だけの失敗: ベクトルとembedded_atは書かれてretryし、再配信では埋め込み・upsertをせず投入だけをやり直す", async () => {
+		const { intentId, eventId } = await seedEvent();
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const state = { fail: false };
+		const { aiEnv, run } = fakeAiEnv(state);
+		// 1回目の配信: embedding_completedの送信だけが失敗する
+		const send = vi
+			.spyOn(testEnv.MATCH_QUEUE, "send")
+			.mockRejectedValueOnce(new Error("Queue send failed: 一時的な失敗"))
+			.mockResolvedValue(sendResponse());
+		const upsertSpy = vi.spyOn(memoryVectorStore(), "upsert");
+
+		const first = await runStage1(eventId, aiEnv, 1);
+
+		expect(first.result.retryMessages).toEqual([{ msgId: "msg-0" }]);
+		expect(first.retrySpy).toHaveBeenCalledWith({ delaySeconds: 10 });
+		expect((await originOf(eventId))?.status).toBe("pending");
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		expect(row.embeddedAt?.getTime()).toBe(clock.now().getTime());
+		expect(await memoryVectorStore().getByIds([intentId])).not.toEqual([null]);
+		expect(run).toHaveBeenCalledTimes(1);
+		expect(upsertSpy).toHaveBeenCalledTimes(1);
+
+		// 2回目の配信: 投入(embedding_completedとvector_reflection)だけを行う
+		send.mockClear();
+		const second = await runStage1(eventId, aiEnv, 2);
+
+		expect(second.result.retryMessages).toEqual([]);
+		expect(run).toHaveBeenCalledTimes(1);
+		expect(upsertSpy).toHaveBeenCalledTimes(1);
+		const events = await eventsOf(intentId);
+		const completed = events.filter(
+			(e) => e.eventType === "embedding_completed",
+		);
+		const reflection = events.filter(
+			(e) => e.eventType === "vector_reflection",
+		);
+		expect(completed).toHaveLength(1);
+		expect(reflection).toHaveLength(1);
+		// ベクトルは保持していないため、embedding_completedはvector無しで送る
+		expect(send.mock.calls).toEqual([
+			[{ event_id: completed[0]?.id }],
+			[{ event_id: reflection[0]?.id }, { delaySeconds: 2 }],
+		]);
+		expect((await originOf(eventId))?.status).toBe("processed");
+	});
+
+	it("投入の再配信の判定: embedded_atが起点の行より前(古い埋め込み)なら埋め込み直す", async () => {
+		const { intentId, eventId } = await seedEvent();
+		spySend();
+		const { aiEnv, run } = fakeAiEnv({ fail: false });
+		// 起点の行より前の埋め込み(更新前のversionのもの等)
+		await db
+			.update(intents)
+			.set({ embeddedAt: new Date(clock.now().getTime() - 1_000) })
+			.where(eq(intents.id, intentId));
+
+		const { result } = await runStage1(eventId, aiEnv);
+
+		expect(result.retryMessages).toEqual([]);
+		expect(run).toHaveBeenCalledTimes(1);
+		expect((await originOf(eventId))?.status).toBe("processed");
 	});
 });
 

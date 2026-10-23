@@ -255,6 +255,10 @@ export const PIPELINE = {
 	// Cronのmetadata整合の修復が点検しない埋め込みからの経過(10分)。反映確認が
 	// pendingの意思もこの経過によらず点検しない(反映待ちのベクトル不在を欠損と誤らない)
 	REPAIR_GRACE_MS: 10 * 60_000,
+	// 第1段(埋め込み・upsert・embedded_atの更新・投入)の失敗でメッセージをやり直す遅延(秒)。
+	// n回目の配信の失敗はn番目の値(使い切ったら最後の値)。合計(100秒)はpending残留の
+	// 掃査(LATCH.PENDING_STALE_MS・10分)より十分に短い。max_retriesを超えたものはDLQでdead
+	STAGE1_RETRY_DELAYS_S: [10, 30, 60],
 	// Cron各処理の1実行あたり処理上限。docs/04 §4
 	CRON_BATCH_LIMIT: 500,
 } as const;

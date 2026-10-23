@@ -121,8 +121,15 @@ describe("PIPELINE", () => {
 			REFLECTION_DELAYS_S: [2, 4, 8, 16, 30],
 			REFLECTION_GIVE_UP_MS: 480_000,
 			REPAIR_GRACE_MS: 600_000,
+			STAGE1_RETRY_DELAYS_S: [10, 30, 60],
 			CRON_BATCH_LIMIT: 500,
 		});
+	});
+
+	it("第1段の再試行の遅延の合計は、pending残留の掃査(10分)より短い(#17)", () => {
+		const totalMs =
+			PIPELINE.STAGE1_RETRY_DELAYS_S.reduce((sum, s) => sum + s, 0) * 1_000;
+		expect(totalMs).toBeLessThan(LATCH.PENDING_STALE_MS);
 	});
 });
 
