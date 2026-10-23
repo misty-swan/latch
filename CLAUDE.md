@@ -39,6 +39,7 @@ pnpm --filter worker exec wrangler d1 migrations apply DB --local
 ```
 
 E2E の webServer は `.dev.vars` 生成(scripts/prepare-dev-vars.mjs)→ローカルD1マイグレーション→`wrangler dev --local` までを自動で行う。web E2E は `VITE_DEV_AUTH=1` 付きビルド(テスト用サインインUIを出すため)も自動で行う。
+E2Eの状態は`apps/worker/.wrangler/e2e-state`(手元のD1とは別)。
 
 ## 全体構造
 
