@@ -14,6 +14,16 @@
  * latches.spec.ts・group-latches.spec.tsの各testの前(wrangler dev起動中)。
  */
 import { spawnSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// E2E専用のローカル状態の置き場(playwright.config.tsのwebServerと同じ場所・手元開発のD1には触れない)
+const e2eState = path.join(
+	path.dirname(fileURLToPath(import.meta.url)),
+	"..",
+	".wrangler",
+	"e2e-state",
+);
 
 const command =
 	"UPDATE intents SET status = 'expired' WHERE status = 'active' AND user_id IN (SELECT id FROM users WHERE auth_subject LIKE 'e2e-%')";
@@ -37,7 +47,16 @@ const sleepSync = (ms) => {
 for (let attempt = 1; ; attempt++) {
 	const result = spawnSync(
 		"wrangler",
-		["d1", "execute", "DB", "--local", "--command", command],
+		[
+			"d1",
+			"execute",
+			"DB",
+			"--local",
+			"--persist-to",
+			e2eState,
+			"--command",
+			command,
+		],
 		{ encoding: "utf8", shell: process.platform === "win32" },
 	);
 	const stdout = result.stdout ?? "";

@@ -94,8 +94,14 @@ export const jwtSecret = (env: Env): string => {
 
 /** VAPIDのsubが仮の送信者か(mailto:で、@の後が.invalidで終わるかexample.com/org/net。大文字小文字を区別しない) */
 const isPlaceholderVapidSubject = (subject: string): boolean => {
-	if (!subject.toLowerCase().startsWith("mailto:")) return false;
-	const domain = subject.slice(subject.lastIndexOf("@") + 1).toLowerCase();
+	const trimmed = subject.trim();
+	if (!trimmed.toLowerCase().startsWith("mailto:")) return false;
+	// ?以降(mailtoのヘッダ)と末尾のドット(FQDN表記)を除いてドメインを取り出す
+	const address = trimmed.split("?")[0] ?? "";
+	const domain = address
+		.slice(address.lastIndexOf("@") + 1)
+		.toLowerCase()
+		.replace(/\.+$/, "");
 	return (
 		domain.endsWith(".invalid") ||
 		["example.com", "example.org", "example.net"].includes(domain)

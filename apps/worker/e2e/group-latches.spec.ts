@@ -313,6 +313,18 @@ test("#24 3人のつながり集合で3人目のYESにより成立する", async
 		expect("proposal" in dto).toBe(false);
 		expect("members" in dto).toBe(false);
 	}
+	// 一覧(GET /v1/latches)に同じLATCHが重複しない(#26)
+	for (const m of group.members) {
+		const listRes = await request.get("/v1/latches?type=proposals", {
+			headers: authHeaders(m.user.access_token),
+		});
+		expect(listRes.status(), "GET /v1/latches?type=proposals").toBe(200);
+		const ids = (
+			(await listRes.json()) as { items: { id: string }[] }
+		).items.map((item) => item.id);
+		expect(new Set(ids).size).toBe(ids.length);
+		expect(ids).toContain(group.latch.id);
+	}
 
 	await respond(request, a.user.access_token, group.latch.id, "yes");
 	const afterB = await respond(

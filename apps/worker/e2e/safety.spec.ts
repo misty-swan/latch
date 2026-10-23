@@ -231,7 +231,7 @@ const executeLocalD1 = async (sql: string): Promise<void> => {
 	for (let attempt = 1; ; attempt++) {
 		try {
 			execSync(
-				`wrangler d1 execute DB --local --command ${JSON.stringify(sql)}`,
+				`wrangler d1 execute DB --local --persist-to .wrangler/e2e-state --command ${JSON.stringify(sql)}`,
 				{ cwd: workerDir, stdio: "pipe" },
 			);
 			return;

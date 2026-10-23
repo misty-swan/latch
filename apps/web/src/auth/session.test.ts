@@ -474,6 +474,18 @@ describe("authSession.refreshOutcome", () => {
 	});
 });
 
+describe("authSession.refreshOutcome の一時的な失敗", () => {
+	it.each([408, 429, 502])(
+		"リフレッシュの%dはnetwork_errorでセッションを保つ",
+		async (status) => {
+			localStorage.setItem(REFRESH_KEY, "refresh-1");
+			fetchMock.mockResolvedValueOnce(new Response(null, { status }));
+			await expect(authSession.refreshOutcome()).resolves.toBe("network_error");
+			expect(localStorage.getItem(REFRESH_KEY)).toBe("refresh-1");
+		},
+	);
+});
+
 describe("authSession.onUserChange", () => {
 	it("U1→U2のsetTokensで1回だけ呼ぶ", () => {
 		authSession.setTokens(fakeJwt({ sub: "U1" }), "refresh-1");

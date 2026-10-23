@@ -31,7 +31,7 @@ describe("PWAの設定", () => {
 			sizes: "512x512",
 			purpose: "maskable",
 		});
-		expect(find("icon.svg")).toMatchObject({ purpose: "any" });
+		expect(icons.some((i) => i.src.endsWith(".svg"))).toBe(false);
 		expect(icons.some((i) => i.purpose === "any maskable")).toBe(false);
 	});
 

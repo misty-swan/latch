@@ -243,15 +243,18 @@ test("ホーム画面追加の要件(manifestとアイコン)を満たす", asyn
 		"icon-192.png",
 		"icon-512.png",
 		"icon-maskable-512.png",
-		"icon.svg",
 	]);
+	// SVGはマニフェストに載せない(固有サイズの警告の原因になるため・#6)
+	expect(icons.some((icon) => icon.src.endsWith(".svg"))).toBe(false);
 	for (const icon of icons) {
 		const res = await request.get(`/${icon.src}`);
 		expect(res.status(), `GET /${icon.src}`).toBe(200);
-		const expectedType = icon.src.endsWith(".svg")
-			? "image/svg+xml"
-			: "image/png";
-		expect(res.headers()["content-type"]).toContain(expectedType);
+		expect(res.headers()["content-type"]).toContain("image/png");
+		// 「square icons」警告を防ぐため、PNGの幅と高さが等しいことをIHDRから確かめる
+		const png = await res.body();
+		expect(png.readUInt32BE(16), `${icon.src} width`).toBe(
+			png.readUInt32BE(20),
+		);
 	}
 
 	await page.goto("/welcome");
@@ -263,16 +266,10 @@ test("ホーム画面追加の要件(manifestとアイコン)を満たす", asyn
 	expect(touchIcon.status(), "GET /apple-touch-icon.png").toBe(200);
 	expect(touchIcon.headers()["content-type"]).toContain("image/png");
 
-	// DevToolsの「square icons」警告は画像の固有サイズ(0x0)が原因なので、SVGの幅と高さを直接確かめる(#6)
-	const svg = await (await request.get("/icon.svg")).text();
-	const svgRoot = svg.match(/<svg\b[^>]*>/)?.[0] ?? "";
-	expect(svgRoot).toContain('width="512"');
-	expect(svgRoot).toContain('height="512"');
-
 	// Chromiumが実際に解釈したマニフェストを確かめる(#6)。screenshotsの警告は検査しない。
 	// headless Chromiumは#6のDevToolsの警告そのものを errors に返さない(修正の前後とも空)ので、
 	// errors の検査はマニフェストの解釈エラーを防ぐ範囲に限る。#6の警告が消えたことは
-	// オーナーが実ブラウザで確認する。警告の原因(SVGの固有サイズ)は上のSVGの幅と高さの検査で守る。
+	// オーナーが実ブラウザで確認する。警告の原因は上の「SVGが無い」「PNGが正方形」の検査で守る。
 	const cdp = await page.context().newCDPSession(page);
 	const parsed = (await cdp.send("Page.getAppManifest")) as {
 		errors: { message: string }[];

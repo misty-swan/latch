@@ -14,6 +14,10 @@ import { defineConfig } from "@playwright/test";
 
 const e2ePort = process.env.LATCH_E2E_PORT ?? "8788";
 
+// E2E専用のローカル状態の置き場(apps/workerの.wrangler/e2e-state・手元開発のD1とは分ける・#12)。
+// worker側のplaywright.config.ts・clean-e2e-data.mjsと同じ場所
+const e2eState = ".wrangler/e2e-state";
+
 export default defineConfig({
 	testDir: "./e2e",
 	// 直列実行にする(latch-flow.spec.tsは提案のパイプラインを通し・各testの前後で
@@ -22,7 +26,7 @@ export default defineConfig({
 	workers: 1,
 	reporter: process.env.CI ? "dot" : "list",
 	webServer: {
-		command: `VITE_DEV_AUTH=1 pnpm --filter web build && pnpm --filter worker exec node scripts/prepare-dev-vars.mjs && pnpm --filter worker exec wrangler d1 migrations apply DB --local && pnpm --filter worker exec wrangler dev --local --port ${e2ePort}`,
+		command: `VITE_DEV_AUTH=1 pnpm --filter web build && pnpm --filter worker exec node scripts/prepare-dev-vars.mjs && pnpm --filter worker exec wrangler d1 migrations apply DB --local --persist-to ${e2eState} && pnpm --filter worker exec wrangler dev --local --persist-to ${e2eState} --port ${e2ePort}`,
 		url: `http://localhost:${e2ePort}/healthz`,
 		reuseExistingServer: !process.env.CI,
 		stdout: "ignore",

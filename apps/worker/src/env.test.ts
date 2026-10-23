@@ -84,6 +84,10 @@ describe("assertEnvSafety(docs/04 §4・docs/10 §2: prodテスト鍵起動ガ�
 		"mailto:dev@example.com",
 		"mailto:x@EXAMPLE.ORG",
 		"mailto:y@example.net",
+		"mailto:dev@example.com.",
+		"mailto:dev@example.com?x=1",
+		"  mailto:dev@example.com  ",
+		"mailto:dev@latch.invalid.",
 	])("prodで仮の送信者%sは例外(ENV_PLACEHOLDER_VAPID_SUBJECT)", (subject) => {
 		expect(() =>
 			assertEnvSafety(
