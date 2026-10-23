@@ -514,7 +514,7 @@ describe("pause/resumeのVectorize metadata同期(docs/06 §2)", () => {
 		// 行はpausedへ遷移している(同期失敗の影響を受けない)
 		expect(((await res.json()) as IntentDTO).status).toBe("paused");
 		upsertSpy.mockRestore();
-		// ベクトルは同期前のactiveのまま(Cronのバックフィルで回収される)
+		// ベクトルは同期前のactiveのまま(Cronのmetadata整合の修復で回収される)
 		const [stale] = await memoryVectorStore().getByIds([created.id]);
 		expect(stale?.metadata.status).toBe("active");
 	});

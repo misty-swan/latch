@@ -60,7 +60,7 @@ export const createEmbedder = (env: Env): Embedder => {
 	return {
 		modelId: EMBEDDING_MODEL_REAL,
 		embed: async (input: string): Promise<number[]> => {
-			// timeout 5秒・再試行なし(07 §4)。タイマー洩れを避けるためrace確定後に解除する
+			// timeout 5秒・呼び出しの中では再試行しない(07 §4)。タイマー洩れを避けるためrace確定後に解除する
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			try {
 				return extractEmbeddingVector(

@@ -69,7 +69,8 @@ export default {
 		return app.fetch(request, env, ctx);
 	},
 	// Queues consumer(match-eventsとmatch-events-dlq・stagingは名前の後ろに-staging・docs/06 §2・§5)。
-	// 消費は例外を外へ出さない(=全メッセージack)。失敗はイベント行のstatusで記録する。
+	// 消費は例外を外へ出さない(既定はack)。失敗はイベント行のstatusで記録し、第1段の失敗と
+	// 反映確認の送り直しの送信の失敗だけメッセージを遅延付きでretryする(docs/06 §5)。
 	// 単体・統合試験では自動消費しない(vitest.config.tsだけが持つTEST_QUEUES_DISABLED
 	// バインディングで判定・消費の試験はhandleQueueBatchの直接呼びで行う)
 	queue: async (

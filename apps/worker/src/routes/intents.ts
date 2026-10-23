@@ -1178,7 +1178,7 @@ intentRoutes.post("/:id/pause", requireRegistered, async (c) => {
 		return c.json(r.body, r.status);
 	}
 	// Vectorize metadataのstatusをpausedへ即時同期(docs/06 §2)。新規候補化を止める。
-	// 失敗はベストエフォート(Cronのバックフィルで回収)のため応答は成功のまま
+	// 失敗はベストエフォート(Cronのmetadata整合の修復で回収)のため応答は成功のまま
 	await syncVectorStatus(c.env, result.row.id, "paused");
 	logger.info("intents.paused", {
 		intent_id: result.row.id,
@@ -1263,7 +1263,7 @@ intentRoutes.post("/:id/resume", requireRegistered, async (c) => {
 		return c.json(r.body, r.status);
 	}
 	// Vectorize metadataのstatusをactiveへ戻す(docs/06 §2)。失敗はベストエフォート
-	// (Cronのバックフィルで回収)のため応答は成功のまま
+	// (Cronのmetadata整合の修復で回収)のため応答は成功のまま
 	await syncVectorStatus(c.env, result.row.id, "active");
 	// イベント発行(docs/06 §2「resumeはintent_updatedイベントを発行して再評価する」)。
 	// 即時投入・versionは再開後の値。waitUntilでsendし、応答をブロックしない

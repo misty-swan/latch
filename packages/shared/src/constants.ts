@@ -244,7 +244,7 @@ export const PIPELINE = {
 	VECTOR_GET_MAX: 20,
 	// バックフィル回収の対象とする生成後の経過(5分)。docs/06 §4
 	BACKFILL_GRACE_MS: 5 * 60_000,
-	// Embedding呼び出しのtimeout(5秒・再試行なし)。docs/07 §4
+	// Embedding呼び出しのtimeout(5秒・呼び出しの中では再試行しない。失敗はメッセージのretry)。docs/07 §4
 	EMBEDDING_TIMEOUT_MS: 5_000,
 	// 自分のベクトルが他の評価から見えるまでの確認の間隔(秒・遅延配信の送り直し)。
 	// 第1段は反映を待たず、vector_reflectionイベントがこの間隔で確認する

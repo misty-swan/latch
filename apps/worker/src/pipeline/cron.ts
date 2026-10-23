@@ -350,8 +350,8 @@ const runExpiryWindows = async (env: Env, clock: Clock): Promise<void> => {
 };
 
 /**
- * ベクトルmetadata整合の修復(docs/06 §2「metadata更新の失敗はCronのバックフィルで
- * 回収する」)。active/paused・埋め込み済み・ベクトル未削除のIntentをgetByIds
+ * ベクトルmetadata整合の修復(docs/06 §2「metadata更新の失敗はCronのmetadata整合の
+ * 修復で回収する」・バックフィル(e)の後の独立した走査)。active/paused・埋め込み済み・ベクトル未削除のIntentをgetByIds
  * (VECTOR_GET_MAX件ずつ)で点検し、ベクトル欠損はactiveのみ再埋め込み(pausedは新規候補化の
  * 対象外のため放置)・metadata.statusの不一致は同じvaluesで現行statusへ修正upsertする。
  * 反映待ちの意思(埋め込みからREPAIR_GRACE_MS以内・または現在のversionの反映確認が
