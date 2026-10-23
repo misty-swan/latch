@@ -32,6 +32,7 @@ import {
 	isNull,
 	lt,
 	lte,
+	notExists,
 	or,
 	sql,
 } from "drizzle-orm";
@@ -352,15 +353,30 @@ const runExpiryWindows = async (env: Env, clock: Clock): Promise<void> => {
  * ベクトルmetadata整合の修復(docs/06 §2「metadata更新の失敗はCronのバックフィルで
  * 回収する」)。active/paused・埋め込み済み・ベクトル未削除のIntentをgetByIds
  * (VECTOR_GET_MAX件ずつ)で点検し、ベクトル欠損はactiveのみ再埋め込み(pausedは新規候補化の
- * 対象外のため放置)・metadata.statusの不一致は同じvaluesで現行statusへ修正upsertする
+ * 対象外のため放置)・metadata.statusの不一致は同じvaluesで現行statusへ修正upsertする。
+ * 反映待ちの意思(埋め込みからREPAIR_GRACE_MS以内・または現在のversionの反映確認が
+ * pending)は点検しない(#13・#21)
  */
 const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
 	const db = drizzle(env.DB);
-	// 埋め込みから5分以内はVectorizeへの反映待ちでベクトルが見えないことがあるため
-	// 点検しない(#13・反映確認vector_reflectionが扱う)
+	// 埋め込みから10分以内はVectorizeへの反映待ちでベクトルが見えないことがあるため
+	// 点検しない(#13・反映確認vector_reflectionが扱う)。打ち切り(REFLECTION_GIVE_UP_MS)
+	// とは別の値にし、打ち切りを変えても修復の除外が縮まないようにする(#21)
 	const settledBefore = new Date(
-		clock.now().getTime() - PIPELINE.REFLECTION_GIVE_UP_MS,
+		clock.now().getTime() - PIPELINE.REPAIR_GRACE_MS,
 	);
+	// 現在のversionの反映確認がまだpendingの意思は、経過によらず反映確認に任せる(#21)
+	const reflectionPending = db
+		.select({ id: matchEvents.id })
+		.from(matchEvents)
+		.where(
+			and(
+				eq(matchEvents.eventType, "vector_reflection"),
+				eq(matchEvents.sourceIntentId, intents.id),
+				eq(matchEvents.version, intents.version),
+				eq(matchEvents.status, "pending"),
+			),
+		);
 	const targets = await db
 		.select()
 		.from(intents)
@@ -370,6 +386,7 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
 				isNotNull(intents.embeddedAt),
 				lte(intents.embeddedAt, settledBefore),
 				isNull(intents.vectorDeletedAt),
+				notExists(reflectionPending),
 			),
 		)
 		.limit(PIPELINE.CRON_BATCH_LIMIT);

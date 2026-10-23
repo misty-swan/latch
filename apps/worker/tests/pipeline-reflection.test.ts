@@ -10,7 +10,12 @@ import {
 	env,
 	getQueueResult,
 } from "cloudflare:test";
-import type { IntentStatus, MatchQueueMessage } from "@latch/shared";
+import {
+	type IntentStatus,
+	LATCH,
+	type MatchQueueMessage,
+	PIPELINE,
+} from "@latch/shared";
 import { eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
@@ -21,6 +26,10 @@ import type { Env as WorkerEnv } from "../src/env";
 import { stubEmbedding } from "../src/llm/stub/embedding";
 import { handleQueueBatch } from "../src/pipeline/consumer";
 import { buildNormalizedText } from "../src/pipeline/normalize";
+import {
+	consumeReflectionEvent,
+	nextReflectionDelaySeconds,
+} from "../src/pipeline/reflection";
 import {
 	holdMemoryVectorWrites,
 	memoryVectorStore,
@@ -154,8 +163,14 @@ const seedEvent = async (
 	return id;
 };
 
-/** handleQueueBatchを直接呼ぶ(メッセージ本体をそのまま渡す) */
-const runBodies = async (bodies: MatchQueueMessage[]) => {
+/**
+ * handleQueueBatchを直接呼び、キューの結果(ack・retry)を返す。
+ * beforeRunはバッチを渡す前に呼ぶ(メッセージのretryの引数を捕まえるため)
+ */
+const runBatch = async (
+	bodies: MatchQueueMessage[],
+	beforeRun?: (batch: MessageBatch<MatchQueueMessage>) => void,
+) => {
 	const batch = createMessageBatch<MatchQueueMessage>(
 		"match-events",
 		bodies.map((body, index) => ({
@@ -165,10 +180,17 @@ const runBodies = async (bodies: MatchQueueMessage[]) => {
 			body,
 		})),
 	);
+	beforeRun?.(batch);
 	const ctx = createExecutionContext();
 	await handleQueueBatch(batch, testEnv, ctx, clock);
 	const result = await getQueueResult(batch, ctx);
 	expect(result.outcome).toBe("ok");
+	return result;
+};
+
+/** handleQueueBatchを直接呼ぶ(メッセージ本体をそのまま渡す・retryが無いことを確かめる) */
+const runBodies = async (bodies: MatchQueueMessage[]) => {
+	const result = await runBatch(bodies);
 	expect(result.retryMessages).toEqual([]);
 };
 
@@ -228,6 +250,23 @@ const sentBodies = (send: SendSpy) => {
 	return { immediate, delayed };
 };
 
+describe("確認の時点と打ち切り(#21)", () => {
+	it("2秒から積み上げると、打ち切る確認は作成から8分以上8分30秒以内で、残留の掃査(10分)より前", () => {
+		let elapsedMs = PIPELINE.REFLECTION_DELAYS_S[0] * 1000;
+		for (let i = 0; i < 100; i += 1) {
+			const delay = nextReflectionDelaySeconds(elapsedMs);
+			if (delay === null) {
+				break;
+			}
+			elapsedMs += delay * 1000;
+		}
+		expect(nextReflectionDelaySeconds(elapsedMs)).toBeNull();
+		expect(elapsedMs).toBeGreaterThanOrEqual(8 * MIN);
+		expect(elapsedMs).toBeLessThanOrEqual(8.5 * MIN);
+		expect(elapsedMs).toBeLessThan(LATCH.PENDING_STALE_MS);
+	});
+});
+
 describe("第1段からの投入", () => {
 	it("第1段はvector_reflectionを遅延2秒で投入する", async () => {
 		const intent = await insertIntent();
@@ -269,13 +308,43 @@ describe("vector_reflectionの消費", () => {
 		expect((await intentRow(intent.id))?.lastEvaluatedAt).toBeNull();
 	});
 
-	it("作成から5分を過ぎて未反映ならfailed", async () => {
+	it("反映に7分30秒かかっても送り直し、反映後に評価し直す(#21)", async () => {
+		const origin = await insertIntent();
+		const partner = await insertIntent({ topic: "遅い反映の相手の学習仲間" });
+		await upsertVector(partner);
+		const eventId = await seedEvent(
+			origin.id,
+			"vector_reflection",
+			1,
+			new Date(BASE - 7.5 * MIN),
+		);
+		const send = spySend();
+
+		await runEvents([eventId]);
+
+		// 7分30秒の時点は打ち切り前。次の確認(8分)まで30秒の遅延で送り直す
+		expect(send).toHaveBeenCalledWith(
+			{ event_id: eventId },
+			{ delaySeconds: 30 },
+		);
+		expect((await eventRow(eventId))?.status).toBe("pending");
+
+		await upsertVector(origin);
+		await runEvents([eventId]);
+
+		const row = await eventRow(eventId);
+		expect(row?.status).toBe("processed");
+		expect(row?.payload).toMatchObject({ proposed: 1, reflect_ms: 7.5 * MIN });
+		expect(await sharedLatchCount(origin.userId, partner.userId)).toBe(1);
+	});
+
+	it("作成から8分を過ぎて未反映ならfailed(#21)", async () => {
 		const intent = await insertIntent();
 		const eventId = await seedEvent(
 			intent.id,
 			"vector_reflection",
 			1,
-			new Date(BASE - 5 * MIN),
+			new Date(BASE - 8 * MIN - 1_000),
 		);
 		const send = spySend();
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -292,6 +361,100 @@ describe("vector_reflectionの消費", () => {
 				intent_id: intent.id,
 			}),
 		);
+	});
+
+	it("getByIdsの例外は未反映と同じに扱い、次の遅延で送り直す(#23)", async () => {
+		const intent = await insertIntent();
+		await upsertVector(intent);
+		const eventId = await seedEvent(
+			intent.id,
+			"vector_reflection",
+			1,
+			new Date(BASE - 3_000),
+		);
+		vi.spyOn(memoryVectorStore(), "getByIds").mockRejectedValue(
+			new Error("VECTOR_GET_ERROR (code = 40007): 一時的な失敗"),
+		);
+		const send = spySend();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runEvents([eventId]);
+
+		expect(send).toHaveBeenCalledWith(
+			{ event_id: eventId },
+			{ delaySeconds: 3 },
+		);
+		expect((await eventRow(eventId))?.status).toBe("pending");
+		expect((await intentRow(intent.id))?.lastEvaluatedAt).toBeNull();
+		const lines = logSpy.mock.calls.map((c) => JSON.parse(String(c[0])));
+		expect(lines).toContainEqual(
+			expect.objectContaining({
+				event: "pipeline.reflection.failed",
+				error_code: "VECTOR_GET_40007",
+				intent_id: intent.id,
+			}),
+		);
+	});
+
+	it("送り直しの送信が例外ならメッセージをretryし、intent_id付きでログを出す(#23)", async () => {
+		const intent = await insertIntent();
+		const eventId = await seedEvent(
+			intent.id,
+			"vector_reflection",
+			1,
+			new Date(BASE - 3_000),
+		);
+		vi.spyOn(testEnv.MATCH_QUEUE, "send").mockRejectedValue(
+			new Error("Queue send failed: 一時的な失敗"),
+		);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		let retrySpy: ReturnType<typeof vi.fn> | undefined;
+		const result = await runBatch([{ event_id: eventId }], (batch) => {
+			const [message] = batch.messages;
+			if (message !== undefined) {
+				retrySpy = vi.spyOn(message, "retry");
+			}
+		});
+
+		expect(result.retryMessages).toEqual([{ msgId: "msg-0" }]);
+		// 次の確認(6秒の時点)までの3秒でやり直す
+		expect(retrySpy).toHaveBeenCalledWith({ delaySeconds: 3 });
+		expect((await eventRow(eventId))?.status).toBe("pending");
+		const lines = logSpy.mock.calls.map((c) => JSON.parse(String(c[0])));
+		expect(lines).toContainEqual(
+			expect.objectContaining({
+				event: "pipeline.reflection.failed",
+				error_code: "QUEUE_SEND_FAILED",
+				intent_id: intent.id,
+			}),
+		);
+	});
+
+	it("意思が無ければskipped(not_found)でprocessed・評価しない(#26)", async () => {
+		const intent = await insertIntent();
+		const eventId = await seedEvent(intent.id, "vector_reflection", 1);
+		const event = await eventRow(eventId);
+		if (event === undefined) {
+			throw new Error("イベント行が作れない");
+		}
+		const send = spySend();
+
+		// match_eventsはintentsへの外部キーを持つため、意思の無い行は作れない。
+		// 行の起点だけを存在しない意思に差し替えて消費する
+		await expect(
+			consumeReflectionEvent(
+				testEnv,
+				{ ...event, sourceIntentId: ulid() },
+				clock,
+			),
+		).resolves.toBeUndefined();
+
+		expect(send).not.toHaveBeenCalled();
+		const row = await eventRow(eventId);
+		expect(row?.status).toBe("processed");
+		expect(row?.payload).toEqual({ skipped: "not_found" });
+		expect((await intentRow(intent.id))?.lastEvaluatedAt).toBeNull();
 	});
 
 	it("metadataのversionが古いベクトルは未反映とみなす", async () => {

@@ -729,7 +729,7 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 		expect(send).not.toHaveBeenCalled();
 	});
 
-	it("metadata整合(#13): 5分を過ぎてベクトルが欠損している意思は埋め込み直し、embedding_completedは投入しない", async () => {
+	it("metadata整合(#13): 10分を過ぎてベクトルが欠損している意思は埋め込み直し、embedding_completedは投入しない", async () => {
 		const userId = ulid();
 		await insertUserRow(userId);
 		const lost = intentFixture({
@@ -740,7 +740,7 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 			startsAt: new Date(BASE - 5 * MIN),
 			endsAt: new Date(BASE + 115 * MIN),
 			expiresAt: new Date(BASE + 3 * HOUR),
-			embeddedAt: new Date(BASE - PIPELINE.REFLECTION_GIVE_UP_MS),
+			embeddedAt: new Date(BASE - PIPELINE.REPAIR_GRACE_MS),
 			lastEvaluatedAt: new Date(BASE - 31 * MIN),
 		});
 		await insertIntentRow(lost);
@@ -758,6 +758,83 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 		expect(types).not.toContain("embedding_completed");
 		expect(types).toContain("vector_reflection");
 		expect(send).toHaveBeenCalled();
+	});
+
+	/** 反映確認(vector_reflection)の行を置く */
+	const insertReflectionRow = async (
+		intentId: string,
+		version: number,
+		status: "pending" | "processed" | "failed",
+	) => {
+		await db.insert(matchEvents).values({
+			id: ulid(),
+			eventType: "vector_reflection",
+			sourceIntentId: intentId,
+			version,
+			payload: {},
+			status,
+			// 残留の掃査(10分)にかからない経過にしておく
+			createdAt: new Date(BASE - 5 * MIN),
+		});
+	};
+
+	/** ベクトルが欠損したactiveのつながりIntent(埋め込みからの経過を指定) */
+	const insertLostIntent = async (
+		embeddedAgoMs: number,
+		version = 1,
+	): Promise<typeof intents.$inferSelect> => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const row = intentFixture({
+			id: ulid(),
+			userId,
+			topic: "反映待ちか欠損かの学習仲間",
+			version,
+			embeddedAt: new Date(BASE - embeddedAgoMs),
+			lastEvaluatedAt: new Date(BASE - 31 * MIN),
+		});
+		await insertIntentRow(row);
+		return row;
+	};
+
+	it("metadata整合(#21): 現在のversionの反映確認がpendingの意思は、埋め込みから10分を過ぎていても点検しない", async () => {
+		const waiting = await insertLostIntent(11 * MIN);
+		await insertReflectionRow(waiting.id, 1, "pending");
+		const send = spySend();
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		expect(await vectorOf(waiting.id)).toBeNull();
+		expect((await rowOf(waiting.id))?.embeddedAt).toEqual(
+			new Date(BASE - 11 * MIN),
+		);
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	it("metadata整合(#21): 反映確認が終わっていても、埋め込みから10分以内の意思は点検しない", async () => {
+		const recent = await insertLostIntent(9 * MIN);
+		await insertReflectionRow(recent.id, 1, "failed");
+		const send = spySend();
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		expect(await vectorOf(recent.id)).toBeNull();
+		expect((await rowOf(recent.id))?.embeddedAt).toEqual(
+			new Date(BASE - 9 * MIN),
+		);
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	it("metadata整合(#21): 10分を過ぎ、現在のversionの反映確認が終わった意思でベクトルが無いものは埋め込み直す(古いversionのpendingは除外の理由にしない)", async () => {
+		const lost = await insertLostIntent(11 * MIN, 2);
+		await insertReflectionRow(lost.id, 1, "pending");
+		await insertReflectionRow(lost.id, 2, "failed");
+		spySend();
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		expect(await vectorOf(lost.id)).not.toBeNull();
+		expect((await rowOf(lost.id))?.embeddedAt).toEqual(FIXED_NOW);
 	});
 
 	it("保持期間: 30日より前の1対1候補・グループ候補を削除する(新しい行は残る)", async () => {

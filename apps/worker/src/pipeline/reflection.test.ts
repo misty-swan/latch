@@ -1,6 +1,6 @@
 /**
  * 反映確認の遅延の計算(nextReflectionDelaySeconds)の単体試験(不具合の修正工程の設計 §2.3)。
- * 確認の時点は作成から2・6・14・30・60秒、以後30秒ごと。5分で打ち切る
+ * 確認の時点は作成から2・6・14・30・60秒、以後30秒ごと。8分で打ち切る(#21)
  */
 import { describe, expect, it } from "vitest";
 import { nextReflectionDelaySeconds } from "./reflection";
@@ -15,6 +15,8 @@ describe("nextReflectionDelaySeconds", () => {
 		[45_000, 15],
 		[60_000, 30],
 		[299_000, 1],
+		[300_000, 30],
+		[479_000, 1],
 	])("経過%iミリ秒なら次の確認まで%i秒", (elapsedMs, expected) => {
 		expect(nextReflectionDelaySeconds(elapsedMs)).toBe(expected);
 	});
@@ -25,8 +27,8 @@ describe("nextReflectionDelaySeconds", () => {
 		expect(nextReflectionDelaySeconds(2_500)).toBe(4);
 	});
 
-	it("作成から5分以上ならnull(打ち切り)", () => {
-		expect(nextReflectionDelaySeconds(300_000)).toBeNull();
-		expect(nextReflectionDelaySeconds(400_000)).toBeNull();
+	it("作成から8分以上ならnull(打ち切り)", () => {
+		expect(nextReflectionDelaySeconds(480_000)).toBeNull();
+		expect(nextReflectionDelaySeconds(500_000)).toBeNull();
 	});
 });

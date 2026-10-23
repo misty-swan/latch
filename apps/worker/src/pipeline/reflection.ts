@@ -4,8 +4,10 @@
  * ベクトルが第2段の時点でまだ見えないことがある(#7)。第1段は同versionの
  * vector_reflectionを遅延付きで投入し、ここで自分のベクトルの反映(metadataのversionの
  * 一致)を確かめてから、30分の再評価抑制の例外として1回だけ評価し直す。
- * 未反映なら同じイベントidを遅延付きで送り直し、作成から5分で打ち切ってfailedへ倒す
- * (以後はCronの(h)が拾う)。1回きりの保証はmatch_eventsのUNIQUEと処理済みの
+ * 未反映なら同じイベントidを遅延付きで送り直し、作成から8分で打ち切ってfailedへ倒す
+ * (以後はCronの(h)が拾う)。確認の途中の例外は次のとおり扱う(#23):
+ * getByIdsの例外は未反映と同じに送り直し、送り直しの送信の例外は受け取ったメッセージの
+ * retryでやり直す(max_retriesを超えたものはDLQでdeadになる)。1回きりの保証はmatch_eventsのUNIQUEと処理済みの
  * 再消費スキップによる(docs/06 §2)。
  */
 import { PIPELINE } from "@latch/shared";
@@ -16,6 +18,8 @@ import { intents, matchEvents } from "../db/schema";
 import type { Env } from "../env";
 import { createLogger } from "../logging/logger";
 import { createVectorStore } from "../vectorstore";
+import type { StoredVector } from "../vectorstore/types";
+import type { ConsumeOutcome } from "./consumer";
 import { errorCodeOf } from "./errors";
 import { evaluateIntent, stage2Payload } from "./evaluate";
 import { sendToMatchQueue } from "./events";
@@ -74,15 +78,17 @@ const markFailed = async (env: Env, eventId: string): Promise<void> => {
  * vector_reflectionの1件を消費する(設計 §2.3の1〜5)。
  * 1. 意思が無い・active以外・versionが違う → skippedでprocessed(評価しない)
  * 2. 自分のベクトルのmetadata.versionがイベントのversionと一致すれば反映済み
- * 3. 未反映・作成から5分未満 → 同じイベントidを次の遅延で送り直す(行はpendingのまま)
- * 4. 未反映・5分以上 → failed(REFLECTION_TIMEOUT)
+ *    (getByIdsの例外は未反映と同じに扱う・#23)
+ * 3. 未反映・作成から8分未満 → 同じイベントidを次の遅延で送り直す(行はpendingのまま)。
+ *    送り直しの送信が例外なら、次の遅延を{ retryDelaySeconds }で返してメッセージのretryに任せる
+ * 4. 未反映・8分以上 → failed(REFLECTION_TIMEOUT)
  * 5. 反映済み → 30分抑制の例外として1回評価し、第2段の計測項目とreflect_msをpayloadへ
  */
 export const consumeReflectionEvent = async (
 	env: Env,
 	event: MatchEventRow,
 	clock: Clock,
-): Promise<void> => {
+): Promise<ConsumeOutcome> => {
 	const db = drizzle(env.DB);
 	const [intent] = await db
 		.select()
@@ -102,13 +108,20 @@ export const consumeReflectionEvent = async (
 		return;
 	}
 
-	const [stored] = await createVectorStore(env).getByIds([intent.id]);
-	const reflected =
-		stored !== null &&
-		stored !== undefined &&
-		stored.metadata.version === event.version;
+	let stored: StoredVector | null = null;
+	try {
+		[stored = null] = await createVectorStore(env).getByIds([intent.id]);
+	} catch (error) {
+		// 一時的な読み取りの失敗で評価し直しの連鎖を切らない(#23)。未反映として送り直す
+		logger.warn("pipeline.reflection.failed", {
+			error_code: errorCodeOf(error),
+			intent_id: intent.id,
+			layer: "get",
+		});
+	}
 	const reflectMs = clock.now().getTime() - event.createdAt.getTime();
-	if (!reflected) {
+	// 未反映(ベクトルが無い・metadataのversionがイベントと違う)
+	if (stored === null || stored.metadata.version !== event.version) {
 		const delaySeconds = nextReflectionDelaySeconds(reflectMs);
 		if (delaySeconds === null) {
 			logger.warn("pipeline.reflection.timeout", {
@@ -121,7 +134,17 @@ export const consumeReflectionEvent = async (
 			return;
 		}
 		// 送り直しの回数はメッセージに持たず、行のcreated_atからの経過で決める
-		await sendToMatchQueue(env, event.id, { delaySeconds });
+		try {
+			await sendToMatchQueue(env, event.id, { delaySeconds });
+		} catch (error) {
+			// 送れなければ受け取ったメッセージを同じ遅延でやり直す(#23・行はpendingのまま)
+			logger.warn("pipeline.reflection.failed", {
+				error_code: errorCodeOf(error),
+				intent_id: intent.id,
+				layer: "send",
+			});
+			return { retryDelaySeconds: delaySeconds };
+		}
 		return;
 	}
 
@@ -136,6 +159,7 @@ export const consumeReflectionEvent = async (
 		logger.warn("pipeline.reflection.failed", {
 			error_code: errorCodeOf(error),
 			intent_id: intent.id,
+			layer: "evaluate",
 		});
 		await markFailed(env, event.id);
 		return;

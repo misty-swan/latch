@@ -6,7 +6,8 @@
  * 第2段は載せられたベクトルで自分を検索するため、upsertの反映待ちは不要。
  * 続けて反映確認のvector_reflection(同version・遅延付き)を投入し、反映後に
  * 1回だけ評価し直す(pipeline/reflection.ts・同時に預けた相手の取りこぼしを拾う)。
- * 消費は例外を外へ出さない(=全メッセージack)。失敗はイベント行のstatusで
+ * 消費は例外を外へ出さない(既定はack・反映確認の送り直しの失敗だけメッセージを
+ * retryする)。失敗はイベント行のstatusで
  * 記録し、Embedding失敗は再試行せずCronのバックフィルが回収する(06 §5)。
  * embedding_completedの消費(第2段)はevaluateIntent(pipeline/evaluate.ts)へ
  * 委譲し、戻り値の計測結果を起点イベントのpayloadへ記録する(06 §7)。
@@ -32,6 +33,13 @@ const logger = createLogger();
 
 /** intents行の型(db/schemaの$inferSelect) */
 export type IntentRow = typeof intents.$inferSelect;
+
+/**
+ * 1メッセージの消費の結果。undefined=ack(失敗も行のstatusに記録済み)・
+ * { retryDelaySeconds }=受け取ったメッセージをその秒数の遅延でretryする
+ * (max_retriesを超えたものはDLQでdeadになる)
+ */
+export type ConsumeOutcome = { retryDelaySeconds: number } | undefined;
 
 /** 第1段の本体の結果。failed=Embedding系の失敗(再試行なし・06 §5) */
 export type EmbeddingStageResult = "embedded" | "failed";
@@ -175,14 +183,15 @@ const markFailed = async (env: Env, eventId: string): Promise<void> => {
 /**
  * 通常キューの1メッセージを処理する(docs/06 §2の処理枝)。
  * 失敗はD1のイベント行statusで記録し、ここでは例外を握って呼び出し側へは
- * 正常復帰する(全メッセージackの設計・06 §5)
+ * 正常復帰する(ackが原則・06 §5)。やり直すべき一時的な失敗だけを
+ * { retryDelaySeconds }で返す(反映確認の送り直しの失敗・#23)
  */
 const consumeEvent = async (
 	env: Env,
 	eventId: string,
 	clock: Clock,
 	vector?: number[],
-): Promise<void> => {
+): Promise<ConsumeOutcome> => {
 	const db = drizzle(env.DB);
 	// イベント行の取得。無ければ何もせずack(送信だけが先行したメッセージ・Task 6引継ぎ)
 	const [event] = await db
@@ -199,8 +208,7 @@ const consumeEvent = async (
 	}
 	// vector_reflection(反映確認・不具合の修正工程の設計 §2.3)
 	if (event.eventType === "vector_reflection") {
-		await consumeReflectionEvent(env, event, clock);
-		return;
+		return consumeReflectionEvent(env, event, clock);
 	}
 	// embedding_completed(第2段・docs/06 §2〜§3): 評価実行(Layer 2検索→
 	// Layer 1→Layer 3→候補保存)をevaluateIntentへ委譲し、戻り値の計測結果を
@@ -289,7 +297,10 @@ const consumeEvent = async (
 	// 第1段の未対応種別(将来追加分)は何もせず保持する(ackのみ)
 };
 
-/** 通常キュー(match-events)のバッチを処理する。1メッセージの例外でバッチ全体を倒さない */
+/**
+ * 通常キュー(match-events)のバッチを処理する。1メッセージの例外でバッチ全体を倒さない。
+ * 消費の結果がretryならそのメッセージだけを遅延付きでretryし、それ以外はack(既定)
+ */
 const handleMainQueueBatch = async (
 	env: Env,
 	batch: MessageBatch<MatchQueueMessage>,
@@ -310,7 +321,10 @@ const handleMainQueueBatch = async (
 				body.vector.every((v) => typeof v === "number")
 					? body.vector
 					: undefined;
-			await consumeEvent(env, eventId, clock, vector);
+			const outcome = await consumeEvent(env, eventId, clock, vector);
+			if (outcome !== undefined) {
+				message.retry({ delaySeconds: outcome.retryDelaySeconds });
+			}
 		} catch (error) {
 			// 個別消費の失敗は再試行せずack(06 §5の設計)。intent_idはこの時点で
 			// 特定できないため記録しない(許可フィールドのみ・docs/08 §6)
@@ -358,8 +372,9 @@ export const isDlqQueue = (queueName: string): boolean =>
 
 /**
  * Queuesのバッチ消費の入口(index.tsのqueueハンドラから呼ぶ)。
- * キュー名はbatch.queueで判別し、例外を外へ出さない(=全メッセージack)。
- * batch全体のretryは使わない設計で、失敗はイベント行のstatusで記録する(06 §5)
+ * キュー名はbatch.queueで判別し、例外を外へ出さない(既定はack)。
+ * batch全体のretryは使わない設計で、失敗はイベント行のstatusで記録する(06 §5)。
+ * メッセージ単位のretryは消費の結果(ConsumeOutcome)が求めたときだけ行う
  */
 export const handleQueueBatch = async (
 	batch: MessageBatch<MatchQueueMessage>,

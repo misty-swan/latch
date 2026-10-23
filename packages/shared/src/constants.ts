@@ -249,8 +249,12 @@ export const PIPELINE = {
 	// 自分のベクトルが他の評価から見えるまでの確認の間隔(秒・遅延配信の送り直し)。
 	// 第1段は反映を待たず、vector_reflectionイベントがこの間隔で確認する
 	REFLECTION_DELAYS_S: [2, 4, 8, 16, 30],
-	// 反映確認を諦めるまでの上限(5分・超過はfailedにしてCronの回収へ)
-	REFLECTION_GIVE_UP_MS: 5 * 60_000,
+	// 反映確認を諦めるまでの上限(8分・超過はfailedにしてCronの回収へ)。
+	// 最後の確認は作成から8分30秒より前に終わり、pending残留の掃査(10分)とぶつからない
+	REFLECTION_GIVE_UP_MS: 8 * 60_000,
+	// Cronのmetadata整合の修復が点検しない埋め込みからの経過(10分)。反映確認が
+	// pendingの意思もこの経過によらず点検しない(反映待ちのベクトル不在を欠損と誤らない)
+	REPAIR_GRACE_MS: 10 * 60_000,
 	// Cron各処理の1実行あたり処理上限。docs/04 §4
 	CRON_BATCH_LIMIT: 500,
 } as const;
