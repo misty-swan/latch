@@ -12,6 +12,7 @@ import {
 	memoryVectorStore,
 	releaseMemoryVectorWrites,
 	resetMemoryVectorStore,
+	setMemoryVectorLimits,
 } from "./memory";
 import type { StoredVector } from "./types";
 
@@ -268,5 +269,29 @@ describe("createVectorStore(実装の選択)", () => {
 				status: { $eq: "active" },
 			},
 		});
+	});
+});
+
+describe("setMemoryVectorLimits(試験専用の上限)", () => {
+	beforeEach(() => {
+		resetMemoryVectorStore();
+	});
+
+	it("getByIdsの上限を超える件数は例外になり、上限ちょうどは通る", async () => {
+		setMemoryVectorLimits({ getByIds: 20 });
+		const ids = Array.from({ length: 21 }, (_, i) => `vec-${i}`);
+		await expect(memoryVectorStore().getByIds(ids)).rejects.toThrow();
+		await expect(
+			memoryVectorStore().getByIds(ids.slice(0, 20)),
+		).resolves.toHaveLength(20);
+	});
+
+	it("resetMemoryVectorStoreで上限が解除される", async () => {
+		setMemoryVectorLimits({ getByIds: 1 });
+		resetMemoryVectorStore();
+		await expect(memoryVectorStore().getByIds(["a", "b"])).resolves.toEqual([
+			null,
+			null,
+		]);
 	});
 });

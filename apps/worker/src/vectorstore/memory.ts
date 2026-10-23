@@ -36,6 +36,8 @@ const byScoreDescThenIdAsc = (
  * インメモリVectorStore(モジュール内Mapを閉じ込めた単一インスタンス)。
  * モジュールレベルで1回だけ生成し、memoryVectorStore()は常に同一オブジェクトを返す。
  */
+let limits: { getByIds?: number } | null = null;
+
 const singleton: VectorStore = {
 	upsert: async (vectors) => {
 		// 同一idは上書き(Vectorizeのupsertと同じセマンティクス)
@@ -58,10 +60,15 @@ const singleton: VectorStore = {
 		hits.sort(byScoreDescThenIdAsc);
 		return hits.slice(0, opts.topK);
 	},
-	getByIds: async (ids) =>
+	getByIds: async (ids) => {
+		// 試験専用の上限(Vectorizeの1回20件の再現)を超えたら例外にする
+		if (limits?.getByIds !== undefined && ids.length > limits.getByIds) {
+			throw new Error("VECTOR_GET_LIMIT: getByIdsの件数が上限を超えた");
+		}
 		// 不在のidはnull・入力順を保持(VectorizeのgetByIdsは在る分だけ返すため、
 		// この実装の契約(不在=null)に揃えている)
-		ids.map((id) => store.get(id) ?? null),
+		return ids.map((id) => store.get(id) ?? null);
+	},
 	deleteByIds: async (ids) => {
 		for (const id of ids) {
 			store.delete(id);
@@ -82,6 +89,17 @@ export const resetMemoryVectorStore = (): void => {
 	store.clear();
 	pending.clear();
 	holding = false;
+	limits = null;
+};
+
+/**
+ * 試験専用: Vectorizeの1回あたりの件数上限を再現する(getByIdsが超えると例外)。
+ * nullで解除する(resetMemoryVectorStoreでも解除される)。index.tsからは再exportしない
+ */
+export const setMemoryVectorLimits = (
+	next: { getByIds?: number } | null,
+): void => {
+	limits = next;
 };
 
 /** 試験専用: 以降のupsertを保留する(query・getByIdsから見えない)。index.tsからは再exportしない */

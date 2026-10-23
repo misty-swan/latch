@@ -78,7 +78,7 @@ const UPDATE_CHUNK = 50;
 /** 候補クローズのチャンク幅(intent_a・intent_bの2列で80バインド) */
 const CLOSE_CHUNK = 40;
 
-/** ベクトル削除のチャンク幅(getByIds/deleteByIdsの上限100に揃える) */
+/** ベクトル削除のチャンク幅(deleteByIds。公式の文書に上限の記載が無いため従来の100のまま) */
 const VECTOR_CHUNK = 100;
 
 /**
@@ -351,7 +351,7 @@ const runExpiryWindows = async (env: Env, clock: Clock): Promise<void> => {
 /**
  * ベクトルmetadata整合の修復(docs/06 §2「metadata更新の失敗はCronのバックフィルで
  * 回収する」)。active/paused・埋め込み済み・ベクトル未削除のIntentをgetByIds
- * (100件チャンク)で点検し、ベクトル欠損はactiveのみ再埋め込み(pausedは新規候補化の
+ * (VECTOR_GET_MAX件ずつ)で点検し、ベクトル欠損はactiveのみ再埋め込み(pausedは新規候補化の
  * 対象外のため放置)・metadata.statusの不一致は同じvaluesで現行statusへ修正upsertする
  */
 const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
@@ -375,8 +375,8 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
 		.limit(PIPELINE.CRON_BATCH_LIMIT);
 	const store = createVectorStore(env);
 	let recovered = 0;
-	for (let i = 0; i < targets.length; i += VECTOR_CHUNK) {
-		const slice: IntentRow[] = targets.slice(i, i + VECTOR_CHUNK);
+	for (let i = 0; i < targets.length; i += PIPELINE.VECTOR_GET_MAX) {
+		const slice: IntentRow[] = targets.slice(i, i + PIPELINE.VECTOR_GET_MAX);
 		const vectors = await store.getByIds(slice.map((row) => row.id));
 		const fixes: StoredVector[] = [];
 		for (let j = 0; j < slice.length; j += 1) {
@@ -429,7 +429,6 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
  * キュー経由の評価と二重になる)。失敗は再試行せず次のCronで回収する(docs/06 §5)。
  * Embeddingの失敗が連続BACKFILL_FAILURE_ABORT(5)件に達したら当回の走査を打ち切る
  * (障害中に500件を空振りしない・docs/06 §4)。成功を挟めば連続数は0に戻る。
- * 続けてベクトルmetadata整合の修復を行う
  */
 const runBackfillSweep = async (env: Env, clock: Clock): Promise<void> => {
 	const db = drizzle(env.DB);
@@ -477,7 +476,6 @@ const runBackfillSweep = async (env: Env, clock: Clock): Promise<void> => {
 	if (backfilled > 0) {
 		logger.info("cron.backfilled", { count: backfilled });
 	}
-	await repairVectorMetadata(env, clock);
 };
 
 /**
@@ -823,7 +821,7 @@ const runPendingSweep = async (env: Env, clock: Clock): Promise<void> => {
 };
 
 /**
- * F4aで追加した走査を隔離して実行する。失敗はwarnログ(cron.sweep.failed・layer=走査名・
+ * 走査を隔離して実行する。失敗はwarnログ(cron.sweep.failed・layer=走査名・
  * error_code)を出して握り、次の走査へ進む(1つの走査の失敗で後続の走査を止めない)
  */
 const runIsolated = async (
@@ -842,11 +840,10 @@ const runIsolated = async (
 
 /**
  * 毎分Cronの入口(index.tsのscheduledハンドラから呼ぶ・docs/04 §4)。
- * 各走査を順に実行する。個々のIntent評価の例外は握って続行するが、
- * 既存7走査(a〜h・保持期間)のクエリ自体の失敗は呼び出し元へ伝播させる(Cron起動の
- * 失敗として可視化し、次回の実行でやり直す)。F4aで追加した4走査(回答期限切れ・保留・
- * 予算アラート・pending残留)と、回答期限切れで閉じたグループ提案の次集合の提案(保留走査の後・
- * F4b設計 §3.5)・(d)completed判定(F5)は互いに隔離し、失敗をログに出して続行する(docs/06 §2)
+ * 各走査を順に実行する。個々のIntent評価の例外は握って続行し、走査ごとの失敗も
+ * runIsolatedで隔離してログ(cron.sweep.failed・layer=走査名)に出し、後ろの走査を止めない
+ * (前半の走査の失敗が後ろを巻き込んで毎分Cronが止まった不具合の修正・#15)。
+ * 回答期限切れで閉じたグループ提案の次集合の提案は保留走査の後(F4b設計 §3.5)
  */
 export const runScheduledPipeline = async (
 	env: Env,
@@ -854,13 +851,14 @@ export const runScheduledPipeline = async (
 ): Promise<void> => {
 	// この実行の中で作られた通知(Cronの評価で作った提案など)だけを後でその場で送るための起点
 	const startedAt = clock.now();
-	await runBucketSweep(env, clock);
-	await runCatchUpSweep(env, clock);
-	await runExpiryWindows(env, clock);
-	await runBackfillSweep(env, clock);
-	await runUnevaluatedSweep(env, clock);
-	await runDelayedReevalSweep(env, clock);
-	await runRetentionSweep(env, clock);
+	await runIsolated("bucket", () => runBucketSweep(env, clock));
+	await runIsolated("catch_up", () => runCatchUpSweep(env, clock));
+	await runIsolated("expiry", () => runExpiryWindows(env, clock));
+	await runIsolated("backfill", () => runBackfillSweep(env, clock));
+	await runIsolated("repair", () => repairVectorMetadata(env, clock));
+	await runIsolated("unevaluated", () => runUnevaluatedSweep(env, clock));
+	await runIsolated("delayed", () => runDelayedReevalSweep(env, clock));
+	await runIsolated("retention", () => runRetentionSweep(env, clock));
 	// 回答期限切れで閉じたLATCHのid。走査が途中で失敗しても、閉じた分は次集合の提案へ渡す
 	const deadlineClosedIds: string[] = [];
 	await runIsolated("response_deadline", () =>

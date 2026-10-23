@@ -48,6 +48,7 @@ import { buildNormalizedText } from "../src/pipeline/normalize";
 import {
 	memoryVectorStore,
 	resetMemoryVectorStore,
+	setMemoryVectorLimits,
 } from "../src/vectorstore/memory";
 import type { StoredVector } from "../src/vectorstore/types";
 
@@ -239,6 +240,8 @@ beforeEach(async () => {
 	await db.delete(users);
 	// テスト間のベクトル汚染除去(シングルトンのインメモリ実装のため)
 	resetMemoryVectorStore();
+	// 全試験をVectorizeと同じ1回20件の上限の下で動かす(#15・#26)
+	setMemoryVectorLimits({ getByIds: PIPELINE.VECTOR_GET_MAX });
 	spySend();
 });
 
@@ -667,6 +670,39 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 		);
 	});
 
+	it("metadata整合(#15): getByIdsの上限20の下でも有効な意思25件を全件点検し、例外を出さない", async () => {
+		setMemoryVectorLimits({ getByIds: 20 });
+		const userId = ulid();
+		await insertUserRow(userId);
+		const rows: (typeof intents.$inferSelect)[] = [];
+		for (let i = 0; i < 25; i += 1) {
+			rows.push(
+				intentFixture({
+					id: ulid(),
+					userId,
+					topic: `上限試験の学習仲間${i}`,
+					embeddedAt: new Date(BASE - 10 * MIN),
+					lastEvaluatedAt: new Date(BASE - 31 * MIN),
+				}),
+			);
+		}
+		for (const row of rows) {
+			await insertIntentRow(row);
+			// metadata.statusを現行(active)と食い違わせ、修復が触れたかを後で判別する
+			await memoryVectorStore().upsert([
+				await vectorFor(row, { status: "paused" }),
+			]);
+		}
+
+		await expect(
+			runScheduledPipeline(testEnv, directClock),
+		).resolves.toBeUndefined();
+
+		for (const row of rows) {
+			expect((await vectorOf(row.id))?.metadata.status).toBe("active");
+		}
+	});
+
 	it("metadata整合(#13): 埋め込みから5分以内でベクトルが見えない意思は埋め込み直さない", async () => {
 		const userId = ulid();
 		await insertUserRow(userId);
@@ -1080,6 +1116,65 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 				error_code: "KV_GET_FAILED",
 			},
 		]);
+	});
+
+	it("走査の隔離(#15): 前半の走査(bucket)の問い合わせが失敗しても後ろの走査が動き、layer付きで記録される", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const target = intentFixture({
+			id: ulid(),
+			userId,
+			topic: "前半失敗の試験",
+		});
+		await insertIntentRow(target);
+		const staleId = ulid();
+		await db.insert(matchEvents).values({
+			id: staleId,
+			eventType: "intent_updated",
+			sourceIntentId: target.id,
+			version: 1,
+			payload: {},
+			status: "pending",
+			createdAt: new Date(BASE - 11 * MIN),
+			processedAt: null,
+		});
+		// 最初のprepare(=bucket走査の問い合わせ)だけを失敗させる
+		let first = true;
+		const flakyDb = new Proxy(testEnv.DB, {
+			get: (t, prop) => {
+				if (prop === "prepare") {
+					return (sql: string) => {
+						if (first) {
+							first = false;
+							throw new Error("D1_FIRST_QUERY_FAILED: 試験用の失敗");
+						}
+						return t.prepare(sql);
+					};
+				}
+				const v = Reflect.get(t, prop, t);
+				return typeof v === "function" ? v.bind(t) : v;
+			},
+		});
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await expect(
+			runScheduledPipeline({ ...testEnv, DB: flakyDb }, directClock),
+		).resolves.toBeUndefined();
+
+		expect(logsOf(logSpy, "cron.sweep.failed")).toEqual([
+			{
+				level: "warn",
+				event: "cron.sweep.failed",
+				layer: "bucket",
+				error_code: "D1_FIRST_QUERY_FAILED",
+			},
+		]);
+		// 後ろのpending残留の掃査は動いている
+		const [event] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, staleId));
+		expect(event?.status).toBe("failed");
 	});
 
 	it("バックフィル: 埋め込み後にembedding_completedイベント行を作らない(評価はCronが直接行う・反映確認は投入する)", async () => {

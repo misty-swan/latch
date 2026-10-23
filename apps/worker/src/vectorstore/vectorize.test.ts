@@ -86,3 +86,40 @@ describe("createVectorizeStore(metadataのversion)", () => {
 		expect(read?.metadata.version).toBeUndefined();
 	});
 });
+
+describe("createVectorizeStore(getByIdsの分割)", () => {
+	it("45件のgetByIdsは20・20・5件の3回に分けて呼び、入力順で返す", async () => {
+		const calls: number[] = [];
+		const ids = Array.from({ length: 45 }, (_, i) => `vec-${i}`);
+		const index = {
+			// 上限20を超える呼び出しはVectorizeと同じく例外にする。返す順は逆順にして入力順への並べ替えを確かめる
+			getByIds: async (chunk: string[]) => {
+				calls.push(chunk.length);
+				if (chunk.length > 20) {
+					throw new Error("VECTOR_GET_LIMIT");
+				}
+				return [...chunk].reverse().map((id) => ({
+					id,
+					values: [1, 0],
+					metadata: {
+						form: "connection",
+						status: "active",
+						user_id: "user-1",
+					},
+				}));
+			},
+		} as unknown as VectorizeIndex;
+		const result = await createVectorizeStore(index).getByIds(ids);
+		expect(calls).toEqual([20, 20, 5]);
+		expect(result.map((v) => v?.id)).toEqual(ids);
+	});
+
+	it("0件のgetByIdsはVectorizeを呼ばず空配列を返す", async () => {
+		const index = {
+			getByIds: async () => {
+				throw new Error("呼ばれないはず");
+			},
+		} as unknown as VectorizeIndex;
+		expect(await createVectorizeStore(index).getByIds([])).toEqual([]);
+	});
+});

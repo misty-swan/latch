@@ -4,6 +4,7 @@
  * (docs/05 §2.3・docs/06 Layer 2 Candidate Retrieval)。metadataの正は
  * Vectorizeに置かず、取り出し後の再検証はD1の現行値で行う(二重化)。
  */
+import { PIPELINE } from "@latch/shared";
 import type { StoredVector, VectorStore } from "./types";
 
 /**
@@ -73,9 +74,14 @@ export const createVectorizeStore = (vectors: VectorizeIndex): VectorStore => ({
 		return result.matches.map((m) => ({ id: m.id, score: m.score }));
 	},
 	getByIds: async (ids) => {
-		// Vectorizeは見つかった分だけ返すため、id→ベクトルのMapへ置いて
-		// 入力順・不在nullの契約に揃える
-		const found = await vectors.getByIds(ids);
+		// Vectorizeは1回に取れる件数に上限(VECTOR_GET_MAX)があるため分けて呼ぶ。
+		// 見つかった分だけ返るので、id→ベクトルのMapへ置いて入力順・不在nullの契約に揃える
+		const found: Awaited<ReturnType<VectorizeIndex["getByIds"]>> = [];
+		for (let i = 0; i < ids.length; i += PIPELINE.VECTOR_GET_MAX) {
+			found.push(
+				...(await vectors.getByIds(ids.slice(i, i + PIPELINE.VECTOR_GET_MAX))),
+			);
+		}
 		const byId = new Map(found.map((v) => [v.id, v]));
 		return ids.map((id) => {
 			const v = byId.get(id);

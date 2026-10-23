@@ -240,6 +240,8 @@ export const PIPELINE = {
 	CANDIDATE_RETENTION_DAYS: 30,
 	// つながりIntentの遅延再評価までの経過(active化後10分・1回きり)。docs/06 §4
 	DELAYED_REEVAL_AFTER_MS: 10 * 60_000,
+	// Vectorize getByIdsの1回あたりの件数上限(20)。超えると呼び出しが失敗する
+	VECTOR_GET_MAX: 20,
 	// バックフィル回収の対象とする生成後の経過(5分)。docs/06 §4
 	BACKFILL_GRACE_MS: 5 * 60_000,
 	// Embedding呼び出しのtimeout(5秒・再試行なし)。docs/07 §4
