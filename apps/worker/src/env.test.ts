@@ -118,6 +118,8 @@ describe("assertEnvSafety(docs/04 §4・docs/10 §2: prodテスト鍵起動ガ�
 						LATCH_ENV: e as Env["LATCH_ENV"],
 						JWT_SECRET: SECRET_32,
 						VAPID_SUBJECT: "mailto:dev@example.com",
+						ACCESS_AUD: "fake-aud",
+						ACCESS_TEAM_DOMAIN: "https://fake.cloudflareaccess.com",
 					}),
 				),
 			).not.toThrow();
@@ -196,10 +198,15 @@ describe("assertEnvSafety(docs/04 §4・docs/10 §2: prodテスト鍵起動ガ�
 		).not.toThrow();
 	});
 
-	it("stagingも通る(prod以外は何もしない)", () => {
+	it("stagingも通る(Accessの設定があればprodの検査はしない)", () => {
 		expect(() =>
 			assertEnvSafety(
-				makeEnv({ LATCH_ENV: "staging", JWT_SECRET: "a".repeat(31) }),
+				makeEnv({
+					LATCH_ENV: "staging",
+					JWT_SECRET: "a".repeat(31),
+					ACCESS_AUD: "fake-aud",
+					ACCESS_TEAM_DOMAIN: "https://fake.cloudflareaccess.com",
+				}),
 			),
 		).not.toThrow();
 	});

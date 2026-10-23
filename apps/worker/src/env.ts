@@ -72,6 +72,10 @@ export interface Env {
 	VAPID_PRIVATE_KEY?: string;
 	/** VAPIDのsub(mailto:) */
 	VAPID_SUBJECT?: string;
+	/** Cloudflare AccessのAUDタグ(staging必須・auth/access.ts) */
+	ACCESS_AUD?: string;
+	/** Accessのチームのドメイン(https://<team>.cloudflareaccess.com・staging必須) */
+	ACCESS_TEAM_DOMAIN?: string;
 	GOOGLE_CLIENT_ID?: string;
 	APPLE_CLIENT_ID?: string;
 }
@@ -133,9 +137,19 @@ export const vapidKeysOf = (env: Env): VapidKeys => {
  * - prodでJWT_SECRETが未設定・32字未満 → 例外
  * - prodでLATCH_PUSH_MODEがreal以外 → 例外(ENV_UNSAFE_PUSH)・VAPID_*の欠落 → 例外
  *   (ENV_MISSING_VAPID)・VAPID公開鍵がテスト鍵 → 例外(ENV_UNSAFE_TEST_KEY)(F7b設計 §5.5)
- * prod以外(LATCH_ENVがproduction以外)は何もしない
+ * - stagingでACCESS_AUD・ACCESS_TEAM_DOMAINの欠落 → 例外(ENV_MISSING_ACCESS・#11)
+ * それ以外のprod以外(LATCH_ENVがproduction以外)は何もしない
  */
 export const assertEnvSafety = (env: Env): void => {
+	// stagingはAccessの証明の検証に必要な値が無ければ起動を拒否する(#11)
+	if (
+		env.LATCH_ENV === "staging" &&
+		(env.ACCESS_AUD === undefined || env.ACCESS_TEAM_DOMAIN === undefined)
+	) {
+		throw new Error(
+			"ENV_MISSING_ACCESS: staging環境ではACCESS_AUDとACCESS_TEAM_DOMAINが必須(#11)",
+		);
+	}
 	if (env.LATCH_ENV !== "production") {
 		return;
 	}

@@ -1,10 +1,12 @@
 import type { MatchQueueMessage } from "@latch/shared";
 import { Hono } from "hono";
+import { verifyAccessRequest } from "./auth/access";
 import type { AppEnv } from "./auth/middleware";
 import { systemClock } from "./clock/clock";
 import { ChatRoomDO } from "./do/chat";
 import { assertEnvSafety, type Env } from "./env";
 import { internalOnError } from "./http/errors";
+import { createLogger } from "./logging/logger";
 import { handleQueueBatch } from "./pipeline/consumer";
 import { runScheduledPipeline } from "./pipeline/cron";
 import { authRoutes } from "./routes/auth";
@@ -65,6 +67,16 @@ export default {
 		if (!envSafetyChecked) {
 			assertEnvSafety(env);
 			envSafetyChecked = true;
+		}
+		// stagingはAccessを経由した到達だけを通す(#11)。理由はログのerror_codeへ
+		if (env.LATCH_ENV === "staging") {
+			const access = await verifyAccessRequest(request, env);
+			if (!access.ok) {
+				createLogger().warn("access.denied", {
+					error_code: `access_${access.reason}`,
+				});
+				return new Response("Forbidden", { status: 403 });
+			}
 		}
 		return app.fetch(request, env, ctx);
 	},
