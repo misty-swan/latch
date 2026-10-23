@@ -465,7 +465,7 @@ const runBackfillSweep = async (env: Env, clock: Clock): Promise<void> => {
 				continue;
 			}
 			consecutiveFailures = 0;
-			await evaluateIntent(env, row.id, clock);
+			await evaluateIntent(env, row.id, clock, { origin: "cron_backfill" });
 			backfilled += 1;
 		} catch (error) {
 			logger.warn("cron.item.failed", {
@@ -537,7 +537,10 @@ const runDelayedReevalSweep = async (env: Env, clock: Clock): Promise<void> => {
 		try {
 			// 30分の再評価抑制の例外(#10)。埋め込みの直後に評価済み(last_evaluated_atが
 			// 約10分前)という通常の状態でも評価する
-			await evaluateIntent(env, row.id, clock, { ignoreSuppression: true });
+			await evaluateIntent(env, row.id, clock, {
+				ignoreSuppression: true,
+				origin: "cron_delayed",
+			});
 			await db
 				.update(intents)
 				.set({ delayedReevalAt: clock.now() })

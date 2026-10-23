@@ -1185,7 +1185,12 @@ describe("計測(Analytics Engine・docs/06 §7)", () => {
 		// (Vectorize取得→L1→L3)・処理時間・Jev(呼び出し・再利用・保留4理由・処理時間)・
 		// L5閾値超過・提示・保留、最後にretrievalMs(Layer 2の所要時間・実時間のため値は固定しない)
 		// (fixedClockのため処理時間は0・retrievalCount=2は自id含む取得件数)
-		expect(stage2?.blobs).toEqual(["stage2", "{}"]);
+		expect(stage2?.blobs).toEqual([
+			"stage2",
+			"{}",
+			"cron_other",
+			expect.any(String),
+		]);
 		expect(stage2?.indexes).toEqual(["stage2"]);
 		expect(stage2?.doubles).toHaveLength(15);
 		expect(stage2?.doubles.slice(0, 14)).toEqual([
@@ -1196,7 +1201,14 @@ describe("計測(Analytics Engine・docs/06 §7)", () => {
 		// F4bの項目(l4_skipped_participants・group_pool・group_sets・group_jev_calls・
 		// group_held_sets・group_over_threshold・group_proposed・group_held_proposals・
 		// group_failed)
-		expect(group?.blobs).toEqual(["stage2_group"]);
+		expect(group?.blobs).toEqual([
+			"stage2_group",
+			"cron_other",
+			expect.any(String),
+		]);
+		// 2件のjoinKeyは同じ。意思のid・イベントのidを含まない
+		expect(group?.blobs[2]).toBe(stage2?.blobs[3]);
+		expect(stage2?.blobs[3]).not.toContain(a.id);
 		expect(group?.indexes).toEqual(["stage2_group"]);
 		expect(group?.doubles).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
@@ -1208,6 +1220,59 @@ describe("計測(Analytics Engine・docs/06 §7)", () => {
 		const second = await evaluateIntent(envWithoutAx, b.id, directClock);
 		expect(second).not.toBeNull();
 		expect(fakeAx.writeDataPoint).toHaveBeenCalledTimes(2);
+	});
+
+	it("originを渡すと2件のblobに載り、joinKeyは評価ごとに違う", async () => {
+		const { origin } = await seedConnectionPair();
+		const fakeAx = strictAx();
+		const env = { ...testEnv, PIPELINE_AX: fakeAx } as unknown as WorkerEnv;
+		await evaluateIntent(env, origin.id, directClock, {
+			origin: "embedding_completed",
+			ignoreSuppression: true,
+		});
+		await evaluateIntent(env, origin.id, directClock, {
+			origin: "cron_delayed",
+			ignoreSuppression: true,
+		});
+		const [s1, g1, s2, g2] = fakeAx.points;
+		expect(s1?.blobs[2]).toBe("embedding_completed");
+		expect(g1?.blobs[1]).toBe("embedding_completed");
+		expect(s2?.blobs[2]).toBe("cron_delayed");
+		expect(g2?.blobs[1]).toBe("cron_delayed");
+		expect(s1?.blobs[3]).toBe(g1?.blobs[2]);
+		expect(s2?.blobs[3]).toBe(g2?.blobs[2]);
+		expect(s1?.blobs[3]).not.toBe(s2?.blobs[3]);
+		for (const p of fakeAx.points) {
+			expect(p.blobs.length).toBeLessThanOrEqual(20);
+			expect(p.blobs.join("|")).not.toContain(origin.id);
+		}
+	});
+
+	it("writeDataPointが例外を出しても評価は結果を返し、提案は残り、warnが出る", async () => {
+		const { userA, origin } = await seedConnectionPair();
+		const throwingEnv = {
+			...testEnv,
+			PIPELINE_AX: {
+				writeDataPoint: () => {
+					throw new TypeError(
+						"writeDataPoint(): Maximum of 20 doubles supported.",
+					);
+				},
+			},
+		} as unknown as WorkerEnv;
+		const logSpy = vi.spyOn(console, "log");
+		const result = await evaluateIntent(throwingEnv, origin.id, directClock);
+		expect(result).not.toBeNull();
+		expect(result?.proposed).toBe(1);
+		expect(await latchesOfUser(userA)).toHaveLength(1);
+		const warns = logSpy.mock.calls
+			.map((c) => String(c[0]))
+			.filter((l) => l.includes("pipeline.metrics.failed"));
+		expect(warns).toHaveLength(1);
+		const parsed = JSON.parse(warns[0] as string);
+		expect(parsed.level).toBe("warn");
+		expect(parsed.error_code).toBe("TypeError");
+		logSpy.mockRestore();
 	});
 });
 

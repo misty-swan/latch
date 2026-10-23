@@ -222,6 +222,7 @@ const consumeEvent = async (
 		try {
 			result = await evaluateIntent(env, event.sourceIntentId, clock, {
 				vector,
+				origin: "embedding_completed",
 			});
 		} catch (error) {
 			// 第2段の失敗は第1段のログと分けて記録し、起点イベントをfailedへ倒す

@@ -130,6 +130,7 @@ export const consumeReflectionEvent = async (
 		result = await evaluateIntent(env, intent.id, clock, {
 			vector: stored.values,
 			ignoreSuppression: true,
+			origin: "vector_reflection",
 		});
 	} catch (error) {
 		logger.warn("pipeline.reflection.failed", {

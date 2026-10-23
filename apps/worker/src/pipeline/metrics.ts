@@ -7,9 +7,28 @@
  */
 import type { Env } from "../env";
 import type { JevHeldReason } from "../jev/runner";
+import { createLogger } from "../logging/logger";
+import { errorCodeOf } from "./errors";
+
+const logger = createLogger();
+
+/**
+ * 評価の起点(第2段の計測の blobs に載せる・#24)。即時評価(embedding_completed・
+ * vector_reflection)と再評価(cron_*)を計測の上で区別するために使う
+ */
+export type EvaluateOrigin =
+	| "embedding_completed"
+	| "vector_reflection"
+	| "cron_backfill"
+	| "cron_delayed"
+	| "cron_other";
 
 /** writeStage2Metricsの入力(第2段の計測値) */
 export interface Stage2MetricsData {
+	/** 評価の起点 */
+	origin: EvaluateOrigin;
+	/** 1回の評価の2件のdata pointを結ぶ鍵(評価ごとの乱数・どこにも保存しない) */
+	joinKey: string;
 	/** Vectorize取得件数(自idの除外前) */
 	retrievalCount: number;
 	/** Layer 1通過後、上位K_vに絞り込んでLayer 3へ渡した件数 */
@@ -60,52 +79,63 @@ export interface Stage2MetricsData {
  * 第2段の計測を2件のdata pointとして書く(docs/06 §7の層別通過記録)。
  * Analytics Engineの1つのdata pointはdoubles 20個まで(超えるとwriteDataPointが
  * TypeErrorを投げ、評価全体が失敗する・#8)のため、1対1の層通過とグループの項目を分ける。
- * 1件目: blob[0]=処理段の識別("stage2")・blob[1]=Layer 1の除外理由別内訳(JSON)。
+ * 1件目: blob[0]=処理段の識別("stage2")・blob[1]=Layer 1の除外理由別内訳(JSON)・
+ * blob[2]=評価の起点(origin)・blob[3]=2件を結ぶ鍵(joinKey)。
  * doubles=層通過件数(Vectorize取得→L1→L3)・処理時間・Jev(呼び出し・再利用・
  * 保留の理由別 budget/breaker/failed/cap・処理時間)・L5閾値超過・提示・保留の順で、
  * 最後にLayer 2 Candidate Retrievalの所要時間(retrievalMs・F8b)を置く(15個)。
- * 2件目: blob[0]=処理段の識別("stage2_group")。doubles=F4bの項目(人数条件の除外・Pool・集合・
+ * 2件目: blob[0]=処理段の識別("stage2_group")・blob[1]=origin・blob[2]=joinKey。doubles=F4bの項目(人数条件の除外・Pool・集合・
  * グループ用Jev・集合の保留・集合の閾値超過・集合の提示・集合の保留・グループ部分の
- * 失敗)の順(9個・F4b設計 §5)
+ * 失敗)の順(9個・F4b設計 §5)。
+ * 書き込みの例外(上限超過等)は評価へ波及させず、warnログだけを残す(#24)
  */
 export const writeStage2Metrics = (env: Env, data: Stage2MetricsData): void => {
 	if (env.PIPELINE_AX === undefined) {
 		return;
 	}
-	env.PIPELINE_AX.writeDataPoint({
-		blobs: ["stage2", JSON.stringify(data.exclusions)],
-		doubles: [
-			data.retrievalCount,
-			data.l1Pass,
-			data.l3Pass,
-			data.latencyMs,
-			data.jevCalls,
-			data.jevReused,
-			data.jevHeld.budget,
-			data.jevHeld.breaker,
-			data.jevHeld.failed,
-			data.jevHeld.cap,
-			data.jevLatencyMs,
-			data.l5OverThreshold,
-			data.proposed,
-			data.held,
-			data.retrievalMs,
-		],
-		indexes: ["stage2"],
-	});
-	env.PIPELINE_AX.writeDataPoint({
-		blobs: ["stage2_group"],
-		doubles: [
-			data.l4SkippedParticipants,
-			data.groupPool,
-			data.groupSets,
-			data.groupJevCalls,
-			data.groupHeldSets,
-			data.groupOverThreshold,
-			data.groupProposed,
-			data.groupHeldProposals,
-			data.groupFailed,
-		],
-		indexes: ["stage2_group"],
-	});
+	try {
+		env.PIPELINE_AX.writeDataPoint({
+			blobs: [
+				"stage2",
+				JSON.stringify(data.exclusions),
+				data.origin,
+				data.joinKey,
+			],
+			doubles: [
+				data.retrievalCount,
+				data.l1Pass,
+				data.l3Pass,
+				data.latencyMs,
+				data.jevCalls,
+				data.jevReused,
+				data.jevHeld.budget,
+				data.jevHeld.breaker,
+				data.jevHeld.failed,
+				data.jevHeld.cap,
+				data.jevLatencyMs,
+				data.l5OverThreshold,
+				data.proposed,
+				data.held,
+				data.retrievalMs,
+			],
+			indexes: ["stage2"],
+		});
+		env.PIPELINE_AX.writeDataPoint({
+			blobs: ["stage2_group", data.origin, data.joinKey],
+			doubles: [
+				data.l4SkippedParticipants,
+				data.groupPool,
+				data.groupSets,
+				data.groupJevCalls,
+				data.groupHeldSets,
+				data.groupOverThreshold,
+				data.groupProposed,
+				data.groupHeldProposals,
+				data.groupFailed,
+			],
+			indexes: ["stage2_group"],
+		});
+	} catch (error) {
+		logger.warn("pipeline.metrics.failed", { error_code: errorCodeOf(error) });
+	}
 };
