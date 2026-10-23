@@ -82,3 +82,5 @@ jobs:
       - run: node apps/worker/scripts/staging-smoke.mjs
         env:
           LATCH_STAGING_URL: ${{ secrets.LATCH_STAGING_URL }}
+          LATCH_ACCESS_CLIENT_ID: ${{ secrets.LATCH_ACCESS_CLIENT_ID }}
+          LATCH_ACCESS_CLIENT_SECRET: ${{ secrets.LATCH_ACCESS_CLIENT_SECRET }}

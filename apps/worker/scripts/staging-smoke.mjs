@@ -4,7 +4,13 @@
  *   POST /v1/dev/idp-token {"subject":"load-smoke"} = 200
  * を確かめ、外れたら非0で終わる。URLは標準出力にも誤りメッセージにも出さない
  * (stagingのURLは文書・設定・ログに残さない・設計 §2.1)。
+ * LATCH_ACCESS_CLIENT_ID・LATCH_ACCESS_CLIENT_SECRET(Cloudflare Accessの通行証)があれば
+ * 全リクエストへ付ける(stagingの前のAccessを通るため)。
  */
+
+import { accessHeaders } from "../../../tools/load/lib/target.mjs";
+
+const access = accessHeaders(process.env);
 
 const base = (
 	process.env.LATCH_STAGING_URL ||
@@ -20,7 +26,10 @@ if (!base) {
 /** 1回の確認。通信エラーはURLを含み得るため名前だけ出す */
 async function check(label, path, init, expected) {
 	try {
-		const res = await fetch(`${base}${path}`, init);
+		const res = await fetch(`${base}${path}`, {
+			...init,
+			headers: { ...access, ...init?.headers },
+		});
 		if (res.status !== expected) {
 			console.error(`NG: ${label}(期待${expected}・実際${res.status})`);
 			return false;

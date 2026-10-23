@@ -7,6 +7,7 @@
  */
 
 const MASK = "<url伏せ>";
+const SECRET_MASK = "<伏せ>";
 
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -19,9 +20,17 @@ const hostOf = (baseUrl) => {
 	}
 };
 
-/** textの中の宛先のURL・ホスト名・workers.devのURLを伏せる */
-export function redact(text, baseUrl = "") {
+/**
+ * textの中の宛先のURL・ホスト名・workers.devのURLを伏せる。
+ * secretsはAccessの通行証の値(IDとシークレット)で、そのまま出たものも伏せる
+ */
+export function redact(text, baseUrl = "", secrets = []) {
 	let out = text;
+	for (const secret of secrets) {
+		if (typeof secret === "string" && secret !== "") {
+			out = out.split(secret).join(SECRET_MASK);
+		}
+	}
 	const base = baseUrl.replace(/\/+$/, "");
 	const host = base === "" ? null : hostOf(base);
 	if (host !== null) {
@@ -39,18 +48,18 @@ export function redact(text, baseUrl = "") {
  * 流れてくる出力を行(\nまたは\r=k6の進み具合の書き換え)の単位で伏せる。
  * 行の途中で切れた分は次のchunkまで持ち越す(ホスト名が2つのchunkに割れても伏せる)
  */
-export function createLineRedactor(baseUrl, write) {
+export function createLineRedactor(baseUrl, write, secrets = []) {
 	let rest = "";
 	return {
 		push(chunk) {
 			rest += chunk;
 			const last = Math.max(rest.lastIndexOf("\n"), rest.lastIndexOf("\r"));
 			if (last < 0) return;
-			write(redact(rest.slice(0, last + 1), baseUrl));
+			write(redact(rest.slice(0, last + 1), baseUrl, secrets));
 			rest = rest.slice(last + 1);
 		},
 		end() {
-			if (rest !== "") write(redact(rest, baseUrl));
+			if (rest !== "") write(redact(rest, baseUrl, secrets));
 			rest = "";
 		},
 	};

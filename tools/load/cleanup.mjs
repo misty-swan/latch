@@ -18,6 +18,7 @@ import {
 	redactUrls,
 	wranglerOk,
 } from "../../apps/worker/scripts/lib/wrangler-cli.mjs";
+import { accessHeaders } from "./lib/target.mjs";
 
 /** 意思を持つ`load-`の利用者(読み取りのみ) */
 export const SUBJECTS_SQL =
@@ -76,9 +77,11 @@ export async function call(
 		fetchImpl = fetch,
 		timeoutMs = REQUEST_TIMEOUT_MS,
 		retries = TIMEOUT_RETRIES,
+		access = accessHeaders(process.env),
 	} = {},
 ) {
-	const headers = {};
+	// stagingの前のCloudflare Accessの通行証(環境変数に両方あるときだけ付く)
+	const headers = { ...access };
 	if (token) headers.authorization = `Bearer ${token}`;
 	if (body !== undefined) headers["content-type"] = "application/json";
 	let res;

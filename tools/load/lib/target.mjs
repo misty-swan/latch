@@ -4,6 +4,7 @@
  * - checkTarget: 宛先の確認(dev専用サインインが200でなければ中止。prodは404)
  * - runIdNow・resolveRunId: 実行の印(UTCのYYYYMMDDHHmm。集計のSQLが12桁の数字を前提にする)
  * - parseScale・scaled: LOAD_SCALE(rate・人数・時間に掛ける倍率)
+ * - accessHeaders: stagingの前に立つCloudflare Accessのサービストークン(通行証)のヘッダー
  * - bodyFromParse: 読み解き(parse)の応答→保存(POST /v1/intents)の本文。
  *   読み解き確認の[預ける](apps/web/src/intents/submit.tsのconfirmValuesFromParse→
  *   buildCreateIntentRequest)と同じ組み立て方にする。k6は@latch/sharedを読めないため、
@@ -25,6 +26,18 @@ export function checkTarget(status) {
 	if (status !== 200) {
 		throw new Error("宛先がstagingではありません(dev専用サインインが使えない)");
 	}
+}
+
+/**
+ * Accessの通行証のヘッダーを環境変数から作る(Node: process.env・k6: __ENV)。
+ * LATCH_ACCESS_CLIENT_IDとLATCH_ACCESS_CLIENT_SECRETの両方があるときだけ返し、
+ * 片方でも欠ければ空(staging以外の宛先へは何も付けない)
+ */
+export function accessHeaders(env) {
+	const id = env.LATCH_ACCESS_CLIENT_ID;
+	const secret = env.LATCH_ACCESS_CLIENT_SECRET;
+	if (!id || !secret) return {};
+	return { "CF-Access-Client-Id": id, "CF-Access-Client-Secret": secret };
 }
 
 const pad2 = (n) => String(n).padStart(2, "0");

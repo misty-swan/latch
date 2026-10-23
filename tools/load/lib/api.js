@@ -8,13 +8,19 @@
  * - waitForReflection: 意思のVectorizeへの反映(vector_reflectionのprocessed)を待つ((b)の先に保存する側)
  * - respondLatch・wsTicket: 提案への回答・チャットのWebSocketのチケット((c)で使う)
  * 各リクエストにはk6のタグ`name`を付け、閾値と集計をこの名前で絞る。
+ * stagingの前のCloudflare Accessの通行証(LATCH_ACCESS_CLIENT_ID・_SECRET)は全リクエストに付ける。
  * 宛先のURLは表示しない(stagingのURLはログに残さない・設計 §2.1)。
  */
 
 import { check, sleep } from "k6";
 import http from "k6/http";
 import { isReflected } from "./queries.mjs";
-import { checkTarget, parseScale, resolveRunId } from "./target.mjs";
+import {
+	accessHeaders,
+	checkTarget,
+	parseScale,
+	resolveRunId,
+} from "./target.mjs";
 
 /** 機会Intentの地域(worker E2E apps/worker/e2e/latches.spec.tsのsite(0)と同じ値) */
 export const LOAD_GEO = { center: { lat: 33, lng: 131.5 }, radius_m: 1_000 };
@@ -53,8 +59,11 @@ export function runIdFromEnv() {
 
 const json = (body) => JSON.stringify(body);
 
+/** stagingの前のCloudflare Accessの通行証(-eで渡した2つが揃うときだけ付く) */
+export const accessHeadersFromEnv = () => accessHeaders(__ENV);
+
 const headers = (token) => {
-	const h = { "content-type": "application/json" };
+	const h = { "content-type": "application/json", ...accessHeadersFromEnv() };
 	if (token) h.authorization = `Bearer ${token}`;
 	return h;
 };

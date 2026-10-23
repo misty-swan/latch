@@ -76,6 +76,34 @@ const hangingFetch = () => {
 	return { fn, state };
 };
 
+describe("call(Accessの通行証)", () => {
+	it("accessが渡されたら2つのヘッダーを付ける", async () => {
+		const seen = [];
+		const fn = (_url, init) => {
+			seen.push(init.headers);
+			return Promise.resolve(new Response(null, { status: 204 }));
+		};
+		await call("https://x.example", "DELETE", "/v1/intents/a", {
+			fetchImpl: fn,
+			access: {
+				"CF-Access-Client-Id": "id-x",
+				"CF-Access-Client-Secret": "secret-x",
+			},
+		});
+		expect(seen[0]["CF-Access-Client-Id"]).toBe("id-x");
+		expect(seen[0]["CF-Access-Client-Secret"]).toBe("secret-x");
+	});
+	it("accessが無ければ付けない", async () => {
+		const seen = [];
+		const fn = (_url, init) => {
+			seen.push(init.headers);
+			return Promise.resolve(new Response(null, { status: 204 }));
+		};
+		await call("https://x.example", "GET", "/v1/intents", { fetchImpl: fn });
+		expect(Object.keys(seen[0])).not.toContain("CF-Access-Client-Id");
+	});
+});
+
 describe("call(時間切れとやり直し)", () => {
 	it("時間切れの要求は同じ要求を最大3回やり直し、それでもだめなら例外にする", async () => {
 		const { fn, state } = hangingFetch();

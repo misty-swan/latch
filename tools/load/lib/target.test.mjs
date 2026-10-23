@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { subjectsWithIntents } from "../cleanup.mjs";
 import {
+	accessHeaders,
 	bodyFromParse,
 	checkTarget,
 	parseScale,
@@ -152,5 +153,32 @@ describe("subjectsWithIntents", () => {
 	});
 	it("空の結果は空", () => {
 		expect(subjectsWithIntents([])).toEqual([]);
+	});
+});
+
+describe("accessHeaders", () => {
+	it("両方の値があればAccessの通行証のヘッダーを作る", () => {
+		expect(
+			accessHeaders({
+				LATCH_ACCESS_CLIENT_ID: "id-x",
+				LATCH_ACCESS_CLIENT_SECRET: "secret-x",
+			}),
+		).toEqual({
+			"CF-Access-Client-Id": "id-x",
+			"CF-Access-Client-Secret": "secret-x",
+		});
+	});
+	it("片方でも欠ければ空(空文字も欠けた扱い)", () => {
+		expect(accessHeaders({ LATCH_ACCESS_CLIENT_ID: "id-x" })).toEqual({});
+		expect(accessHeaders({ LATCH_ACCESS_CLIENT_SECRET: "s" })).toEqual({});
+		expect(
+			accessHeaders({
+				LATCH_ACCESS_CLIENT_ID: "id-x",
+				LATCH_ACCESS_CLIENT_SECRET: "",
+			}),
+		).toEqual({});
+	});
+	it("どちらも無ければ空", () => {
+		expect(accessHeaders({})).toEqual({});
 	});
 });

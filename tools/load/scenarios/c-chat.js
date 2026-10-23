@@ -24,6 +24,7 @@ import { Counter, Rate, Trend } from "k6/metrics";
 import { clearInterval, setInterval, setTimeout } from "k6/timers";
 import { WebSocket } from "k6/websockets";
 import {
+	accessHeadersFromEnv,
 	createOccasion,
 	ensureTarget,
 	loadConfig,
@@ -164,7 +165,11 @@ export default function (data) {
 		connectFailed.add(1);
 	};
 
-	const ws = new WebSocket(chatWsUrl(config.baseUrl, pair.latchId, ticket));
+	const ws = new WebSocket(
+		chatWsUrl(config.baseUrl, pair.latchId, ticket),
+		null,
+		{ headers: accessHeadersFromEnv() },
+	);
 	ws.onopen = () => {
 		state = "open";
 		connectFailed.add(0);

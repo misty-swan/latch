@@ -107,6 +107,50 @@ URLもシークレットとして持つ。GitHubはシークレットの値を�
 
 3件の登録を終えたら、最後に同じ画面の Variables(Secretsの隣)でリポジトリ変数を1件作る。名前は`STAGING_DEPLOY_ENABLED`、値は`true`である。この変数が`true`のあいだだけ、mainへの変更でstagingへの自動デプロイが動く(5.1)。
 
+### 4.3 Cloudflare Access(stagingの門)
+
+stagingのWorkerは、Cloudflare Accessを通った要求だけを受け付ける。Accessは通った要求にヘッダー`Cf-Access-Jwt-Assertion`を足し、Worker側がその署名・発行元(`iss`)・宛先(`aud`)・期限を確かめて、通らないものは403で断る(設計 `docs/superpowers/specs/2026-10-24-llm-real-connection-design.md` §1)。人間はオーナーのメールアドレスでログインして通り、道具(負荷試験・疎通確認・CI)は「サービストークン」(道具用の通行証=IDとシークレットの組)で通る。
+
+**オーナーの操作**(Cloudflareの管理画面。いずれも新しい設定を作る操作なので、実行の直前に確認する)
+
+1. Workers & Pages → `latch-worker-staging` → Settings → Domains & Routes → workers.devの「Enable Cloudflare Access」を押す
+2. Accessのアプリケーションの方針を、オーナーのメールアドレスだけに絞る
+3. サービストークンを1つ発行し(Zero Trust → Access → Service Auth)、同じアプリケーションの方針に「Service Auth」で加える。発行時に一度だけ出るシークレットを控える(後から見直せない)
+4. アプリケーションのAUD(Audience)タグとチームのドメインを控える。Workerのシークレット`ACCESS_AUD`・`ACCESS_TEAM_DOMAIN`に登録する(3の手順に追記してよい。`pnpm --filter worker secrets:staging`)
+
+**通行証の置き場所**
+
+- 手元: `.superpowers/sdd/2026-10-22-f8b-staging-load-test/access.env`(gitの管理外。コミットしない・文書や記録に貼らない)。中身は次の2行
+  ```
+  LATCH_ACCESS_CLIENT_ID=<サービストークンのID>
+  LATCH_ACCESS_CLIENT_SECRET=<サービストークンのシークレット>
+  ```
+  使うときは`set -a; . .superpowers/sdd/2026-10-22-f8b-staging-load-test/access.env; set +a`で環境変数として読み込む(そのシェルの中だけで有効になる)
+- GitHub: 4.2と同じ画面で、シークレットを2件足す
+
+| 名前 | 値 |
+|---|---|
+| `LATCH_ACCESS_CLIENT_ID` | サービストークンのID |
+| `LATCH_ACCESS_CLIENT_SECRET` | サービストークンのシークレット |
+
+CIの疎通確認(`staging-smoke.mjs`)が、この2件を使ってAccessを通る。
+
+**道具が送るもの**: 環境変数`LATCH_ACCESS_CLIENT_ID`と`LATCH_ACCESS_CLIENT_SECRET`が両方あれば、疎通確認・負荷試験の包み(`run.mjs`がk6へ渡す。HTTPもWebSocketも)・後始末(`cleanup.mjs`)が、全要求にヘッダー`CF-Access-Client-Id`・`CF-Access-Client-Secret`を付ける。片方でも欠ければ何も付けない。包みはこの2つの値を出力から伏せる。集計(`report.mjs`)はWorkerを呼ばずD1を直接読むため、この通行証は使わない。
+
+**確かめ方**(デプロイの後)
+
+```bash
+# 通行証なし: 403になること(Accessの門か、Workerの検証で断られる)
+curl -s -o /dev/null -w "%{http_code}\n" <stagingのURL>/healthz
+# 通行証あり: 200になること(上のaccess.envを読み込んだシェルで)
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -H "CF-Access-Client-Id: $LATCH_ACCESS_CLIENT_ID" \
+  -H "CF-Access-Client-Secret: $LATCH_ACCESS_CLIENT_SECRET" \
+  <stagingのURL>/healthz
+```
+
+(1つ目は通行証なしで403、2つ目はサービストークンを付けて200が出れば成功。通行証なしがAccessのログイン画面への転送(302)になる設定でも、Workerには届かず通らないことの確認として扱う。`node apps/worker/scripts/staging-smoke.mjs`でも、通行証ありの確認ができる)
+
 ## 5. デプロイ
 
 デプロイは、手元のプログラムをCloudflareへ載せて動かすことである。どちらの方法も同じ順で進み、途中で失敗したらそこで止まる。
@@ -214,6 +258,7 @@ k6には`-e 名前=値`で渡す(`LATCH_LOAD_BASE_URL`だけは包みが渡す)�
 | 名前 | 既定 | 意味 |
 |---|---|---|
 | `LATCH_LOAD_BASE_URL` | (必須) | 宛先=`<stagingのURL>`。包み(`run.mjs`)と後始末(`cleanup.mjs`)にシェルの環境変数として渡す |
+| `LATCH_ACCESS_CLIENT_ID`・`LATCH_ACCESS_CLIENT_SECRET` | (stagingは必須) | Cloudflare Accessの通行証(4.3)。包みと後始末にシェルの環境変数として渡す。包みはk6へ`-e`で渡し、出力から伏せる |
 | `RUN_ID` | 実行時刻(UTCの`YYYYMMDDHHmm`) | 実行の印。試験用の利用者のsubjectは`load-<RUN_ID>-<連番>`になり、集計はこの印で絞る。12桁の数字のみ |
 | `LOAD_SCALE` | `1` | 規模の倍率。rate(1分あたりの件数)・人数・時間に掛ける(試しは`0.1`)。(b)(d)は`1.6`(48組)まで・(c)は`1.44`(72組)まで(7.6・7.7) |
 | `PROPOSAL_WAIT_SEC` | `60` | 提案の通知を待つ上限の秒数((b)〜(d)で使う)。(b)では、先に保存した側の意思の反映を待つ上限にも使う(7.6) |
