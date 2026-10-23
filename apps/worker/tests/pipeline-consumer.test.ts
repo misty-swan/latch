@@ -792,6 +792,10 @@ describe("削除の後の書き戻しの防止(第1段・#20・設計 §5.2)", (
 		expect(await memoryVectorStore().getByIds([intentId])).toEqual([null]);
 		expect(send).not.toHaveBeenCalled();
 		expect(logsOf(logSpy, "pipeline.stage1.failed")).toEqual([]);
+		// 書き戻しの防止が働いた回数を数えられるよう、infoログを1件出す
+		expect(logsOf(logSpy, "pipeline.stage1.skipped")).toEqual([
+			expect.objectContaining({ intent_id: intentId, layer: "queue" }),
+		]);
 	});
 
 	it("埋め込みの間に意思がpausedになったら、ベクトルを書かず、起点をprocessedにする", async () => {

@@ -197,6 +197,11 @@ export const runEmbeddingStage = async (
 			.where(eq(intents.id, intent.id))
 			.limit(1);
 		if (current === undefined || current.status !== "active") {
+			// 書き戻しの防止が働いた回数をstagingで数えるためのinfo(layer=呼び出した経路)
+			logger.info("pipeline.stage1.skipped", {
+				intent_id: intent.id,
+				layer: source,
+			});
 			return { status: "gone" };
 		}
 		layer = "upsert";

@@ -287,7 +287,10 @@ describe("DELETE /v1/intents/{id}の後始末(docs/05 §2.5)", () => {
 			{
 				id: ulid(),
 				intentIds: [target.id, keptY.id, keptZ.id],
-				dedupKey: `cleanup-del-g1-${ulid()}`,
+				// 実運用の形(ID@versionのカンマ結合・dedupKeyOf)。削除は本人の絞り込みにこの列を使う(#16)
+				dedupKey: [target.id, keptY.id, keptZ.id]
+					.map((x) => `${x}@1`)
+					.join(","),
 				aggregateScore: 0.5,
 				status: "candidate",
 				createdAt: new Date(),
@@ -295,7 +298,7 @@ describe("DELETE /v1/intents/{id}の後始末(docs/05 §2.5)", () => {
 			{
 				id: ulid(),
 				intentIds: [keptY.id, keptZ.id],
-				dedupKey: `cleanup-del-g2-${ulid()}`,
+				dedupKey: [keptY.id, keptZ.id].map((x) => `${x}@1`).join(","),
 				aggregateScore: 0.4,
 				status: "candidate",
 				createdAt: new Date(),

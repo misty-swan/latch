@@ -1509,6 +1509,9 @@ describe("削除の後の書き戻しの防止(#20・設計 §5.2)", () => {
 		expect(await vectorOf(target.id)).toBeNull();
 		expect(logsOf(logSpy, "pipeline.stage1.failed")).toEqual([]);
 		expect(logsOf(logSpy, "cron.backfilled")).toEqual([]);
+		expect(logsOf(logSpy, "pipeline.stage1.skipped")).toEqual([
+			expect.objectContaining({ intent_id: target.id, layer: "backfill" }),
+		]);
 	});
 
 	it("バックフィル: 埋め込みの間に意思がpausedになったら、ベクトルを書かない", async () => {

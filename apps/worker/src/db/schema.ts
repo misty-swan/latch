@@ -217,6 +217,10 @@ export const matchEvents = sqliteTable(
 			t.sourceIntentId,
 			t.version,
 		),
+		// 削除APIの子の削除(source_intent_id)と、Cronの未処理・反映待ちの掃査
+		// (status・created_at)が全件走査にならないようにする(#16)
+		index("match_events_source_intent_id_idx").on(t.sourceIntentId),
+		index("match_events_status_created_at_idx").on(t.status, t.createdAt),
 	],
 );
 

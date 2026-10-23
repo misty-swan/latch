@@ -56,22 +56,52 @@ function querySubjects() {
 	return Array.isArray(out) ? (out[0]?.results ?? []) : (out.results ?? []);
 }
 
-/** 1回のAPI呼び出し。通信エラーはURLを含み得るため名前だけを出す */
-async function call(base, method, path, { token, body } = {}) {
+/** 1回の要求の時間切れ(ミリ秒)。stagingで1回の削除が長引いても全体が止まらないようにする */
+export const REQUEST_TIMEOUT_MS = 30_000;
+/** 時間切れのとき同じ要求をやり直す最大回数(初回は数えない) */
+export const TIMEOUT_RETRIES = 3;
+
+/**
+ * 1回のAPI呼び出し。通信エラーはURLを含み得るため名前だけを出す。
+ * 時間切れ(既定30秒)なら同じ要求を最大3回までやり直し、それでもだめなら例外にする
+ * (削除・一覧・サインインは再実行しても結果が同じ)。fetchImpl・timeoutMsは試験用の差し替え口
+ */
+export async function call(
+	base,
+	method,
+	path,
+	{
+		token,
+		body,
+		fetchImpl = fetch,
+		timeoutMs = REQUEST_TIMEOUT_MS,
+		retries = TIMEOUT_RETRIES,
+	} = {},
+) {
 	const headers = {};
 	if (token) headers.authorization = `Bearer ${token}`;
 	if (body !== undefined) headers["content-type"] = "application/json";
 	let res;
-	try {
-		res = await fetch(`${base}${path}`, {
-			method,
-			headers,
-			body: body === undefined ? undefined : JSON.stringify(body),
-		});
-	} catch (e) {
-		throw new Error(
-			`${method} ${path.split("?")[0]}: 通信エラー(${e?.name ?? "Error"})`,
-		);
+	for (let attempt = 0; ; attempt += 1) {
+		try {
+			res = await fetchImpl(`${base}${path}`, {
+				method,
+				headers,
+				body: body === undefined ? undefined : JSON.stringify(body),
+				signal: AbortSignal.timeout(timeoutMs),
+			});
+			break;
+		} catch (e) {
+			const timedOut = e?.name === "TimeoutError" || e?.name === "AbortError";
+			if (timedOut && attempt < retries) continue;
+			throw new Error(
+				`${method} ${path.split("?")[0]}: ${
+					timedOut
+						? `時間切れ(${attempt + 1}回試行)`
+						: `通信エラー(${e?.name ?? "Error"})`
+				}`,
+			);
+		}
 	}
 	const text = await res.text();
 	let parsed = null;
@@ -84,8 +114,9 @@ async function call(base, method, path, { token, body } = {}) {
 }
 
 /** subjectとして入り直し、登録済みの利用者のaccess_tokenを返す */
-async function signInExisting(base, subject) {
+async function signInExisting(base, subject, opts) {
 	const idp = await call(base, "POST", "/v1/dev/idp-token", {
+		...opts,
 		body: { subject },
 	});
 	if (idp.status !== 200) {
@@ -94,6 +125,7 @@ async function signInExisting(base, subject) {
 		);
 	}
 	const auth = await call(base, "POST", "/v1/auth/token", {
+		...opts,
 		body: { provider: "google", idp_token: idp.json.idp_token },
 	});
 	if (auth.status !== 200 || auth.json?.registration_required !== false) {
@@ -103,12 +135,15 @@ async function signInExisting(base, subject) {
 }
 
 /** 本人の意思のidを全頁から集める */
-async function listIntentIds(base, token) {
+async function listIntentIds(base, token, opts) {
 	const ids = [];
 	let cursor = null;
 	do {
 		const q = cursor === null ? "" : `&cursor=${encodeURIComponent(cursor)}`;
-		const page = await call(base, "GET", `/v1/intents?limit=50${q}`, { token });
+		const page = await call(base, "GET", `/v1/intents?limit=50${q}`, {
+			...opts,
+			token,
+		});
 		if (page.status !== 200) {
 			throw new Error(`GET /v1/intents が${page.status}`);
 		}
@@ -144,18 +179,33 @@ export async function cleanupSubjects(subjects, cleanOne, onError = () => {}) {
 	return { deleted, failed, failedUsers };
 }
 
-/** 1人分: 入り直して意思を全件消す。404は他の後始末と重なって既に消えた場合 */
-async function cleanOneSubject(base, subject) {
-	const token = await signInExisting(base, subject);
+/**
+ * 1人分: 入り直して意思を全件消す。404は他の後始末と重なって既に消えた場合。
+ * 時間切れで通らなかった意思(やり直しの後も)は残して次の意思へ進み、failedに数える。
+ * opts.fetchImpl・timeoutMsは試験用、onErrorは誤りの文(URL伏せ済み)の出し先
+ */
+export async function cleanOneSubject(base, subject, opts = {}) {
+	const { onError = (m) => console.error(m), ...callOpts } = opts;
+	const token = await signInExisting(base, subject, callOpts);
 	let deleted = 0;
 	let failed = 0;
-	for (const id of await listIntentIds(base, token)) {
-		const r = await call(base, "DELETE", `/v1/intents/${id}`, { token });
-		if (r.status === 204 || r.status === 404) {
-			deleted += 1;
-		} else {
+	for (const id of await listIntentIds(base, token, callOpts)) {
+		try {
+			const r = await call(base, "DELETE", `/v1/intents/${id}`, {
+				...callOpts,
+				token,
+			});
+			if (r.status === 204 || r.status === 404) {
+				deleted += 1;
+			} else {
+				failed += 1;
+				onError(`cleanup: DELETE /v1/intents/{id} が${r.status}`);
+			}
+		} catch (e) {
 			failed += 1;
-			console.error(`cleanup: DELETE /v1/intents/{id} が${r.status}`);
+			onError(
+				`cleanup: 意思を残して次へ進みます(${redactUrls(String(e?.message ?? e))})`,
+			);
 		}
 	}
 	return { deleted, failed };
@@ -181,7 +231,7 @@ async function main() {
 			console.error(`cleanup: 1人の後始末に失敗しました(${message})`),
 	);
 	console.log(
-		`cleanup: 意思を${deleted}件削除しました(失敗${failed}件・うち途中で止まった利用者${failedUsers}人)`,
+		`cleanup: 意思を${deleted}件削除しました(残った意思・失敗${failed}件・うち途中で止まった利用者${failedUsers}人)`,
 	);
 	if (failed > 0) process.exit(1);
 }

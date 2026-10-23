@@ -43,7 +43,7 @@ import {
 	parseResponseSchema,
 	patchIntentRequestSchema,
 } from "@latch/shared";
-import { and, count, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, like, lt, or } from "drizzle-orm";
 import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -990,10 +990,13 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 	return c.json(toIntentDto(result.row), 200);
 });
 
-/** 削除APIの段ごとの所要時間(vector/d1_children/d1_intent・遅い段の切り分け用) */
+/** group_candidatesの削除1文あたりのid数(D1の束縛上限100個の内側) */
+const GROUP_DELETE_CHUNK = 50;
+
+/** 削除APIの段ごとの所要時間(vector/d1・遅い段の切り分け用) */
 const logDeleteTiming = (
 	intentId: string,
-	layer: "vector" | "d1_children" | "d1_intent",
+	layer: "vector" | "d1",
 	startedAt: number,
 ): void => {
 	logger.info("intents.delete.timing", {
@@ -1064,33 +1067,57 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 		sub,
 		deleteNow,
 	);
-	const childrenStartedAt = systemClock.now().getTime();
-	// 子(候補・イベント投入記録)を先に削除してから本体を削除する(docs/05 §2.5)。
-	// 1対1候補はintent_a/bのどちらかに含む行・グループ候補はintent_idsに含む行
-	await db
-		.delete(matchCandidates)
-		.where(
-			or(
-				eq(matchCandidates.intentAId, target.id),
-				eq(matchCandidates.intentBId, target.id),
-			),
+	// 本人の意思を含むグループ候補のidを先に絞る。dedup_keyは「ID@version」のカンマ結合
+	// なので文字列の一致で絞れる(ULIDは英数字のみでLIKEの記号を含まない)。全件を
+	// json_eachで展開する走査をやめる(#16)
+	const groupCandidateIds = (
+		await db
+			.select({ id: groupCandidates.id })
+			.from(groupCandidates)
+			.where(like(groupCandidates.dedupKey, `%${target.id}@%`))
+	).map((row) => row.id);
+	// 子(候補・イベント投入記録・通知)と本体の削除を1回のbatchで行う。batchは1つの
+	// 取引として全部成功か全部取り消しになるため、途中で失敗しても子だけが消えた状態に
+	// ならない(docs/05 §2.5。子行がintentsをFK参照するので本体は最後)。
+	// 1対1候補はintent_a/bのどちらかに含む行。期限切れの通知(intent_expired)も消す
+	// (F7b設計 §5.7)。D1の束縛は1文100個までのためgroup候補のidは50件ずつに分ける
+	const groupDeletes = [];
+	for (let i = 0; i < groupCandidateIds.length; i += GROUP_DELETE_CHUNK) {
+		groupDeletes.push(
+			db
+				.delete(groupCandidates)
+				.where(
+					inArray(
+						groupCandidates.id,
+						groupCandidateIds.slice(i, i + GROUP_DELETE_CHUNK),
+					),
+				),
 		);
-	// intent_idsはJSON配列列のため、json_eachで展開した要素の一致で絞り込む
-	await db
-		.delete(groupCandidates)
-		.where(
-			sql`EXISTS (SELECT 1 FROM json_each(${groupCandidates.intentIds}) WHERE json_each.value = ${target.id})`,
-		);
-	await db.delete(matchEvents).where(eq(matchEvents.sourceIntentId, target.id));
-	// 期限切れの通知(intent_expired)も消す(F7b設計 §5.7。対象が消えた通知を残さない)
-	await db.delete(notifications).where(eq(notifications.intentId, target.id));
-	logDeleteTiming(target.id, "d1_children", childrenStartedAt);
-	const intentStartedAt = systemClock.now().getTime();
-	const [deleted] = await db
-		.delete(intents)
-		.where(and(eq(intents.id, target.id), eq(intents.userId, sub)))
-		.returning();
-	logDeleteTiming(target.id, "d1_intent", intentStartedAt);
+	}
+	const d1StartedAt = systemClock.now().getTime();
+	let deleted: typeof intents.$inferSelect | undefined;
+	try {
+		const results = await db.batch([
+			db
+				.delete(matchCandidates)
+				.where(
+					or(
+						eq(matchCandidates.intentAId, target.id),
+						eq(matchCandidates.intentBId, target.id),
+					),
+				),
+			...groupDeletes,
+			db.delete(matchEvents).where(eq(matchEvents.sourceIntentId, target.id)),
+			db.delete(notifications).where(eq(notifications.intentId, target.id)),
+			db
+				.delete(intents)
+				.where(and(eq(intents.id, target.id), eq(intents.userId, sub)))
+				.returning(),
+		]);
+		[deleted] = results[results.length - 1] as (typeof intents.$inferSelect)[];
+	} finally {
+		logDeleteTiming(target.id, "d1", d1StartedAt);
+	}
 	// 次集合の提案はIntent行とそのグループ候補を消した後に行う(削除中のIntentを含む集合を
 	// 提案しない・F4b設計 §3.5)。消えた行は版の照合・再検証(recheckSet)で除かれる
 	await proposeNextGroupsAfterCancel(db, closedLatchIds, deleteNow);

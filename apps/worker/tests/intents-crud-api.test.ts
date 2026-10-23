@@ -920,7 +920,7 @@ describe("DELETE /v1/intents/{id}(削除・docs/05 §3.1・§3.2)", () => {
 		expect(row).toBeUndefined();
 	});
 
-	it("削除で intents.delete.timing が vector・d1_children・d1_intent の3段そろって出る", async () => {
+	it("削除で intents.delete.timing が vector・d1 の2段そろって出る", async () => {
 		const accessToken = await registerUser("delete-timing");
 		const created = await createActiveConnection(
 			accessToken,
@@ -942,17 +942,108 @@ describe("DELETE /v1/intents/{id}(削除・docs/05 §3.1・§3.2)", () => {
 					(l) =>
 						l.event === "intents.delete.timing" && l.intent_id === created.id,
 				);
-			expect(timings.map((l) => l.layer)).toEqual([
-				"vector",
-				"d1_children",
-				"d1_intent",
-			]);
+			expect(timings.map((l) => l.layer)).toEqual(["vector", "d1"]);
 			for (const l of timings) {
 				expect(typeof l.latency).toBe("number");
 			}
 		} finally {
 			logSpy.mockRestore();
 		}
+	});
+
+	it("D1の削除の途中で失敗したら、どの子の行も消えず、意思の行も残る(1回のbatch・#16)", async () => {
+		const accessToken = await registerUser("delete-atomic");
+		const created = await createActiveConnection(
+			accessToken,
+			"削除が途中で失敗する学習仲間",
+		);
+		const [row] = await db
+			.select({ userId: intents.userId })
+			.from(intents)
+			.where(eq(intents.id, created.id));
+		const userId = row?.userId ?? "";
+		await db.insert(matchEvents).values({
+			id: ulid(),
+			eventType: "embedding_completed",
+			sourceIntentId: created.id,
+			version: 999,
+			payload: {},
+			status: "processed",
+			createdAt: new Date(),
+		});
+		const noteId = ulid();
+		await db.insert(notifications).values({
+			id: noteId,
+			userId,
+			type: "intent_expired",
+			intentId: created.id,
+			createdAt: new Date(),
+		});
+		// 意思の行の削除だけを失敗させる。batchなら先に走った子の削除も巻き戻る
+		await testEnv.DB.exec(
+			"CREATE TRIGGER fail_intent_delete BEFORE DELETE ON intents WHEN OLD.id = '" +
+				created.id +
+				"' BEGIN SELECT RAISE(ABORT, 'forced'); END",
+		);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const res = await deleteReq(`/v1/intents/${created.id}`, accessToken);
+			expect(res.status).toBe(500);
+		} finally {
+			logSpy.mockRestore();
+			errSpy.mockRestore();
+			await testEnv.DB.exec("DROP TRIGGER fail_intent_delete");
+		}
+		const events = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.sourceIntentId, created.id));
+		expect(events.length).toBeGreaterThan(0);
+		const notes = await db
+			.select()
+			.from(notifications)
+			.where(eq(notifications.id, noteId));
+		expect(notes).toHaveLength(1);
+		const [still] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, created.id));
+		expect(still).toBeDefined();
+	});
+
+	it("削除は本人の意思を含むgroup_candidatesだけを消し、他人だけの集合は残す(#16)", async () => {
+		const accessToken = await registerUser("delete-groupcand");
+		const created = await createActiveConnection(
+			accessToken,
+			"グループ候補の掃除を確かめる学習仲間",
+		);
+		const [o1, o2, o3] = [ulid(), ulid(), ulid()];
+		const insertGroup = async (ids: string[]) => {
+			const id = ulid();
+			await db.insert(groupCandidates).values({
+				id,
+				intentIds: ids,
+				dedupKey: ids.map((x) => `${x}@1`).join(","),
+				aggregateScore: 0.5,
+				prevAggregateScore: null,
+				status: "candidate",
+				createdAt: new Date(),
+			});
+			return id;
+		};
+		const mineIds = [
+			await insertGroup([created.id, o1, o2]),
+			await insertGroup([o1, o2, created.id].sort()),
+		];
+		const othersId = await insertGroup([o1, o2, o3]);
+		const res = await deleteReq(`/v1/intents/${created.id}`, accessToken);
+		expect(res.status).toBe(204);
+		const left = await db
+			.select({ id: groupCandidates.id })
+			.from(groupCandidates)
+			.where(inArray(groupCandidates.id, [...mineIds, othersId]));
+		expect(left.map((r) => r.id)).toEqual([othersId]);
 	});
 
 	it("削除でそのIntentのintent_expired通知だけが消え、他の通知は残る", async () => {

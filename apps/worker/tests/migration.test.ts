@@ -6,6 +6,7 @@ import rollback0004Sql from "../migrations_rollback/0004_rollback.sql?raw";
 import rollback0005Sql from "../migrations_rollback/0005_rollback.sql?raw";
 import rollback0006Sql from "../migrations_rollback/0006_rollback.sql?raw";
 import rollback0007Sql from "../migrations_rollback/0007_rollback.sql?raw";
+import rollback0008Sql from "../migrations_rollback/0008_rollback.sql?raw";
 
 /**
  * マイグレーション適用結果の検証。
@@ -353,4 +354,19 @@ it("戻しマイグレーション0007の適用で3列と2索引が消える(doc
 	const indexes = await indexNamesOf("notifications");
 	expect(indexes).not.toContain("notifications_intent_id_type_uniq");
 	expect(indexes).not.toContain("notifications_push_state_created_at_idx");
+});
+
+it("0008適用後、match_eventsにsource_intent_idと(status, created_at)の索引がある(#16)", async () => {
+	const indexes = await indexNamesOf("match_events");
+	expect(indexes).toContain("match_events_source_intent_id_idx");
+	expect(indexes).toContain("match_events_status_created_at_idx");
+});
+
+it("戻しマイグレーション0008の適用でmatch_eventsの2索引が消える(docs/11 §3の対マイグレーション)", async () => {
+	for (const statement of toStatements(rollback0008Sql)) {
+		await env.DB.prepare(statement).run();
+	}
+	const indexes = await indexNamesOf("match_events");
+	expect(indexes).not.toContain("match_events_source_intent_id_idx");
+	expect(indexes).not.toContain("match_events_status_created_at_idx");
 });

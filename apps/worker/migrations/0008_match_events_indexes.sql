@@ -1,0 +1,2 @@
+CREATE INDEX `match_events_source_intent_id_idx` ON `match_events` (`source_intent_id`);--> statement-breakpoint
+CREATE INDEX `match_events_status_created_at_idx` ON `match_events` (`status`,`created_at`);
