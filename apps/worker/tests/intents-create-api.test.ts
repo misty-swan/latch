@@ -20,7 +20,7 @@ import { describe, expect, it } from "vitest";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
 import { intents, users } from "../src/db/schema";
 import { MS_PER_DAY } from "../src/intents/expiry";
-import { toIntentDto } from "../src/routes/intents";
+import { setParserOverrideForTest, toIntentDto } from "../src/routes/intents";
 import privateJwkText from "./fixtures/test-idp-private.jwk?raw";
 
 const testEnv = env as unknown as Env;
@@ -167,6 +167,19 @@ describe("POST /v1/intents/parse(docs/05 §3.2・§3.3: 構造化プレビュー
 		expect(body.warnings).toEqual([]);
 		// つながりは期限選択肢3件(now+7/30/90日)
 		expect(body.expires_at_options).toHaveLength(3);
+	});
+
+	it("Parserが失敗(ok:false)を返すと422 PARSE_FAILED", async () => {
+		const accessToken = await registerUser("parse-fail");
+		setParserOverrideForTest(async () => ({ ok: false, kind: "timeout" }));
+		try {
+			const res = await postParse(accessToken, { raw_text: "失敗させる入力" });
+			expect(res.status).toBe(422);
+			const body = (await res.json()) as ErrorResponse;
+			expect(body.error.code).toBe("PARSE_FAILED");
+		} finally {
+			setParserOverrideForTest(null);
+		}
 	});
 
 	it("raw_text空は400 VALIDATION_FAILED", async () => {

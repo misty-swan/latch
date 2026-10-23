@@ -3,16 +3,16 @@
  * LATCH_LLM_MODEで切り替える3系統(Intent Parser / Embedding / Jev)の
  * 入出力をここに集約する。実装はstub/配下・束ねはmode.ts。
  */
-import type { IntentForm, ParseWarning } from "@latch/shared";
+import type { Category, IntentForm, ParseWarning } from "@latch/shared";
 
 /** LLMの動作モード。既定stub・real適用は精度ゲート(07 §6)合格が条件 */
 export type LlmMode = "stub" | "real";
 
-/** Intent Parser stubの出力(07 §2(a)・05 §3.3のstub対象フィールド) */
-export interface ParserStubOutput {
+/** Intent Parserの出力(07 §2(a)・05 §3.3)。stubはcategoryを常にnullで返す */
+export interface ParserOutput {
 	form: IntentForm;
 	topic: string;
-	category: null;
+	category: Category | null;
 	time: { start: string; end: null } | null;
 	participants: { min: number; max: number };
 	budget: { min: number; max: number } | null;
@@ -45,13 +45,21 @@ export interface JevInput {
 	normalizedB: string;
 }
 
-/** Jev呼び出しの失敗種別(07 §5)。切替対象かどうかは isFallbackEligible で判定する */
-export type JevFailureKind =
+/** LLM呼び出しの失敗種別(07 §5)。Jevの切替対象かどうかは isFallbackEligible で判定する */
+export type LlmFailureKind =
 	| "timeout"
 	| "rate_limited"
 	| "overloaded"
 	| "invalid_output"
 	| "other";
+
+/** Jev呼び出しの失敗種別。LlmFailureKindの別名(既存の参照を保つ) */
+export type JevFailureKind = LlmFailureKind;
+
+/** Parser呼び出しの結果。失敗は例外でなく型付きで返す(Jevと同じ作法) */
+export type ParserOutcome =
+	| { ok: true; output: ParserOutput }
+	| { ok: false; kind: LlmFailureKind };
 
 /** Jev呼び出しの結果。失敗は例外でなく型付きで返す(07 §5) */
 export type JevOutcome =
@@ -67,7 +75,7 @@ export const isFallbackEligible = (kind: JevFailureKind): boolean =>
 
 /** LLMの3系統を束ねたインターフェース。clockは構築時に注入する(04 §4の時刻規律) */
 export interface Llm {
-	parser: (raw_text: string) => ParserStubOutput;
+	parser: (raw_text: string) => Promise<ParserOutcome>;
 	embedding: (input: string) => Promise<number[]>;
 	/** primary失敗(切替対象)時にfallbackへ切り替える(07 §5) */
 	jev: { primary: JevFn; fallback: JevFn };

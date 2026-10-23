@@ -26,7 +26,10 @@ export const createLlm = (env: Env, clock: Clock): Llm => {
 		);
 	}
 	return {
-		parser: (raw_text) => stubParse(raw_text, clock),
+		parser: async (raw_text) => ({
+			ok: true,
+			output: stubParse(raw_text, clock),
+		}),
 		embedding: stubEmbedding,
 		jev: { primary: stubJev, fallback: stubJev },
 	};

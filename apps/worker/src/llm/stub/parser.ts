@@ -12,7 +12,7 @@ import {
 } from "@latch/shared";
 import type { Clock } from "../../clock/clock";
 import { MS_PER_DAY, occasionDefaultExpiry } from "../../intents/expiry";
-import type { ParserStubOutput } from "../types";
+import type { ParserOutput } from "../types";
 
 /** JST=UTC+9の固定オフセット。Intl・タイムゾーンDBは使わない(clock.tsと同一方針・04 §4) */
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -92,7 +92,7 @@ const extractTopic = (raw_text: string): string => {
 };
 
 /** raw_textを規則ベースで構造化する(07 §2(a)・§3) */
-export const stubParse = (raw_text: string, clock: Clock): ParserStubOutput => {
+export const stubParse = (raw_text: string, clock: Clock): ParserOutput => {
 	// form判定: 時刻語(0〜23時のみ採用)→機会(時刻確定)・日付語のみ→機会(時刻null)・
 	// どちらもなし→より安全な側のつながり(07 §3)。範囲外の時刻語(例: 「25時」)は
 	// 時刻語として採用しない(不正なISO・Invalid Dateを作らないため。日付語の有無で
@@ -101,8 +101,8 @@ export const stubParse = (raw_text: string, clock: Clock): ParserStubOutput => {
 	const dateMatch = DATE_WORD.exec(raw_text);
 
 	let form: IntentForm = "connection";
-	let time: ParserStubOutput["time"] = null;
-	const warnings: ParserStubOutput["warnings"] = [];
+	let time: ParserOutput["time"] = null;
+	const warnings: ParserOutput["warnings"] = [];
 	if (timeMatch !== null && Number(timeMatch[1]) <= 23) {
 		form = "occasion";
 		const hour = Number(timeMatch[1]);
@@ -118,7 +118,7 @@ export const stubParse = (raw_text: string, clock: Clock): ParserStubOutput => {
 
 	// 金額: min=maxへ丸める(07 §3)
 	const amountMatch = AMOUNT.exec(raw_text);
-	let budget: ParserStubOutput["budget"] = null;
+	let budget: ParserOutput["budget"] = null;
 	if (amountMatch !== null) {
 		const amount = Number(amountMatch[1]);
 		budget = { min: amount, max: amount };
@@ -129,7 +129,7 @@ export const stubParse = (raw_text: string, clock: Clock): ParserStubOutput => {
 	const rangeMatch = PARTICIPANT_RANGE.exec(raw_text);
 	const singleMatch =
 		rangeMatch === null ? PARTICIPANT_SINGLE.exec(raw_text) : null;
-	let participants: ParserStubOutput["participants"] = { min: 2, max: 2 };
+	let participants: ParserOutput["participants"] = { min: 2, max: 2 };
 	if (rangeMatch !== null) {
 		const rawMin = Number(rangeMatch[1]);
 		const rawMax = Number(rangeMatch[2]);

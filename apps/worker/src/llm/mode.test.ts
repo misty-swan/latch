@@ -44,10 +44,12 @@ describe("createLlm(07 §2: 3系統の束ね・realは未接続)", () => {
 		expect(typeof llm.jev.fallback).toBe("function");
 	});
 
-	it("llm.parserは構築時に注入したclockで解析する", () => {
+	it("llm.parserは構築時に注入したclockで解析し、成功を{ok:true}で返す", async () => {
 		const llm = createLlm({ LATCH_LLM_MODE: "stub" } as unknown as Env, fixed);
-		expect(llm.parser("日曜17時にカレー会").time?.start).toBe(
-			"2026-10-18T17:00:00+09:00",
-		);
+		const outcome = await llm.parser("日曜17時にカレー会");
+		expect(outcome.ok).toBe(true);
+		if (outcome.ok) {
+			expect(outcome.output.time?.start).toBe("2026-10-18T17:00:00+09:00");
+		}
 	});
 });

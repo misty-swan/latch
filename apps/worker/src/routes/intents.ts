@@ -71,6 +71,7 @@ import {
 	proposeNextGroupsAfterCancel,
 } from "../latches/cancel-open";
 import { createLlm } from "../llm/mode";
+import type { Llm } from "../llm/types";
 import { createLogger } from "../logging/logger";
 import { errorCodeOf } from "../pipeline/errors";
 import { emitMatchEvent } from "../pipeline/events";
@@ -318,6 +319,15 @@ const intentMeaningChanged = (
 // metadata.statusの同期(syncVectorStatus)はvectorstore/sync-status.tsの共通ヘルパーを使う
 // (pause/resumeとCronの期限切れ2窓走査の共用・docs/06 §2)
 
+/**
+ * parseのParserを差し替える試験専用の注入口(失敗時の422の試験用)。
+ * 通常はnullで、createLlmのparserを使う。本番コードからは設定しない
+ */
+let parserOverrideForTest: Llm["parser"] | null = null;
+export const setParserOverrideForTest = (p: Llm["parser"] | null): void => {
+	parserOverrideForTest = p;
+};
+
 intentRoutes.post("/parse", requireRegistered, async (c) => {
 	const parsed = parseIntentRequestSchema.safeParse(await readJsonBody(c));
 	if (!parsed.success) {
@@ -327,10 +337,23 @@ intentRoutes.post("/parse", requireRegistered, async (c) => {
 	// Parserはstub(決定的・docs/07 §2)。real適用は精度ゲート(07 §6)合格後。
 	// createLlmの引数型はwrangler生成の完全なEnv(worker-configuration.d.tsのambient型)。
 	// c.env(AppEnv.Bindings・src/env.tsのEnv)は同一実行時値の宣言部分型のため画一的に受ける
-	const result = createLlm(
-		c.env as unknown as Parameters<typeof createLlm>[0],
-		systemClock,
-	).parser(parsed.data.raw_text);
+	const parser =
+		parserOverrideForTest ??
+		createLlm(c.env as unknown as Parameters<typeof createLlm>[0], systemClock)
+			.parser;
+	const outcome = await parser(parsed.data.raw_text);
+	if (!outcome.ok) {
+		// 失敗種別はすべて422 PARSE_FAILEDに倒す。ログには種別だけを出す
+		logger.warn("intents.parse.failed", {
+			error_code: `PARSE_${outcome.kind.toUpperCase()}`,
+		});
+		const r = errorJson(
+			"PARSE_FAILED",
+			"解析に失敗しました。入力を見直してください",
+		);
+		return c.json(r.body, r.status);
+	}
+	const result = outcome.output;
 	const body: ParseIntentResponse = {
 		form: result.form,
 		topic: result.topic,
