@@ -1199,6 +1199,77 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 		]);
 	});
 
+	it("push_fresh(#26): 購読の無い利用者の通知は同じ実行の中でno_subscriptionまで進む", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const id = ulid();
+		await db.insert(notifications).values({
+			id,
+			userId,
+			type: "proposal",
+			latchId: null,
+			readAt: null,
+			createdAt: FIXED_NOW,
+			intentId: null,
+			pushState: "pending",
+			pushAttemptedAt: null,
+		});
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		const [row] = await db
+			.select({ s: notifications.pushState })
+			.from(notifications)
+			.where(eq(notifications.id, id));
+		expect(row?.s).toBe("no_subscription");
+	});
+
+	it("push_fresh(#26): 送出が失敗しても後ろの走査が止まらず、layer付きで記録される", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const target = intentFixture({
+			id: ulid(),
+			userId,
+			topic: "送出失敗の試験",
+		});
+		await insertIntentRow(target);
+		const staleId = ulid();
+		await db.insert(matchEvents).values({
+			id: staleId,
+			eventType: "intent_updated",
+			sourceIntentId: target.id,
+			version: 1,
+			payload: {},
+			status: "pending",
+			createdAt: new Date(BASE - 11 * MIN),
+			processedAt: null,
+		});
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		// realでVAPIDの鍵が無いと、送り手の生成が例外になる
+		await expect(
+			runScheduledPipeline(
+				{
+					...testEnv,
+					LATCH_PUSH_MODE: "real",
+					VAPID_PUBLIC_KEY: undefined,
+					VAPID_PRIVATE_KEY: undefined,
+					VAPID_SUBJECT: undefined,
+				},
+				directClock,
+			),
+		).resolves.toBeUndefined();
+
+		const layers = logsOf(logSpy, "cron.sweep.failed").map((l) => l.layer);
+		expect(layers).toContain("push_fresh");
+		// push_freshより後ろのpending残留の掃査は動いている
+		const [event] = await db
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, staleId));
+		expect(event?.status).toBe("failed");
+	});
+
 	it("走査の隔離(#15): 前半の走査(bucket)の問い合わせが失敗しても後ろの走査が動き、layer付きで記録される", async () => {
 		const userId = ulid();
 		await insertUserRow(userId);

@@ -16,10 +16,10 @@
  * 委譲し、戻り値の計測結果を起点イベントのpayloadへ記録する(06 §7)。
  */
 import { type MatchQueueMessage, PIPELINE } from "@latch/shared";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Clock } from "../clock/clock";
-import { intents, matchEvents } from "../db/schema";
+import { intents, matchEvents, notifications } from "../db/schema";
 import type { Env } from "../env";
 import { createEmbedder } from "../llm/embedding";
 import { createLogger } from "../logging/logger";
@@ -441,12 +441,52 @@ const consumeEvent = async (
 };
 
 /**
+ * 開始時刻以降に作られた通知があれば、その送出をwaitUntilで始める(待たない)。
+ * 判定は「createdAtが開始時刻以降の通知が1件でもあるか」の1回の照会。
+ * バッチの最後の送出と重なっても、flushPushは行ごとの条件付きUPDATEで順番を取るので
+ * 同じ通知は1回しか送られない。失敗はログだけ(取りこぼしはバッチの最後の送出とCronが担う)
+ */
+const flushFreshPush = async (
+	env: Env,
+	ctx: ExecutionContext,
+	clock: Clock,
+	startedAt: Date,
+): Promise<void> => {
+	try {
+		const db = drizzle(env.DB);
+		const [created] = await db
+			.select({ id: notifications.id })
+			.from(notifications)
+			.where(gte(notifications.createdAt, startedAt))
+			.limit(1);
+		if (created === undefined) {
+			return;
+		}
+		ctx.waitUntil(
+			flushPush(db, pushSenderOf(env), clock, {
+				minAgeMs: 0,
+				createdFrom: startedAt,
+			}).catch((error) => {
+				logger.warn("push.flush.failed", {
+					error_code: errorCodeOf(error, "PUSH_FLUSH_FAILED"),
+				});
+			}),
+		);
+	} catch (error) {
+		logger.warn("push.flush.failed", {
+			error_code: errorCodeOf(error, "PUSH_FLUSH_FAILED"),
+		});
+	}
+};
+
+/**
  * 通常キュー(match-events)のバッチを処理する。1メッセージの例外でバッチ全体を倒さない。
  * 消費の結果がretryならそのメッセージだけを遅延付きでretryし、それ以外はack(既定)
  */
 const handleMainQueueBatch = async (
 	env: Env,
 	batch: MessageBatch<MatchQueueMessage>,
+	ctx: ExecutionContext,
 	clock: Clock,
 ): Promise<void> => {
 	for (const message of batch.messages) {
@@ -455,6 +495,8 @@ const handleMainQueueBatch = async (
 		if (typeof eventId !== "string") {
 			continue;
 		}
+		// このメッセージの処理の開始時刻。これ以降に作られた通知だけをその場で送る(#19)
+		const startedAt = clock.now();
 		try {
 			const body = message.body;
 			// 空でない数値の配列だけを第2段へ渡す(空配列で照会しない)
@@ -471,6 +513,9 @@ const handleMainQueueBatch = async (
 			if (outcome !== undefined) {
 				message.retry({ delaySeconds: outcome.retryDelaySeconds });
 			}
+			// このメッセージで通知が作られていれば、バッチの終わりを待たずに送り出す
+			// (長いバッチの先頭で作った提案のWeb Pushが最後まで待たされない・#19)
+			await flushFreshPush(env, ctx, clock, startedAt);
 		} catch (error) {
 			// 個別消費の失敗は再試行せずack(06 §5の設計)。intent_idはこの時点で
 			// 特定できないため記録しない(許可フィールドのみ・docs/08 §6)
@@ -533,7 +578,7 @@ export const handleQueueBatch = async (
 			await handleDlqBatch(env, batch);
 			return;
 		}
-		await handleMainQueueBatch(env, batch, clock);
+		await handleMainQueueBatch(env, batch, ctx, clock);
 		// 提案化・成立で作られた通知をその場で送り出す(F7b設計 §5.1 手順2)。
 		// 失敗はログだけ(取りこぼしはCronの回収が担う・§5.6)
 		ctx.waitUntil(

@@ -15,13 +15,14 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { importJWK, SignJWT } from "jose";
 import { ulid } from "ulid";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
 import { fixedClock } from "../src/clock/clock";
 import {
 	intents,
 	latches,
 	latchMembers,
+	matchEvents,
 	notifications,
 	proposalHistory,
 	pushSubscriptions,
@@ -29,6 +30,8 @@ import {
 import type { Env as WorkerEnv } from "../src/env";
 import worker from "../src/index";
 import { handleQueueBatch } from "../src/pipeline/consumer";
+import { stubPushSender } from "../src/push/sender";
+import { memoryVectorStore } from "../src/vectorstore/memory";
 import privateJwkText from "./fixtures/test-idp-private.jwk?raw";
 
 const testEnv = env as unknown as WorkerEnv;
@@ -360,5 +363,113 @@ describe("主キューのバッチの後の送出", () => {
 		const nid = await seedPending(a.id);
 		await consume("match-events-dlq");
 		expect(await stateOf(nid)).toBe("pending");
+	});
+});
+
+describe("メッセージごとの送出(#19)", () => {
+	const clock = fixedClock(new Date("2026-10-19T12:00:00.000Z"));
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	/** 意思1件と、その反映確認(vector_reflection)のイベント行を作り、event_idを返す */
+	const seedReflectionEvent = async (userId: string): Promise<string> => {
+		const intentId = await insertIntent(userId);
+		const id = ulid();
+		await db.insert(matchEvents).values({
+			id,
+			eventType: "vector_reflection",
+			sourceIntentId: intentId,
+			version: 1,
+			payload: {},
+			status: "pending",
+			createdAt: clock.now(),
+		});
+		return id;
+	};
+
+	const stateOf = async (id: string) =>
+		(
+			await db
+				.select({ s: notifications.pushState })
+				.from(notifications)
+				.where(eq(notifications.id, id))
+		)[0]?.s;
+
+	/**
+	 * 2件のバッチを消費する。1件目の処理(getByIdsの1回目)で通知を1件作り、
+	 * 2件目の処理(getByIdsの2回目)の中で通知の送出を最大2秒待って、その時点の状態を返す
+	 */
+	const runTwoMessageBatch = async (userId: string) => {
+		vi.spyOn(testEnv.MATCH_QUEUE, "send").mockResolvedValue({
+			metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+		});
+		const first = await seedReflectionEvent(userId);
+		const second = await seedReflectionEvent(userId);
+		const notificationId = ulid();
+		let stateDuringSecond: string | undefined;
+		const store = memoryVectorStore();
+		const original = store.getByIds.bind(store);
+		let calls = 0;
+		vi.spyOn(store, "getByIds").mockImplementation(async (ids) => {
+			calls += 1;
+			if (calls === 1) {
+				await db.insert(notifications).values({
+					id: notificationId,
+					userId,
+					type: "proposal",
+					latchId: null,
+					readAt: null,
+					createdAt: clock.now(),
+					intentId: null,
+					pushState: "pending",
+					pushAttemptedAt: null,
+				});
+			} else {
+				for (let i = 0; i < 40; i += 1) {
+					stateDuringSecond = await stateOf(notificationId);
+					if (stateDuringSecond !== "pending") break;
+					await new Promise((resolve) => setTimeout(resolve, 50));
+				}
+			}
+			return original(ids);
+		});
+		const batch = createMessageBatch<MatchQueueMessage>("match-events", [
+			{
+				id: "m1",
+				timestamp: clock.now(),
+				attempts: 1,
+				body: { event_id: first },
+			},
+			{
+				id: "m2",
+				timestamp: clock.now(),
+				attempts: 1,
+				body: { event_id: second },
+			},
+		]);
+		const ctx = createExecutionContext();
+		await handleQueueBatch(batch, testEnv, ctx, clock);
+		await waitOnExecutionContext(ctx);
+		return { notificationId, stateDuringSecond };
+	};
+
+	it("1件目が作った通知の送信試行は、2件目の処理の終わりより前に起きる", async () => {
+		const a = await registerUser("己");
+		const { notificationId, stateDuringSecond } = await runTwoMessageBatch(
+			a.id,
+		);
+		expect(stateDuringSecond).toBe("no_subscription");
+		expect(await stateOf(notificationId)).toBe("no_subscription");
+	});
+
+	it("メッセージごとの送出とバッチの最後の送出が重なっても、同じ通知は1回しか送らない", async () => {
+		const a = await registerUser("庚");
+		await subscribe(a.id);
+		const send = vi.spyOn(stubPushSender, "send");
+		const { notificationId } = await runTwoMessageBatch(a.id);
+		expect(await stateOf(notificationId)).toBe("sent");
+		expect(send).toHaveBeenCalledTimes(1);
 	});
 });

@@ -86,6 +86,8 @@
 			{
 				"queue": "match-events",
 				"max_retries": 3,
+				// 1件目が来てから待つ秒数。既定(5秒)だと小さいバッチでも5秒待つため1秒にする(#19)
+				"max_batch_timeout": 1,
 				"dead_letter_queue": "match-events-dlq"
 			},
 			{
@@ -201,6 +203,7 @@
 					{
 						"queue": "match-events-staging",
 						"max_retries": 3,
+						"max_batch_timeout": 1,
 						"dead_letter_queue": "match-events-dlq-staging"
 					},
 					{

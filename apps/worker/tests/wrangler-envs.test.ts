@@ -12,6 +12,7 @@ interface Queues {
 	consumers?: {
 		queue: string;
 		max_retries?: number;
+		max_batch_timeout?: number;
 		dead_letter_queue?: string;
 	}[];
 }
@@ -91,6 +92,7 @@ describe("wrangler.jsonc の env.staging", () => {
 			{
 				queue: "match-events-staging",
 				max_retries: 3,
+				max_batch_timeout: 1,
 				dead_letter_queue: "match-events-dlq-staging",
 			},
 			{ queue: "match-events-dlq-staging", max_retries: 1 },
@@ -104,5 +106,15 @@ describe("wrangler.jsonc の env.staging", () => {
 	it("workers.devは有効でプレビューURLは無効", () => {
 		expect(staging.workers_dev).toBe(true);
 		expect(staging.preview_urls).toBe(false);
+	});
+});
+
+describe("主キューの消費者の待ち時間(#19)", () => {
+	it("トップレベルとstagingの主キューのmax_batch_timeoutが1(秒)", () => {
+		const mainOf = (s: Section) =>
+			s.queues?.consumers?.find((c) => c.dead_letter_queue !== undefined)
+				?.max_batch_timeout;
+		expect(mainOf(top)).toBe(1);
+		expect(mainOf(staging)).toBe(1);
 	});
 });
