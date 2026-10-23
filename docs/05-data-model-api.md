@@ -1,9 +1,9 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.25
+- 文書バージョン: v0.26
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.25更新: 2026-10-22)
+- 作成日: 2026-10-17(v0.26更新: 2026-10-23)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
@@ -28,7 +28,8 @@
 - v0.23の変更点: 不具合の修正工程(issue #7・2026-10-22オーナー合意・12 §2の決定記録(評価の流れ))に伴い、§2.2のmatch_eventsのevent_typeへ反映確認のイベント`vector_reflection`を(TEXT列でCHECK制約が無いためマイグレーションは無い)、§2.3のVectorizeのmetadataへ意思の`version`(反映確認に使う)を加え、取得系(getByIds)の用途を反映確認に改めた。前提文書欄の版数を更新
 - v0.24の変更点: 前提文書欄の版数同期(F8bの負荷試験の結果の記録(2026-10-22)に伴う02・04改版への追従)。内容の変更はない
 - v0.25の変更点: 前提文書欄の同期のみの改版(最終の直しに伴う版数の連鎖。内容の変更はない)
-- 前提文書: 01 要件定義書 v0.20 / 02 スコープ・受け入れ条件合意書 v0.16 / 04 アーキテクチャ設計書 v0.25
+- v0.26の変更点: 不具合の修正工程(第2回・issue #15・#16・#20・2026-10-23)に伴い、§2.2のmatch_eventsへ2つの索引(source_intent_id・(status, created_at))とマイグレーション0008と戻す手順を、§2.4の索引の一覧へ同じ2つを、§2.3のVectorizeへ取得(getByIds)の1回20件の上限と実装の中での分割・metadata更新の失敗をCronのmetadata整合の修復で回収することを、§2.5のIntent削除の実行順序へD1の削除を1回のバッチ(1つの取引)で行うこと・グループ候補を本人の意思を含む行に絞ってから消すこと・削除の後のベクトルの書き戻しの防止と孤立したベクトルの自己修復(06 §2)を加えた。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.21 / 02 スコープ・受け入れ条件合意書 v0.17 / 04 アーキテクチャ設計書 v0.26
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -144,7 +145,10 @@ payload:           json
 status:            pending | processed | failed | dead   # dead=DLQ隔離
 created_at / processed_at
 UNIQUE(event_type, source_intent_id, version)
+INDEX(source_intent_id) / INDEX(status, created_at)   # マイグレーション0008
 ```
+
+**match_eventsの索引(不具合の修正工程(第2回)で確定)。** INDEX(source_intent_id)は意思の削除APIの子の行の削除(§2.5)・反映確認とmetadata整合の修復の照会(06 §2)に、INDEX(status, created_at)はCronの未処理・反映待ち・pending残留の掃査に使う(多くの意思を保存した後に削除APIが全件走査で遅くなった不具合・issue #16の修正)。マイグレーション0008で追加し、戻す手順(migrations_rollback/0008)を対で持つ(12 §4・11 §3。索引の追加だけで列とデータは変わらないため、適用前の確認は要らない。戻してもデータは失われないが、削除APIとCronの掃査が全件走査に戻って遅くなる)。
 
 **match_candidates**(1対1評価・30日定期削除)
 
@@ -276,7 +280,7 @@ created_at / updated_at
 
 ### 2.3 Vectorize・KV・R2
 
-**Vectorizeインデックス**(1本): vector id = intent ULID。metadata = `{form, status, category, user_id, version}`(インデックス作成時にmetadata indexとしてform・status・categoryを宣言する。07 §1)。`version`は第1段でupsertしたときの意思のversion(整数)で、反映確認(06 §2)が新しいversionの反映を見分けるために使う(filterには使わないためmetadata indexは要らない。`version`を持たない既存のベクトルは反映確認の対象にならず、Cronのmetadata整合の修復は既存のmetadataを保ったまま書き直す・不具合の修正工程で確定)。検索時のfilterで form一致・status=active を最適化として適用し(01 §12)、取り出し後は**D1の現行status・blocks・提案履歴をコードで再検証する**(metadataの同期遅延に依存しない二重化)。Intentの遷移(pause/resume/expired)ごとにmetadataのstatusを更新し、失敗はCronバックフィルで回収する(機会LATCH成立によるmatchedはmetadataを更新しない・§2.2)。照合時にD1行が存在しないベクトルはfail-closeで除外する。次元=1024・距離=cosine(07 v0.1で確定)。削除: Intent削除・期限切れ+7日でベクトル削除(§2.6)。**ローカル代替(F3実装確定)。** Vectorizeにはローカルシミュレータが存在しないため、LATCH_ENV=local(単体・統合試験・wrangler dev・E2E)では同一インタフェースのインメモリ実装(コサイン距離・metadata filter込み・04 §4のVectorStore抽象)へ置き換える。staging/prodはVectorize実装を使う。取得系(getByIds)は反映確認(metadataのversionの照合)・metadata同期・Cronの整合点検と、自分のベクトルを載せていない`embedding_completed`の第2段に使う(06 §2)。
+**Vectorizeインデックス**(1本): vector id = intent ULID。metadata = `{form, status, category, user_id, version}`(インデックス作成時にmetadata indexとしてform・status・categoryを宣言する。07 §1)。`version`は第1段でupsertしたときの意思のversion(整数)で、反映確認(06 §2)が新しいversionの反映を見分けるために使う(filterには使わないためmetadata indexは要らない。`version`を持たない既存のベクトルは反映確認の対象にならず、Cronのmetadata整合の修復は既存のmetadataを保ったまま書き直す・不具合の修正工程で確定)。検索時のfilterで form一致・status=active を最適化として適用し(01 §12)、取り出し後は**D1の現行status・blocks・提案履歴をコードで再検証する**(metadataの同期遅延に依存しない二重化)。Intentの遷移(pause/resume/expired)ごとにmetadataのstatusを更新し、失敗はCronのmetadata整合の修復で回収する(06 §2)(機会LATCH成立によるmatchedはmetadataを更新しない・§2.2)。照合時にD1行が存在しないベクトルはfail-closeで除外する。次元=1024・距離=cosine(07 v0.1で確定)。削除: Intent削除・期限切れ+7日でベクトル削除(§2.6)。**ローカル代替(F3実装確定)。** Vectorizeにはローカルシミュレータが存在しないため、LATCH_ENV=local(単体・統合試験・wrangler dev・E2E)では同一インタフェースのインメモリ実装(コサイン距離・metadata filter込み・04 §4のVectorStore抽象)へ置き換える。staging/prodはVectorize実装を使う。取得系(getByIds)は反映確認(metadataのversionの照合)・metadata同期・Cronの整合点検と、自分のベクトルを載せていない`embedding_completed`の第2段に使う(06 §2)。Vectorizeの取得は1回20件までで、超えると呼び出しが失敗するため、Vectorizeの実装の中で20件ずつに分けて呼ぶ(呼び出し側は上限を意識しない・不具合の修正工程(第2回)で確定)。
 
 **KV**: `revocation:{jti}` = 1(TTL=JWT残り寿命)。失効はJWT残寿命(最大1時間)以内の効力とし、権限が関わる操作(チャット送信・回答・退会)はD1のusers.statusを必ず再検証して補完する。ブロックはトークンを失効させず、該当する提案・LATCHを閉じることで即時に効かせる(§2.2のblocks・§3.3)。WebSocket接続チケットはKVに置かず、**joseで署名した短期トークン(exp=60秒・user_id/latch_idクレーム)** を使う(結果整合の伝播遅延を回避。§3.4)。回転猶予: `rfg:{旧リフレッシュトークンハッシュ}` = 現行リフレッシュトークン(TTL 120秒・取得後に削除で使い切り。窓外の再提示は再利用検出として族をrevoked。04 §4)。猶予窓内の旧トークン再提示でKVエントリが見えない場合は結果整合の競合の可能性があるため族は失効させず401のみ(窓外のみ再利用検出として族revoked)。KVは結果整合のため猶予エントリの並行取得は理論上可能であり、猶予の「1回に限り」はベストエフォートとする。**パイプライン用KV(バインディングPIPELINE_KV・F4a実装確定)**: `jev:breaker` = Jevのcircuit breakerの状態(JSON・06 §5)。`jev:alert:{scope}:{period}` = 予算アラートの送信済み印(scope=jev_global_daily|jev_global_monthly・同一periodで1回・TTLはperiodの寿命より長く取る・06 §6)
 
@@ -297,6 +301,7 @@ proposal_history: PK(user_low, user_high)
 latches:      (status, response_deadline) ← 回答期限切れ走査 / (status, proposed_at)
 latch_status_events: (latch_id)
 reports:      (reporter, latch_id, reportee, target, status) ← 通報者内の統合の照会(F7a)
+match_events: (source_intent_id) ← 削除APIの子の削除・反映確認の照会 / (status, created_at) ← Cronの掃査(マイグレーション0008)
 ```
 
 latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表である(latches本体はintent_idsのみ保持)。
@@ -320,7 +325,7 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 | R2アイコン | — | icon_key解除+R2オブジェクト削除 |
 | users行 | — | status=deleted + 表示名/プロフィール/アイコンを消去 |
 
-**Intent削除の実行順序(F3実装確定)。** Vectorizeの該当ベクトルの削除を先に実行し、これが失敗した場合はD1に触れず500 INTERNALで中断する(クライアントの再試行で完結する)。この順序により「Intent行が消えたならベクトルも消えている」ことが保証され、検索可能な孤立ベクトルが残らない。ベクトルの削除は期限+7日の遅延ではなく**無条件の即時削除**である。
+**Intent削除の実行順序(F3実装確定)。** Vectorizeの該当ベクトルの削除を先に実行し、これが失敗した場合はD1に触れず500 INTERNALで中断する(クライアントの再試行で完結する)。この順序により「Intent行が消えたならベクトルも消えている」ことを削除APIの側で保証する。ベクトルの削除は期限+7日の遅延ではなく**無条件の即時削除**である。**D1の削除(不具合の修正工程(第2回)で確定)。** 子の行(1対1・グループの候補・match_events・intent_expiredの通知)と本体の削除は1回のバッチ(1つの取引)で行い、途中で失敗しても子だけが消えた状態を残さない(子の行が本体を外部キーで参照するため本体を最後に置く)。グループ候補は、dedup_key(「ID@version」のカンマ結合)の文字列の一致で本人の意思を含む行のidを先に絞ってから消す(表全体のintent_idsを展開する走査をやめる。D1の束縛の上限のため1文50件ずつに分ける・issue #16)。各段の所要時間はログintents.delete.timing(layer=vector・d1)に出し、ベクトルの削除の失敗のerror_codeは例外の分類名にする(06 §7)。**削除の後の書き戻し(不具合の修正工程(第2回)で確定)。** 削除の前に読み取りを済ませた第1段・Cronのバックフィルと修復・状態の同期が、削除の後にベクトルを書き戻すと孤立したベクトルが残る(issue #20)。ベクトルを書く経路はupsertの直前に意思の行を読み直して行が無ければ書かず、それでも残ったベクトルは他の評価のLayer 1で行の無いhitとして見つけて消す(06 §2の孤立したベクトルの自己修復)。
 
 ### 2.6 保持期間・定期削除(Cron・04 §4)
 
