@@ -1112,6 +1112,109 @@ describe("30分抑制と対象外(docs/06 §4)", () => {
 	});
 });
 
+describe("孤立したベクトルの自己修復(#20・設計 §5.2)", () => {
+	/** console.logへ出た構造化ログ(JSON1行)のうち、指定eventのものを返す */
+	const logsOf = (
+		spy: ReturnType<typeof vi.spyOn>,
+		event: string,
+	): Record<string, unknown>[] =>
+		spy.mock.calls
+			.map(
+				(call: unknown[]) =>
+					JSON.parse(String(call[0])) as Record<string, unknown>,
+			)
+			.filter((line: Record<string, unknown>) => line.event === event);
+
+	/**
+	 * 起点(active・ベクトルあり)と、D1に行の無い孤立ベクトルorphanCount件・行のあるhit
+	 * (反映待ちでmetadataがactiveのままのpaused・相手のactive)を置く
+	 */
+	const seedOrphans = async (orphanCount: number) => {
+		const userA = ulid();
+		const userB = ulid();
+		await insertUserRow(userA);
+		await insertUserRow(userB);
+		const origin = intentFixture({ id: ulid(), userId: userA });
+		const partner = intentFixture({ id: ulid(), userId: userB });
+		const lagging = intentFixture({
+			id: ulid(),
+			userId: userB,
+			topic: "一時停止したばかりの学習仲間",
+			status: "paused",
+		});
+		for (const row of [origin, partner, lagging]) {
+			await insertIntentRow(row);
+			// laggingもmetadataはactiveのまま(paused化の同期の反映待ち)
+			await upsertVector(row);
+		}
+		const orphanIds: string[] = [];
+		for (let i = 0; i < orphanCount; i += 1) {
+			// 行を作らずにベクトルだけを置く(削除の後に残ったベクトル)
+			const ghost = intentFixture({
+				id: ulid(),
+				userId: ulid(),
+				topic: `削除済みの学習仲間${i}`,
+			});
+			await upsertVector(ghost);
+			orphanIds.push(ghost.id);
+		}
+		return { origin, partner, lagging, orphanIds };
+	};
+
+	it("D1に行の無いhitを10件まで消し、件数だけをログに出す。行のあるhitは消さない", async () => {
+		const { origin, partner, lagging, orphanIds } = await seedOrphans(12);
+		const store = memoryVectorStore();
+		const deleteSpy = vi.spyOn(store, "deleteByIds");
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		const result = await evaluateIntent(testEnv, origin.id, directClock);
+
+		expect(result).not.toBeNull();
+		expect(deleteSpy).toHaveBeenCalledTimes(1);
+		const deleted = deleteSpy.mock.calls[0]?.[0] ?? [];
+		expect(deleted).toHaveLength(PIPELINE.ORPHAN_DELETE_MAX);
+		expect(PIPELINE.ORPHAN_DELETE_MAX).toBe(10);
+		for (const id of deleted) {
+			expect(orphanIds).toContain(id);
+		}
+		const remaining = await store.getByIds(orphanIds);
+		expect(remaining.filter((v) => v !== null)).toHaveLength(2);
+		// 行のあるhit(相手・反映待ちのpaused)と起点は残る
+		const kept = await store.getByIds([origin.id, partner.id, lagging.id]);
+		expect(kept.every((v) => v !== null)).toBe(true);
+		expect(logsOf(logSpy, "pipeline.orphan.deleted")).toEqual([
+			{ level: "info", event: "pipeline.orphan.deleted", count: 10 },
+		]);
+	});
+
+	it("孤立したベクトルが無ければ消さず、ログも出さない", async () => {
+		const { origin } = await seedOrphans(0);
+		const deleteSpy = vi.spyOn(memoryVectorStore(), "deleteByIds");
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await evaluateIntent(testEnv, origin.id, directClock);
+
+		expect(deleteSpy).not.toHaveBeenCalled();
+		expect(logsOf(logSpy, "pipeline.orphan.deleted")).toEqual([]);
+	});
+
+	it("孤立したベクトルの削除が失敗しても、評価は結果を返しwarnだけを出す", async () => {
+		const { origin } = await seedOrphans(1);
+		vi.spyOn(memoryVectorStore(), "deleteByIds").mockRejectedValue(
+			new Error("VECTOR_DELETE_ERROR (code = 40012): x"),
+		);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		const result = await evaluateIntent(testEnv, origin.id, directClock);
+
+		expect(result).not.toBeNull();
+		const warns = logsOf(logSpy, "pipeline.orphan.failed");
+		expect(warns).toHaveLength(1);
+		expect(warns[0]?.level).toBe("warn");
+		expect(warns[0]?.count).toBe(1);
+	});
+});
+
 /**
  * 本番のAnalytics Engineと同じ上限で検査する偽物(1つのdata pointにblobs 20・doubles 20・
  * index 1まで)。ローカルの模擬(miniflare)のwriteDataPointは何もしないため、上限を

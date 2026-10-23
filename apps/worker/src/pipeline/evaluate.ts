@@ -23,6 +23,7 @@ import { blockedForProposal, proposeSet } from "../latches/propose";
 import type { JevFn } from "../llm/types";
 import { createLogger } from "../logging/logger";
 import { createVectorStore } from "../vectorstore";
+import type { VectorStore } from "../vectorstore/types";
 import { upsertCandidateRows } from "./candidates";
 import { cheapJudgeScore, geoDistanceM } from "./cheap";
 import { errorCodeOf } from "./errors";
@@ -150,6 +151,28 @@ const byScoreDescThenIdAsc = (
 };
 
 /**
+ * 孤立したベクトルを消し、件数だけをログに出す(#20・設計 §5.2)。失敗は評価を止めず
+ * warnだけにする(消えなかったものは次の評価のhitで再び見つかる)
+ */
+const deleteOrphanVectors = async (
+	store: VectorStore,
+	orphanIds: string[],
+): Promise<void> => {
+	if (orphanIds.length === 0) {
+		return;
+	}
+	try {
+		await store.deleteByIds(orphanIds);
+		logger.info("pipeline.orphan.deleted", { count: orphanIds.length });
+	} catch (error) {
+		logger.warn("pipeline.orphan.failed", {
+			error_code: errorCodeOf(error),
+			count: orphanIds.length,
+		});
+	}
+};
+
+/**
  * 評価実行(第2段・docs/06 §2〜§3)。対象外(active以外・行不在)・30分抑制中
  * (docs/06 §4)・ベクトル不在(埋め込み未完了=バックフィル対象外パス)のときは
  * 何も書かずnullを返す。それ以外は検索→Layer 1→Layer 3→候補保存→
@@ -217,6 +240,16 @@ export const evaluateIntent = async (
 		db,
 		intent.userId,
 		retrieved.map((hit) => hit.id),
+	);
+	// 孤立したベクトルの自己修復(#20・設計 §5.2): Layer 1が読んだ結果にD1の行が無いhitは、
+	// 削除の後に残ったベクトル(意思の行は必ずベクトルより先に作られる)。追加の照会はせず、
+	// 1回の評価でORPHAN_DELETE_MAX件まで消す。行のあるhit(反映待ち・paused等)は消さない
+	await deleteOrphanVectors(
+		store,
+		retrieved
+			.map((hit) => hit.id)
+			.filter((id) => l1.intents[id] === undefined)
+			.slice(0, PIPELINE.ORPHAN_DELETE_MAX),
 	);
 	const exclusions: Record<string, number> = {};
 	const passed: { id: string; score: number; candidate: IntentRow }[] = [];

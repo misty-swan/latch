@@ -49,11 +49,14 @@ export type EmbeddingStageLayer = "embed" | "upsert" | "d1" | "emit";
 
 /**
  * 第1段の本体の結果。embedded=計算したベクトル(直後の評価に渡す)・
- * failed=失敗した段(呼び出し側がやり直し方を決める・設計 §4)
+ * failed=失敗した段(呼び出し側がやり直し方を決める・設計 §4)・
+ * gone=埋め込みの間に意思の行が消えたかactiveでなくなったため何も書かずに止めた
+ * (失敗ではない。削除の後の書き戻しの防止・#20・設計 §5.2)
  */
 export type EmbeddingStageResult =
 	| { status: "embedded"; vector: number[] }
-	| { status: "failed"; layer: EmbeddingStageLayer };
+	| { status: "failed"; layer: EmbeddingStageLayer }
+	| { status: "gone" };
 
 /**
  * 第1段の後続イベントを投入する。embedding_completed(emitCompleted=trueのとき・同version・
@@ -185,6 +188,17 @@ export const runEmbeddingStage = async (
 	try {
 		const embedder = createEmbedder(env);
 		const values = await embedder.embed(buildNormalizedText(intent));
+		// upsertの直前に意思の行を読み直す。埋め込みの間に削除・一時停止されていたら
+		// 書かない(削除APIはベクトルを先に消すため、ここで書くと孤立したベクトルが残る・#20)
+		layer = "d1";
+		const [current] = await drizzle(env.DB)
+			.select({ status: intents.status })
+			.from(intents)
+			.where(eq(intents.id, intent.id))
+			.limit(1);
+		if (current === undefined || current.status !== "active") {
+			return { status: "gone" };
+		}
 		layer = "upsert";
 		const store = createVectorStore(env);
 		// ベクトルid=Intent ULID・metadataはLayer 2のfilterに使う(docs/05 §2.3)。
@@ -413,6 +427,8 @@ const consumeEvent = async (
 		if (result.status === "failed") {
 			return retry;
 		}
+		// embedded・gone(埋め込みの間の削除・一時停止で書かずに止めた)はどちらもprocessedへ
+		// (goneは上の「本体行が消えている」と同じ扱いでやり直さない・#20)
 		await markProcessed(env, event.id, clock);
 		return;
 	}

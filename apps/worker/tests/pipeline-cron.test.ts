@@ -17,7 +17,7 @@ import {
 	getQueueResult,
 } from "cloudflare:test";
 import { LATCH, LIMITS, type MatchQueueMessage, PIPELINE } from "@latch/shared";
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1445,6 +1445,183 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 		expect(logsOf(logSpy, "cron.backfill.aborted")).toEqual([
 			{ level: "warn", event: "cron.backfill.aborted", count: 9 },
 		]);
+	});
+});
+
+describe("削除の後の書き戻しの防止(#20・設計 §5.2)", () => {
+	/**
+	 * 削除APIと同じ順(ベクトル→子の行→意思の行・docs/05 §2.5)で意思を消す。
+	 * 経路が行を読んだ後・upsertの前に差し込み、削除と競合した状況を作る
+	 */
+	const deleteIntentLikeApi = async (intentId: string): Promise<void> => {
+		await memoryVectorStore().deleteByIds([intentId]);
+		await db
+			.delete(matchCandidates)
+			.where(
+				or(
+					eq(matchCandidates.intentAId, intentId),
+					eq(matchCandidates.intentBId, intentId),
+				),
+			);
+		await db
+			.delete(matchEvents)
+			.where(eq(matchEvents.sourceIntentId, intentId));
+		await db.delete(intents).where(eq(intents.id, intentId));
+	};
+
+	/**
+	 * Workers AIの代わり(LATCH_EMBEDDING_MODE=real)。埋め込みの計算中(行を読んだ後・
+	 * upsertの前)にonEmbedを1回だけ呼び、stubと同じベクトルを返す
+	 */
+	const aiEnvWith = (onEmbed: () => Promise<void>): WorkerEnv => {
+		let fired = false;
+		const run = vi.fn(async (_model: string, input: { text: string[] }) => {
+			if (!fired) {
+				fired = true;
+				await onEmbed();
+			}
+			return { data: [await stubEmbedding(input.text[0] ?? "")] };
+		});
+		return {
+			...testEnv,
+			LATCH_EMBEDDING_MODE: "real",
+			AI: { run },
+		} as unknown as WorkerEnv;
+	};
+
+	it("バックフィル: 埋め込みの間に意思が削除されたら、ベクトルを書かず失敗にも数えない", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const target = intentFixture({
+			id: ulid(),
+			userId,
+			topic: "削除と競合する学習仲間",
+			updatedAt: new Date(BASE - 6 * MIN),
+		});
+		await insertIntentRow(target);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runScheduledPipeline(
+			aiEnvWith(() => deleteIntentLikeApi(target.id)),
+			directClock,
+		);
+
+		expect(await vectorOf(target.id)).toBeNull();
+		expect(logsOf(logSpy, "pipeline.stage1.failed")).toEqual([]);
+		expect(logsOf(logSpy, "cron.backfilled")).toEqual([]);
+	});
+
+	it("バックフィル: 埋め込みの間に意思がpausedになったら、ベクトルを書かない", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const target = intentFixture({
+			id: ulid(),
+			userId,
+			topic: "一時停止と競合する学習仲間",
+			updatedAt: new Date(BASE - 6 * MIN),
+		});
+		await insertIntentRow(target);
+		vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runScheduledPipeline(
+			aiEnvWith(async () => {
+				await db
+					.update(intents)
+					.set({ status: "paused" })
+					.where(eq(intents.id, target.id));
+			}),
+			directClock,
+		);
+
+		expect(await vectorOf(target.id)).toBeNull();
+		expect((await rowOf(target.id))?.embeddedAt).toBeNull();
+	});
+
+	it("修復(埋め込み直し): 埋め込みの間に意思が削除されたら、ベクトルを書かない", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const lost = intentFixture({
+			id: ulid(),
+			userId,
+			topic: "埋め込み直しと削除が競合する学習仲間",
+			embeddedAt: new Date(BASE - 11 * MIN),
+			lastEvaluatedAt: new Date(BASE - 31 * MIN),
+		});
+		await insertIntentRow(lost);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runScheduledPipeline(
+			aiEnvWith(() => deleteIntentLikeApi(lost.id)),
+			directClock,
+		);
+
+		expect(await vectorOf(lost.id)).toBeNull();
+		expect(logsOf(logSpy, "pipeline.stage1.failed")).toEqual([]);
+		expect(logsOf(logSpy, "cron.recovered")).toEqual([]);
+	});
+
+	it("修復(metadataの修正): 点検の後に意思が削除されたら、ベクトルを書き戻さない", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const paused = intentFixture({
+			id: ulid(),
+			userId,
+			topic: "修正と削除が競合する学習仲間",
+			status: "paused",
+			embeddedAt: new Date(BASE - 11 * MIN),
+			lastEvaluatedAt: new Date(BASE - 31 * MIN),
+		});
+		await insertIntentRow(paused);
+		// metadata.statusをD1(paused)と食い違わせ、修復の修正の対象にする
+		await upsertVector(paused, { status: "active" });
+		const store = memoryVectorStore();
+		const original = store.getByIds.bind(store);
+		vi.spyOn(store, "getByIds").mockImplementation(async (ids) => {
+			const found = await original(ids);
+			if (ids.includes(paused.id)) {
+				await deleteIntentLikeApi(paused.id);
+			}
+			return found;
+		});
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		expect(await original([paused.id])).toEqual([null]);
+		expect(logsOf(logSpy, "cron.recovered")).toEqual([]);
+	});
+
+	it("修復(metadataの修正): 点検の後に意思のstatusが変わったら、古いstatusで書かない", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const paused = intentFixture({
+			id: ulid(),
+			userId,
+			topic: "修正と再開が競合する学習仲間",
+			status: "paused",
+			embeddedAt: new Date(BASE - 11 * MIN),
+			lastEvaluatedAt: new Date(BASE - 31 * MIN),
+		});
+		await insertIntentRow(paused);
+		await upsertVector(paused, { status: "active" });
+		const store = memoryVectorStore();
+		const original = store.getByIds.bind(store);
+		vi.spyOn(store, "getByIds").mockImplementation(async (ids) => {
+			const found = await original(ids);
+			if (ids.includes(paused.id)) {
+				// 再開(resume)が先に行とmetadataをactiveへ戻した状況
+				await db
+					.update(intents)
+					.set({ status: "active" })
+					.where(eq(intents.id, paused.id));
+			}
+			return found;
+		});
+		vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		expect((await original([paused.id]))[0]?.metadata.status).toBe("active");
 	});
 });
 

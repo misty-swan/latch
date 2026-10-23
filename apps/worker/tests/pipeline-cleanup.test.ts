@@ -35,6 +35,7 @@ import {
 	memoryVectorStore,
 	resetMemoryVectorStore,
 } from "../src/vectorstore/memory";
+import { syncVectorStatus } from "../src/vectorstore/sync-status";
 import type { StoredVector } from "../src/vectorstore/types";
 import privateJwkText from "./fixtures/test-idp-private.jwk?raw";
 
@@ -513,5 +514,62 @@ describe("pause/resumeのVectorize metadata同期(docs/06 §2)", () => {
 		// ベクトルは同期前のactiveのまま(Cronのバックフィルで回収される)
 		const [stale] = await memoryVectorStore().getByIds([created.id]);
 		expect(stale?.metadata.status).toBe("active");
+	});
+
+	it("同期がベクトルを読んだ後に意思が削除されたら、ベクトルを書き戻さない(#20)", async () => {
+		const accessToken = await registerUser("cleanup-pause-deleted");
+		const created = await createActiveConnection(
+			accessToken,
+			"同期と削除が競合する学習仲間",
+		);
+		await memoryVectorStore().upsert([
+			makeVector(created.id, [1, 0], { form: "connection" }),
+		]);
+		const store = memoryVectorStore();
+		const original = store.getByIds.bind(store);
+		vi.spyOn(store, "getByIds").mockImplementation(async (ids) => {
+			const found = await original(ids);
+			if (ids.includes(created.id)) {
+				// 削除APIと同じ順(ベクトル→子の行→意思の行・docs/05 §2.5)
+				await store.deleteByIds([created.id]);
+				await db
+					.delete(matchCandidates)
+					.where(
+						or(
+							eq(matchCandidates.intentAId, created.id),
+							eq(matchCandidates.intentBId, created.id),
+						) as SQL,
+					);
+				await db
+					.delete(matchEvents)
+					.where(eq(matchEvents.sourceIntentId, created.id));
+				await db.delete(intents).where(eq(intents.id, created.id));
+			}
+			return found;
+		});
+
+		const res = await postAction(
+			`/v1/intents/${created.id}/pause`,
+			accessToken,
+		);
+		expect(res.status).toBe(200);
+		expect(await original([created.id])).toEqual([null]);
+	});
+
+	it("意思の行のstatusが同期先と違えば書かない(後から来た再開を古い一時停止で上書きしない・#20)", async () => {
+		const accessToken = await registerUser("cleanup-sync-mismatch");
+		const created = await createActiveConnection(
+			accessToken,
+			"同期先と行が食い違う学習仲間",
+		);
+		await memoryVectorStore().upsert([
+			makeVector(created.id, [1, 0], { form: "connection" }),
+		]);
+
+		// 行はactiveのまま、pausedへの同期だけが遅れて届いた状況
+		await syncVectorStatus(testEnv, created.id, "paused");
+
+		const [vector] = await memoryVectorStore().getByIds([created.id]);
+		expect(vector?.metadata.status).toBe("active");
 	});
 });

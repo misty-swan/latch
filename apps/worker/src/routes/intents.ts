@@ -1037,8 +1037,8 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	}
 	// ベクトルを先に削除する(docs/05 §2.5の無条件削除)。失敗時はD1に触れず
 	// 500 INTERNALで中止する(クライアントが再試行できる)。pause/resumeの
-	// metadata同期と違い、削除はベストエフォートにしない(孤立ベクトルの
-	// 回収経路がCronに無いため)
+	// metadata同期と違い、削除はベストエフォートにしない(孤立ベクトルは
+	// 他の評価のhitに現れたときにしか消えないため・#20の自己修復は安全網)
 	const vectorStartedAt = systemClock.now().getTime();
 	try {
 		await createVectorStore(c.env).deleteByIds([target.id]);

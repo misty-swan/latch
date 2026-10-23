@@ -427,9 +427,28 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
 				});
 			}
 		}
-		if (fixes.length > 0) {
-			await store.upsert(fixes);
-			recovered += fixes.length;
+		// upsertの直前に意思の行を読み直し、消えた・statusが変わった意思は書かない。
+		// 点検の後の削除でベクトルを書き戻したり、後から来たpause/resumeの同期を古い
+		// statusで上書きしたりしない(#20・設計 §5.2)。変わった意思は次の実行で点検する
+		const current =
+			fixes.length === 0
+				? []
+				: await db
+						.select({ id: intents.id, status: intents.status })
+						.from(intents)
+						.where(
+							inArray(
+								intents.id,
+								fixes.map((fix) => fix.id),
+							),
+						);
+		const statusById = new Map(current.map((row) => [row.id, row.status]));
+		const stillValid = fixes.filter(
+			(fix) => statusById.get(fix.id) === fix.metadata.status,
+		);
+		if (stillValid.length > 0) {
+			await store.upsert(stillValid);
+			recovered += stillValid.length;
 		}
 	}
 	if (recovered > 0) {
@@ -471,6 +490,10 @@ const runBackfillSweep = async (env: Env, clock: Clock): Promise<void> => {
 				emitCompleted: false,
 				source: "backfill",
 			});
+			// 埋め込みの間に削除・一時停止された意思は書かずに止めた(失敗に数えない・#20)
+			if (stage.status === "gone") {
+				continue;
+			}
 			if (stage.status !== "embedded") {
 				failed += 1;
 				consecutiveFailures += 1;

@@ -755,6 +755,71 @@ describe("第1段の失敗(段ごとの扱い・#17)", () => {
 	});
 });
 
+describe("削除の後の書き戻しの防止(第1段・#20・設計 §5.2)", () => {
+	/**
+	 * Workers AIの代わり(LATCH_EMBEDDING_MODE=real)。埋め込みの計算中(行を読んだ後・
+	 * upsertの前)にonEmbedを呼び、stubと同じベクトルを返す
+	 */
+	const aiEnvWith = (onEmbed: () => Promise<void>): WorkerEnv => {
+		const run = vi.fn(async (_model: string, input: { text: string[] }) => {
+			await onEmbed();
+			return { data: [await stubEmbedding(input.text[0] ?? "")] };
+		});
+		return {
+			...testEnv,
+			LATCH_EMBEDDING_MODE: "real",
+			AI: { run },
+		} as unknown as WorkerEnv;
+	};
+
+	it("埋め込みの間に意思が削除されたら、ベクトルを書かず、retryせずに終える", async () => {
+		const { intentId, eventId } = await seedEvent();
+		const send = spySend();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		// 削除APIと同じ順(ベクトル→子の行→意思の行・docs/05 §2.5)
+		const aiEnv = aiEnvWith(async () => {
+			await memoryVectorStore().deleteByIds([intentId]);
+			await db
+				.delete(matchEvents)
+				.where(eq(matchEvents.sourceIntentId, intentId));
+			await db.delete(intents).where(eq(intents.id, intentId));
+		});
+
+		const { result, retrySpy } = await runStage1(eventId, aiEnv);
+
+		expect(result.retryMessages).toEqual([]);
+		expect(retrySpy).not.toHaveBeenCalled();
+		expect(await memoryVectorStore().getByIds([intentId])).toEqual([null]);
+		expect(send).not.toHaveBeenCalled();
+		expect(logsOf(logSpy, "pipeline.stage1.failed")).toEqual([]);
+	});
+
+	it("埋め込みの間に意思がpausedになったら、ベクトルを書かず、起点をprocessedにする", async () => {
+		const { intentId, eventId } = await seedEvent();
+		const send = spySend();
+		const aiEnv = aiEnvWith(async () => {
+			await db
+				.update(intents)
+				.set({ status: "paused" })
+				.where(eq(intents.id, intentId));
+		});
+
+		const { result, retrySpy } = await runStage1(eventId, aiEnv);
+
+		expect(result.retryMessages).toEqual([]);
+		expect(retrySpy).not.toHaveBeenCalled();
+		expect(await memoryVectorStore().getByIds([intentId])).toEqual([null]);
+		expect(send).not.toHaveBeenCalled();
+		expect((await originOf(eventId))?.status).toBe("processed");
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		expect(row.embeddedAt).toBeNull();
+		expect((await eventsOf(intentId)).length).toBe(1);
+	});
+});
+
 describe("DLQの消費(docs/06 §5: dead反映と警報)", () => {
 	it("match-events-dlqのメッセージはイベント行をstatus=deadへ更新しackする", async () => {
 		const { eventId } = await seedEvent();
