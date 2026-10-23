@@ -1034,7 +1034,7 @@ describe("DELETE /v1/intents/{id}(削除・docs/05 §3.1・§3.2)", () => {
 		};
 		const mineIds = [
 			await insertGroup([created.id, o1, o2]),
-			await insertGroup([o1, o2, created.id].sort()),
+			await insertGroup([o1, created.id, o3].sort()),
 		];
 		const othersId = await insertGroup([o1, o2, o3]);
 		const res = await deleteReq(`/v1/intents/${created.id}`, accessToken);
