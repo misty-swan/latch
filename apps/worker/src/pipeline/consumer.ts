@@ -53,13 +53,21 @@ export const runEmbeddingStage = async (
 	env: Env,
 	intent: IntentRow,
 	clock: Clock,
-	options: { emitCompleted?: boolean } = {},
+	options: {
+		emitCompleted?: boolean;
+		/** 第1段を呼んだ経路(完了ログのlayer・既定queue) */
+		source?: "queue" | "backfill" | "repair";
+	} = {},
 ): Promise<EmbeddingStageResult> => {
 	const emitCompleted = options.emitCompleted ?? true;
+	const source = options.source ?? "queue";
 	const startedAt = clock.now().getTime();
+	// いま実行中の段(embed/upsert/d1/emit)。失敗ログのlayerに載せて失敗した段を見分ける
+	let layer: "embed" | "upsert" | "d1" | "emit" = "embed";
 	try {
 		const embedder = createEmbedder(env);
 		const values = await embedder.embed(buildNormalizedText(intent));
+		layer = "upsert";
 		const store = createVectorStore(env);
 		// ベクトルid=Intent ULID・metadataはLayer 2のfilterに使う(docs/05 §2.3)。
 		// 第1段はactive化済みのIntentのみで呼ばれるためformは非null
@@ -77,12 +85,14 @@ export const runEmbeddingStage = async (
 				},
 			},
 		]);
+		layer = "d1";
 		const db = drizzle(env.DB);
 		await db
 			.update(intents)
 			.set({ embeddingModel: embedder.modelId, embeddedAt: clock.now() })
 			.where(eq(intents.id, intent.id));
 		// 第2段への再投入(同version・即時・docs/06 §2)
+		layer = "emit";
 		if (emitCompleted) {
 			await emitMatchEvent(
 				env,
@@ -115,10 +125,12 @@ export const runEmbeddingStage = async (
 				intent_id: intent.id,
 			});
 		}
-		// count=upsertしたベクトル数(1Intent=1ベクトル・06 §7の層別観測)
+		// count=upsertしたベクトル数(1Intent=1ベクトル・06 §7の層別観測)・
+		// layer=第1段を呼んだ経路(queue/backfill/repair)
 		logger.info("pipeline.stage1.completed", {
 			intent_id: intent.id,
 			count: 1,
+			layer: source,
 			latency: clock.now().getTime() - startedAt,
 		});
 		return "embedded";
@@ -126,6 +138,7 @@ export const runEmbeddingStage = async (
 		logger.warn("pipeline.stage1.failed", {
 			error_code: errorCodeOf(error, "EMBEDDING_FAILED"),
 			intent_id: intent.id,
+			layer,
 		});
 		return "failed";
 	}

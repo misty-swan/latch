@@ -72,6 +72,7 @@ import {
 } from "../latches/cancel-open";
 import { createLlm } from "../llm/mode";
 import { createLogger } from "../logging/logger";
+import { errorCodeOf } from "../pipeline/errors";
 import { emitMatchEvent } from "../pipeline/events";
 import { pushFlushAfterWrite } from "../push/flush-middleware";
 import { createVectorStore } from "../vectorstore";
@@ -989,6 +990,19 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 	return c.json(toIntentDto(result.row), 200);
 });
 
+/** 削除APIの段ごとの所要時間(vector/d1_children/d1_intent・遅い段の切り分け用) */
+const logDeleteTiming = (
+	intentId: string,
+	layer: "vector" | "d1_children" | "d1_intent",
+	startedAt: number,
+): void => {
+	logger.info("intents.delete.timing", {
+		intent_id: intentId,
+		layer,
+		latency: systemClock.now().getTime() - startedAt,
+	});
+};
+
 /**
  * DELETE /v1/intents/{id}(削除・docs/05 §3.2)。所有者のみ・他人は404(存在を隠す)。
  * 削除の後始末(docs/05 §2.5の無条件削除): まずVectorizeのベクトルを即時削除する
@@ -1025,18 +1039,21 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	// 500 INTERNALで中止する(クライアントが再試行できる)。pause/resumeの
 	// metadata同期と違い、削除はベストエフォートにしない(孤立ベクトルの
 	// 回収経路がCronに無いため)
+	const vectorStartedAt = systemClock.now().getTime();
 	try {
 		await createVectorStore(c.env).deleteByIds([target.id]);
-	} catch {
+	} catch (error) {
 		logger.error("intents.delete.vector_failed", {
 			intent_id: target.id,
-			error_code: "INTERNAL",
+			error_code: errorCodeOf(error),
 		});
 		const r = errorJson(
 			"INTERNAL",
 			"削除に失敗しました。時間を置いて再度お試しください",
 		);
 		return c.json(r.body, r.status);
+	} finally {
+		logDeleteTiming(target.id, "vector", vectorStartedAt);
 	}
 	// このIntentを含む進行中の提案を取り消す(docs/01 §8の不成立経路「参加Intentが削除された」)。
 	// matchedは成立済みのため変更しない(docs/05 §2.5)。閉じるのは候補・イベント行の削除より前
@@ -1047,6 +1064,7 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 		sub,
 		deleteNow,
 	);
+	const childrenStartedAt = systemClock.now().getTime();
 	// 子(候補・イベント投入記録)を先に削除してから本体を削除する(docs/05 §2.5)。
 	// 1対1候補はintent_a/bのどちらかに含む行・グループ候補はintent_idsに含む行
 	await db
@@ -1066,10 +1084,13 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	await db.delete(matchEvents).where(eq(matchEvents.sourceIntentId, target.id));
 	// 期限切れの通知(intent_expired)も消す(F7b設計 §5.7。対象が消えた通知を残さない)
 	await db.delete(notifications).where(eq(notifications.intentId, target.id));
+	logDeleteTiming(target.id, "d1_children", childrenStartedAt);
+	const intentStartedAt = systemClock.now().getTime();
 	const [deleted] = await db
 		.delete(intents)
 		.where(and(eq(intents.id, target.id), eq(intents.userId, sub)))
 		.returning();
+	logDeleteTiming(target.id, "d1_intent", intentStartedAt);
 	// 次集合の提案はIntent行とそのグループ候補を消した後に行う(削除中のIntentを含む集合を
 	// 提案しない・F4b設計 §3.5)。消えた行は版の照合・再検証(recheckSet)で除かれる
 	await proposeNextGroupsAfterCancel(db, closedLatchIds, deleteNow);

@@ -390,6 +390,7 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
 					if (
 						(await runEmbeddingStage(env, row, clock, {
 							emitCompleted: false,
+							source: "repair",
 						})) === "embedded"
 					) {
 						recovered += 1;
@@ -451,6 +452,7 @@ const runBackfillSweep = async (env: Env, clock: Clock): Promise<void> => {
 		try {
 			const stage = await runEmbeddingStage(env, row, clock, {
 				emitCompleted: false,
+				source: "backfill",
 			});
 			if (stage !== "embedded") {
 				failed += 1;

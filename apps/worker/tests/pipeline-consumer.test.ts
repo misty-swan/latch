@@ -588,6 +588,24 @@ describe("ログの分離と計測(docs/06 §7・docs/08 §6)", () => {
 		const completed = logsOf(logSpy, "pipeline.stage1.completed");
 		expect(completed).toHaveLength(1);
 		expect(completed[0]?.count).toBe(1);
+		// 書いた経路(通常キューはqueue)
+		expect(completed[0]?.layer).toBe("queue");
+	});
+
+	it("upsertが失敗するとstage1.failedに失敗した段layer=upsertと分類済みerror_codeが載る", async () => {
+		const { eventId } = await seedEvent();
+		spySend();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		vi.spyOn(memoryVectorStore(), "upsert").mockRejectedValue(
+			new Error("VECTOR_UPSERT_ERROR (code = 40012): x"),
+		);
+
+		await runBatch("match-events", [eventId]);
+
+		const failed = logsOf(logSpy, "pipeline.stage1.failed");
+		expect(failed).toHaveLength(1);
+		expect(failed[0]?.layer).toBe("upsert");
+		expect(failed[0]?.error_code).toBe("VECTOR_UPSERT_40012");
 	});
 
 	it("第2段のpayloadは既存の項目の後にF4bの項目を同順で載せる(F4b設計 §5)", async () => {

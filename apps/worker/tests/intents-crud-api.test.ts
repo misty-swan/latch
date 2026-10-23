@@ -13,7 +13,7 @@ import { eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { importJWK, SignJWT } from "jose";
 import { ulid } from "ulid";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
 import {
 	groupCandidates,
@@ -918,6 +918,41 @@ describe("DELETE /v1/intents/{id}(削除・docs/05 §3.1・§3.2)", () => {
 			.from(intents)
 			.where(eq(intents.id, created.id));
 		expect(row).toBeUndefined();
+	});
+
+	it("削除で intents.delete.timing が vector・d1_children・d1_intent の3段そろって出る", async () => {
+		const accessToken = await registerUser("delete-timing");
+		const created = await createActiveConnection(
+			accessToken,
+			"削除の所要時間を測る学習仲間",
+		);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			const res = await deleteReq(`/v1/intents/${created.id}`, accessToken);
+			expect(res.status).toBe(204);
+			const timings = logSpy.mock.calls
+				.map((call) => {
+					try {
+						return JSON.parse(String(call[0])) as Record<string, unknown>;
+					} catch {
+						return {};
+					}
+				})
+				.filter(
+					(l) =>
+						l.event === "intents.delete.timing" && l.intent_id === created.id,
+				);
+			expect(timings.map((l) => l.layer)).toEqual([
+				"vector",
+				"d1_children",
+				"d1_intent",
+			]);
+			for (const l of timings) {
+				expect(typeof l.latency).toBe("number");
+			}
+		} finally {
+			logSpy.mockRestore();
+		}
 	});
 
 	it("削除でそのIntentのintent_expired通知だけが消え、他の通知は残る", async () => {
