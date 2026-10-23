@@ -4,8 +4,12 @@
  * 2人とも提案のアプリ内通知(type=proposal)を受け取るまで待つ。
  * 組kの意思は基準時刻(実行時刻+24時間を1時間単位に切り上げ)+k×3時間から2時間とし、
  * 組どうしはLayer 1の時間の重なりの条件で外れる(lib/pairs.mjs)。
- * - MODE=staggered((b)・既定): 組ごとに2秒間隔で投入する
- * - MODE=burst((d)): 全組がsetupの決めた同じ時刻に一斉に投入する(60件前後の提案の通知が同時に発生)
+ * - MODE=staggered((b)・既定): 組ごとに2秒間隔で投入する。組の中は2段で、片方が先に保存し、
+ *   GET /v1/dev/match-eventsでその意思のvector_reflectionがprocessedになる(Vectorizeへ反映済み)のを
+ *   待ってから、もう片方が保存する(待ちの上限はPROPOSAL_WAIT_SEC。超えたらそのまま保存する)。
+ *   後から保存した側が「相手が先に反映済み」の標本になる(初期判定 p95 10秒の対象・10 §5)
+ * - MODE=burst((d)): 全組がsetupの決めた同じ時刻に一斉に投入する(60件前後の提案の通知が同時に発生)。
+ *   2人が同時の組で、初期判定は合否のない参考値になる
  * k6は時間を測らない。初期判定(intent_createdのイベント行→提案の通知のpush_attempted_at)と
  * 通知(通知行のcreated_at→push_attempted_at)のp95は、試験の後に集計(設計 §4.1)がD1から出す。
  * k6が出すのは提案の通知が届いた人数(proposal_delivered)と届かなかった人数(proposal_missing)。
@@ -27,6 +31,7 @@ import {
 	runIdFromEnv,
 	signIn,
 	waitForProposal,
+	waitForReflection,
 } from "../lib/api.js";
 import {
 	assertWithinStartLimit,
@@ -104,8 +109,24 @@ export default function (data) {
 	const topic = TOPICS[k % TOPICS.length];
 	const startMs = pairStartMs(data.baseMs, k);
 	try {
-		for (const token of tokens) {
-			createOccasion(config.baseUrl, token, { topic, startMs });
+		if (mode === "burst") {
+			for (const token of tokens) {
+				createOccasion(config.baseUrl, token, { topic, startMs });
+			}
+		} else {
+			// (b): 先に保存した側の反映を確かめてから、もう片方が保存する。反映を確認できなくても
+			// 進む(その組の後の側は集計で「同時」へ振り分けられる)
+			const firstId = createOccasion(config.baseUrl, tokens[0], {
+				topic,
+				startMs,
+			});
+			waitForReflection(
+				config.baseUrl,
+				tokens[0],
+				firstId,
+				config.proposalWaitSec,
+			);
+			createOccasion(config.baseUrl, tokens[1], { topic, startMs });
 		}
 	} catch (_e) {
 		// 保存の失敗はcheckとhttp_req_failedに出る。この組は届かなかったとして数える

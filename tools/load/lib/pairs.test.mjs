@@ -106,9 +106,9 @@ describe("pairSubjects", () => {
 });
 
 describe("maxDurationSec", () => {
-	it("(b)は最後の組の投入まで+提案待ち+余裕120秒", () => {
-		expect(maxDurationSec("staggered", 30, 60)).toBe(58 + 60 + 120);
-		expect(maxDurationSec("staggered", 6, 900)).toBe(10 + 900 + 120);
+	it("(b)は最後の組の投入まで+反映待ち+提案待ち+余裕120秒", () => {
+		expect(maxDurationSec("staggered", 30, 60)).toBe(58 + 60 + 60 + 120);
+		expect(maxDurationSec("staggered", 6, 900)).toBe(10 + 900 + 900 + 120);
 	});
 	it("(d)は一斉投入までの間+提案待ち+余裕120秒", () => {
 		expect(maxDurationSec("burst", 30, 60)).toBe(BURST_LEAD_SEC + 60 + 120);

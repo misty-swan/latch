@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildQueries,
+	isReflected,
 	judgeFromRows,
 	notifyFromRows,
+	reflectionBreakdown,
 	reflectionFromRows,
 	retrievalFromRows,
+	splitJudgeRows,
 } from "./queries.mjs";
 
 describe("buildQueries", () => {
@@ -114,5 +117,102 @@ describe("反映時間", () => {
 				{ status: "failed", reflect_ms: 5 },
 			]),
 		).toEqual([1200, null, null, null]);
+	});
+});
+
+describe("初期判定の振り分け", () => {
+	it("SQL: 利用者のsubjectと、その意思の反映確認(processed)の最小のprocessed_atを取る", () => {
+		const { judge } = buildQueries("202610221200");
+		expect(judge).toContain("u.auth_subject AS auth_subject");
+		expect(judge).toContain("event_type = 'vector_reflection'");
+		expect(judge).toContain("me.status = 'processed'");
+		expect(judge).toContain("min(me.processed_at)");
+		expect(judge).toContain("AS reflected_at");
+	});
+	const row = (n, activated, reflected, pushed, tag = "b") => ({
+		auth_subject: `load-202610221200-${tag}${n}`,
+		activated_at: activated,
+		reflected_at: reflected,
+		push_attempted_at: pushed,
+	});
+	it("相手の反映が自分の保存より前なら相手が先に反映済み、後なら同時", () => {
+		const out = splitJudgeRows([
+			// 組1(連番1と2): 1が先に保存・2は1の反映の後に保存
+			row(1, 1000, 1800, 6000),
+			row(2, 2000, 2900, 4500),
+			// 組2(連番3と4): 4の保存の時点で3は未反映
+			row(3, 1000, 5000, 7000),
+			row(4, 1500, 5200, 8000),
+		]);
+		expect(out.preReflected).toEqual([2500]);
+		expect(out.simultaneous).toEqual([5000, 6000, 6500]);
+	});
+	it("境界(同時刻)・相手の行が無い・相手が未反映は同時", () => {
+		const out = splitJudgeRows([
+			row(1, 1000, 2000, 5000),
+			row(2, 2000, 3000, 5000), // 相手の反映2000=自分の保存2000は同時
+			row(5, 1000, 1200, 3000), // 相手(連番6)の行が無い
+			row(7, 1000, null, 3000),
+			row(8, 9000, 9500, 12000), // 相手(7)は未反映
+		]);
+		expect(out.preReflected).toEqual([]);
+		expect(out.simultaneous).toEqual([4000, 3000, 2000, 2000, 3000]);
+	});
+	it("(d)の組は反映の時刻によらず同時。提案なしは欠け(null)として振り分けられる", () => {
+		const out = splitJudgeRows([
+			row(1, 1000, 1100, 3000, "d"),
+			row(2, 2000, 2100, null, "d"),
+			row(3, 1000, 1100, 6000),
+			row(4, 5000, 5100, null),
+		]);
+		expect(out.preReflected).toEqual([null]);
+		expect(out.simultaneous).toEqual([2000, null, 5000]);
+	});
+	it("subjectの形が想定外の行は同時に入れる", () => {
+		expect(
+			splitJudgeRows([
+				{
+					auth_subject: "x",
+					activated_at: 0,
+					reflected_at: 1,
+					push_attempted_at: 5,
+				},
+			]),
+		).toEqual({ preReflected: [], simultaneous: [5] });
+	});
+});
+
+describe("反映の欠けの内訳", () => {
+	it("processedで値の無い行はその他、failedとskippedを分けて数える", () => {
+		expect(
+			reflectionBreakdown([
+				{ status: "processed", reflect_ms: 1 },
+				{ status: "failed", reflect_ms: null },
+				{ status: "failed", reflect_ms: null },
+				{ status: "skipped", reflect_ms: null },
+				{ status: "processed", reflect_ms: null },
+			]),
+		).toEqual({ skipped: 1, failed: 2, other: 1 });
+	});
+});
+
+describe("isReflected(GET /v1/dev/match-eventsの項目)", () => {
+	it("vector_reflectionのprocessedがあればtrue、無い・pending・failedはfalse", () => {
+		const item = (event_type, status) => ({ event_type, status });
+		expect(
+			isReflected([
+				item("intent_created", "processed"),
+				item("vector_reflection", "processed"),
+			]),
+		).toBe(true);
+		expect(
+			isReflected([
+				item("intent_created", "processed"),
+				item("vector_reflection", "pending"),
+				item("vector_reflection", "failed"),
+			]),
+		).toBe(false);
+		expect(isReflected([])).toBe(false);
+		expect(isReflected(undefined)).toBe(false);
 	});
 });

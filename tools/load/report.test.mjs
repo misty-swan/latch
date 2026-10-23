@@ -20,6 +20,7 @@ describe("buildReport", () => {
 		expect(out).toContain(
 			"| Vectorizeの反映 | 3 | 1 | 1.00秒 | 3.00秒 | 3.00秒 |",
 		);
+		expect(out).toContain("欠けの内訳: skipped 0件・failed 1件・その他 0件");
 		const none = buildReport("202610221200", { a: null, c: null }, empty);
 		expect(none).toContain(
 			"| Vectorizeの反映 | 0 | 0 | 計測なし | 計測なし | 計測なし |",
@@ -33,7 +34,10 @@ describe("buildReport", () => {
 			"| Candidate Retrieval | 1.00秒 | 0 | 0 | 0 | 計測なし | — |",
 		);
 		expect(out).toContain(
-			"| 初期判定(stub) | 10.00秒 | 0 | 0 | 0 | 計測なし | — |",
+			"| 初期判定(相手が先に反映済み) | 10.00秒 | 0 | 0 | 0 | 計測なし | — |",
+		);
+		expect(out).toContain(
+			"| 初期判定(同時・参考) | 0 | 0 | 計測なし | 計測なし | 計測なし |",
 		);
 		expect(out).toContain("| 通知 | 5.00秒 | 0 | 0 | 0 | 計測なし | — |");
 		expect(out).toContain("| チャット 送信→到着 p95 | 計測なし |");
@@ -46,8 +50,24 @@ describe("buildReport", () => {
 			{ a: null, c: null },
 			{
 				judge: [
-					{ intent_id: "A", activated_at: 0, push_attempted_at: 2000 },
-					{ intent_id: "B", activated_at: 0, push_attempted_at: null },
+					{
+						auth_subject: "load-202610220442-b1",
+						activated_at: 0,
+						reflected_at: 500,
+						push_attempted_at: 9000,
+					},
+					{
+						auth_subject: "load-202610220442-b2",
+						activated_at: 1000,
+						reflected_at: 1500,
+						push_attempted_at: 3000,
+					},
+					{
+						auth_subject: "load-202610220442-b3",
+						activated_at: 0,
+						reflected_at: null,
+						push_attempted_at: null,
+					},
 				],
 				notify: [{ created_at: 0, push_attempted_at: 30 }],
 				retrieval: [
@@ -57,7 +77,10 @@ describe("buildReport", () => {
 			},
 		);
 		expect(out).toContain(
-			"| 初期判定(stub) | 10.00秒 | 2 | 1 | 1 | 2.00秒 | —(欠けあり) |",
+			"| 初期判定(相手が先に反映済み) | 10.00秒 | 1 | 1 | 0 | 2.00秒 | 合格 |",
+		);
+		expect(out).toContain(
+			"| 初期判定(同時・参考) | 2 | 1 | 9.00秒 | 9.00秒 | 9.00秒 |",
 		);
 		expect(out).toContain("| 通知 | 5.00秒 | 1 | 1 | 0 | 0.03秒 | 合格 |");
 		expect(out).toContain(

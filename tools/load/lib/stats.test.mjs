@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { p95, renderTable, summarize } from "./stats.mjs";
+import {
+	p95,
+	quantile,
+	renderReferenceTable,
+	renderTable,
+	summarize,
+} from "./stats.mjs";
 
 const range = (n) => Array.from({ length: n }, (_, i) => i + 1);
 
@@ -62,5 +68,32 @@ describe("renderTable", () => {
 			"| 欠け | 10.00秒 | 2 | 1 | 1 | 0.42秒 | —(欠けあり) |",
 		);
 		expect(lines[6]).toContain("| 不合格 |");
+	});
+});
+
+describe("quantile", () => {
+	it("p50は最近順位法、p95と同じ計算", () => {
+		expect(quantile([4, 1, 3, 2], 0.5)).toBe(2);
+		expect(quantile(range(100), 0.95)).toBe(p95(range(100)));
+		expect(quantile([], 0.5)).toBeNull();
+		expect(quantile([7], 0)).toBe(7);
+	});
+});
+
+describe("renderReferenceTable", () => {
+	it("件数・欠け・p50・p95・最大を、項目ごとの行で出す(合否なし)", () => {
+		const out = renderReferenceTable([
+			{ name: "A", durations: [1000, 3000, null] },
+			{ name: "B", durations: [] },
+		]).split("\n");
+		expect(out[0]).toBe("| 項目(参考) | 件数 | 欠け | p50 | p95 | 最大 |");
+		expect(out[2]).toBe("| A | 3 | 1 | 1.00秒 | 3.00秒 | 3.00秒 |");
+		expect(out[3]).toBe("| B | 0 | 0 | 計測なし | 計測なし | 計測なし |");
+		expect(out).toHaveLength(4);
+	});
+	it("すべて欠けなら計測なし(NaNを出さない)", () => {
+		const out = renderReferenceTable([{ name: "C", durations: [null, null] }]);
+		expect(out).toContain("| C | 2 | 2 | 計測なし | 計測なし | 計測なし |");
+		expect(out).not.toContain("NaN");
 	});
 });

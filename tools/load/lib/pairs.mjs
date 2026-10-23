@@ -25,7 +25,7 @@ export const PAIR_SPACING_MS = 3 * MS_PER_HOUR;
 export const CHAT_PAIR_SPACING_MS = 2 * MS_PER_HOUR;
 /** 組の種類ごとのsubjectの印(staggered=(b)・chat=(c)・burst=(d)) */
 const SUBJECT_TAGS = { staggered: "b", chat: "c", burst: "d" };
-/** (b)の組ごとの投入の間隔(秒) */
+/** (b)の組ごとの投入の間隔(秒)。組の中は片方が先に保存し、反映を確かめてからもう片方が保存する */
 export const STAGGER_SEC = 2;
 /** (d)でsetupの終わりから一斉投入までに置く間(秒)。全VUが起動してsleepに入る余裕 */
 export const BURST_LEAD_SEC = 10;
@@ -68,11 +68,12 @@ export function pairSubjects(runId, kind, k) {
 
 /**
  * シナリオのmaxDuration(秒)。投入までの待ち((b)は最後の組の(組数-1)×2秒・
- * (d)はBURST_LEAD_SEC)+提案待ちの上限+余裕
+ * (d)はBURST_LEAD_SEC)+(b)の先に保存した側の反映待ちの上限(提案待ちと同じ長さ)+提案待ちの上限+余裕
  */
 export function maxDurationSec(mode, pairs, proposalWaitSec) {
 	const launch = mode === "burst" ? BURST_LEAD_SEC : (pairs - 1) * STAGGER_SEC;
-	return Math.ceil(launch + proposalWaitSec + SLACK_SEC);
+	const reflectionWait = mode === "burst" ? 0 : proposalWaitSec;
+	return Math.ceil(launch + reflectionWait + proposalWaitSec + SLACK_SEC);
 }
 
 /** 機会Intentの開始の上限(保存の時点+7日以内・docs/05 §2.2・OCCASION_STARTS_AT_MAX_DAYS_AHEAD) */

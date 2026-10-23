@@ -5,6 +5,7 @@
  * - signIn: テスト用サインイン→登録(subject=`load-<runId>-<連番>`)
  * - parseIntent・saveIntent・createOccasion: 意思の読み解き・保存
  * - waitForProposal: 提案のアプリ内通知が届くまで待つ
+ * - waitForReflection: 意思のVectorizeへの反映(vector_reflectionのprocessed)を待つ((b)の先に保存する側)
  * - respondLatch・wsTicket: 提案への回答・チャットのWebSocketのチケット((c)で使う)
  * 各リクエストにはk6のタグ`name`を付け、閾値と集計をこの名前で絞る。
  * 宛先のURLは表示しない(stagingのURLはログに残さない・設計 §2.1)。
@@ -12,6 +13,7 @@
 
 import { check, sleep } from "k6";
 import http from "k6/http";
+import { isReflected } from "./queries.mjs";
 import { checkTarget, parseScale, resolveRunId } from "./target.mjs";
 
 /** 機会Intentの地域(worker E2E apps/worker/e2e/latches.spec.tsのsite(0)と同じ値) */
@@ -164,6 +166,23 @@ export function waitForProposal(baseUrl, token, maxWaitSec) {
 			if (found) return found;
 		}
 		if (Date.now() >= deadline) return null;
+		sleep(1);
+	}
+}
+
+/**
+ * 意思の反映確認(vector_reflection)がprocessedになるまで、dev専用のGET /v1/dev/match-eventsを
+ * 1秒間隔で確かめる。確認できたらtrue、maxWaitSec秒を過ぎたらfalse(呼び出し側はそのまま進む)
+ */
+export function waitForReflection(baseUrl, token, intentId, maxWaitSec) {
+	const deadline = Date.now() + maxWaitSec * 1_000;
+	for (;;) {
+		const res = http.get(
+			`${baseUrl}/v1/dev/match-events?intent_id=${intentId}&limit=50`,
+			{ headers: headers(token), tags: { name: "dev_match_events" } },
+		);
+		if (res.status === 200 && isReflected(res.json().items)) return true;
+		if (Date.now() >= deadline) return false;
 		sleep(1);
 	}
 }

@@ -18,9 +18,12 @@ export function buildQueries(runId) {
 	const subject = `u.auth_subject LIKE 'load-${runId}-%' AND (u.auth_subject LIKE 'load-${runId}-b%' OR u.auth_subject LIKE 'load-${runId}-d%')`;
 	return {
 		// 初期判定: 有効化のイベント行の作成時刻(起点)→そのIntentを含むLATCHの、
-		// そのIntentの利用者への提案の通知の最小のpush_attempted_at(提案が無ければnull)
+		// そのIntentの利用者への提案の通知の最小のpush_attempted_at(提案が無ければnull)。
+		// 相手が先に反映済みかの振り分け(splitJudgeRows)のため、利用者のsubjectと、
+		// そのIntentの反映確認(processed)の最小のprocessed_atも取る
 		judge: [
-			"SELECT i.id AS intent_id,",
+			"SELECT i.id AS intent_id, u.auth_subject AS auth_subject,",
+			"(SELECT min(me.processed_at) FROM match_events me WHERE me.source_intent_id = i.id AND me.event_type = 'vector_reflection' AND me.status = 'processed') AS reflected_at,",
 			"(SELECT min(me.created_at) FROM match_events me WHERE me.source_intent_id = i.id AND me.event_type = 'intent_created') AS activated_at,",
 			"(SELECT min(n.push_attempted_at) FROM latches l JOIN json_each(l.intent_ids) j JOIN notifications n ON n.latch_id = l.id",
 			"WHERE j.value = i.id AND n.user_id = i.user_id AND n.type = 'proposal') AS push_attempted_at",
@@ -95,4 +98,72 @@ export function retrievalFromRows(rows) {
  */
 export function reflectionFromRows(rows) {
 	return rows.map((r) => (r.status === "processed" ? num(r.reflect_ms) : null));
+}
+
+/** (b)(d)のsubject(`load-<runId>-b<連番>`・`-d<連番>`)→{ tag, n }。それ以外はnull */
+function parseSubject(subject) {
+	const m = /^(.*-([bd]))(\d+)$/.exec(
+		typeof subject === "string" ? subject : "",
+	);
+	return m ? { prefix: m[1], tag: m[2], n: Number(m[3]) } : null;
+}
+
+/**
+ * 初期判定の行を「相手が先に反映済み」と「同時」へ振り分け、それぞれの所要時間(欠けはnull)を返す。
+ * 組の相手は連番の隣(奇数nはn+1・偶数nはn−1・pairSubjectsの決め方)。
+ * 相手の意思の反映(reflected_at)が自分の有効化(activated_at)より厳密に前なら「相手が先に反映済み」。
+ * 同時刻・相手の行が無い・相手が未反映・(d)の組・subjectが想定外の行は「同時」(10 §5・設計 §6.2)
+ * @param {Array<{ auth_subject: unknown, activated_at: unknown, reflected_at: unknown, push_attempted_at: unknown }>} rows
+ * @returns {{ preReflected: Array<number | null>, simultaneous: Array<number | null> }}
+ */
+export function splitJudgeRows(rows) {
+	const reflectedBySubject = new Map();
+	for (const r of rows) {
+		if (typeof r.auth_subject === "string") {
+			reflectedBySubject.set(r.auth_subject, num(r.reflected_at));
+		}
+	}
+	const durations = judgeFromRows(rows);
+	const out = { preReflected: [], simultaneous: [] };
+	rows.forEach((r, i) => {
+		const s = parseSubject(r.auth_subject);
+		let pre = false;
+		if (s && s.tag === "b") {
+			const partner = `${s.prefix}${s.n % 2 === 1 ? s.n + 1 : s.n - 1}`;
+			const partnerReflected = reflectedBySubject.get(partner) ?? null;
+			const own = num(r.activated_at);
+			pre = partnerReflected !== null && own !== null && partnerReflected < own;
+		}
+		(pre ? out.preReflected : out.simultaneous).push(durations[i]);
+	});
+	return out;
+}
+
+/**
+ * 反映の行の欠けの内訳。processedで値のある行は数えず、failed・skipped・それ以外(processedで値なしなど)を分ける
+ * @param {Array<{ status: unknown, reflect_ms: unknown }>} rows
+ * @returns {{ skipped: number, failed: number, other: number }}
+ */
+export function reflectionBreakdown(rows) {
+	const out = { skipped: 0, failed: 0, other: 0 };
+	for (const r of rows) {
+		if (r.status === "processed" && num(r.reflect_ms) !== null) continue;
+		if (r.status === "skipped") out.skipped += 1;
+		else if (r.status === "failed") out.failed += 1;
+		else out.other += 1;
+	}
+	return out;
+}
+
+/**
+ * GET /v1/dev/match-eventsの項目に、反映確認(vector_reflection)のprocessedがあるか((b)の先に保存した側の反映待ち)
+ * @param {Array<{ event_type?: unknown, status?: unknown }> | undefined} items
+ */
+export function isReflected(items) {
+	return (
+		Array.isArray(items) &&
+		items.some(
+			(e) => e.event_type === "vector_reflection" && e.status === "processed",
+		)
+	);
 }

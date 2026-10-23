@@ -1,14 +1,24 @@
 // 負荷試験の集計の計算部(純粋関数)。時間の単位はすべてミリ秒。
 
 /**
- * p95(最近順位法)。昇順に並べ、ceil(0.95 × n) − 1 番目(0始まり)。n=0はnull。
+ * 分位(最近順位法)。昇順に並べ、ceil(q × n) − 1 番目(0始まり・最小0)。n=0はnull
+ * @param {number[]} values
+ * @param {number} q
+ * @returns {number | null}
+ */
+export function quantile(values, q) {
+	if (values.length === 0) return null;
+	const sorted = [...values].sort((a, b) => a - b);
+	return sorted[Math.max(0, Math.ceil(q * sorted.length) - 1)];
+}
+
+/**
+ * p95。n=0はnull
  * @param {number[]} values
  * @returns {number | null}
  */
 export function p95(values) {
-	if (values.length === 0) return null;
-	const sorted = [...values].sort((a, b) => a - b);
-	return sorted[Math.ceil(0.95 * sorted.length) - 1];
+	return quantile(values, 0.95);
 }
 
 /**
@@ -39,17 +49,6 @@ export function summarize(name, targetMs, durations) {
 	};
 }
 
-/**
- * 分位(最近順位法)。q=0.5でp50。n=0はnull
- * @param {number[]} values
- * @param {number} q
- */
-function quantile(values, q) {
-	if (values.length === 0) return null;
-	const sorted = [...values].sort((a, b) => a - b);
-	return sorted[Math.max(0, Math.ceil(q * sorted.length) - 1)];
-}
-
 const sec = (ms) => `${(ms / 1000).toFixed(2)}秒`;
 
 /**
@@ -78,16 +77,20 @@ export function renderTable(summaries) {
 }
 
 /**
- * 目標値の無い参考項目の行(件数・欠け・p50・p95・最大。合否なし)。nullは欠け
- * @param {string} name
- * @param {Array<number | null>} durations
+ * 目標値の無い参考項目の表(項目ごとに1行: 件数・欠け・p50・p95・最大。合否なし)。nullは欠け
+ * @param {Array<{ name: string, durations: Array<number | null> }>} entries
  */
-export function renderReferenceTable(name, durations) {
-	const values = durations.filter((d) => d !== null);
+export function renderReferenceTable(entries) {
 	const cell = (v) => (v === null ? "計測なし" : sec(v));
-	return [
+	const lines = [
 		"| 項目(参考) | 件数 | 欠け | p50 | p95 | 最大 |",
 		"| --- | --- | --- | --- | --- | --- |",
-		`| ${name} | ${durations.length} | ${durations.length - values.length} | ${cell(quantile(values, 0.5))} | ${cell(p95(values))} | ${cell(values.length === 0 ? null : Math.max(...values))} |`,
-	].join("\n");
+	];
+	for (const { name, durations } of entries) {
+		const values = durations.filter((d) => d !== null);
+		lines.push(
+			`| ${name} | ${durations.length} | ${durations.length - values.length} | ${cell(quantile(values, 0.5))} | ${cell(p95(values))} | ${cell(values.length === 0 ? null : Math.max(...values))} |`,
+		);
+	}
+	return lines.join("\n");
 }
