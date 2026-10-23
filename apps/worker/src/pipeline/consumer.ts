@@ -6,7 +6,7 @@
  * 第2段は載せられたベクトルで自分を検索するため、upsertの反映待ちは不要。
  * 続けて反映確認のvector_reflection(同version・遅延付き)を投入し、反映後に
  * 1回だけ評価し直す(pipeline/reflection.ts・同時に預けた相手の取りこぼしを拾う)。
- * 消費は例外を外へ出さない(既定はack)。第1段の失敗(埋め込み・upsert・embedded_atの
+ * 消費は例外を外へ出さない(既定はack)。第1段の失敗(意思の読み取り・埋め込み・upsert・embedded_atの
  * 更新・投入)と反映確認の送り直しの失敗だけ、受け取ったメッセージを遅延付きでretryする。
  * 第1段の失敗は起点の行をpendingのまま残し、STAGE1_RETRY_DELAYS_S(10秒・30秒・60秒)で
  * やり直す。max_retriesを超えたものはDLQでdeadになり、Cronのバックフィル(e)が回収する
@@ -50,8 +50,9 @@ export type EmbeddingStageLayer = "embed" | "upsert" | "d1" | "emit";
 /**
  * 第1段の本体の結果。embedded=計算したベクトル(直後の評価に渡す)・
  * failed=失敗した段(呼び出し側がやり直し方を決める・設計 §4)・
- * gone=埋め込みの間に意思の行が消えたかactiveでなくなったため何も書かずに止めた
- * (失敗ではない。削除の後の書き戻しの防止・#20・設計 §5.2)
+ * gone=埋め込みの間に意思の行が消えたか、activeでなくなったか、内容が直されて版が
+ * 上がったため何も書かずに止めた(失敗ではない。削除の後の書き戻しの防止・#20・設計 §5.2。
+ * 新しい版は、その版のイベントが埋め込む)
  */
 export type EmbeddingStageResult =
 	| { status: "embedded"; vector: number[] }
@@ -158,6 +159,20 @@ const emittedStage1Events = async (
 };
 
 /**
+ * 第1段を何も書かずに止めたことを記録する(削除・一時停止・版の更新)。
+ * 書き戻しの防止が働いた回数をstagingで数えるためのinfo(layer=呼び出した経路)
+ */
+const logStage1Skipped = (
+	intentId: string,
+	source: "queue" | "backfill" | "repair",
+): void => {
+	logger.info("pipeline.stage1.skipped", {
+		intent_id: intentId,
+		layer: source,
+	});
+};
+
+/**
  * 第1段の本体(docs/06 §2)。埋め込み→VectorStoreへのupsert(反映は待たない)→
  * intents.embedding_model/embedded_atの更新→embedding_completedイベント(vector付き)の投入
  * (同version・即時)→vector_reflectionの投入(同version・遅延付き)までを行い、
@@ -189,19 +204,21 @@ export const runEmbeddingStage = async (
 		const embedder = createEmbedder(env);
 		const values = await embedder.embed(buildNormalizedText(intent));
 		// upsertの直前に意思の行を読み直す。埋め込みの間に削除・一時停止されていたら
-		// 書かない(削除APIはベクトルを先に消すため、ここで書くと孤立したベクトルが残る・#20)
+		// 書かない(削除APIはベクトルを先に消すため、ここで書くと孤立したベクトルが残る・#20)。
+		// 内容が直されて版が上がっていたら、古い版の結果は書かない(新しい版のイベントが
+		// 埋め込む。古い版でembedded_atを書くと、投入だけのやり直しの判定を誤らせる)
 		layer = "d1";
 		const [current] = await drizzle(env.DB)
-			.select({ status: intents.status })
+			.select({ status: intents.status, version: intents.version })
 			.from(intents)
 			.where(eq(intents.id, intent.id))
 			.limit(1);
-		if (current === undefined || current.status !== "active") {
-			// 書き戻しの防止が働いた回数をstagingで数えるためのinfo(layer=呼び出した経路)
-			logger.info("pipeline.stage1.skipped", {
-				intent_id: intent.id,
-				layer: source,
-			});
+		if (
+			current === undefined ||
+			current.status !== "active" ||
+			current.version !== intent.version
+		) {
+			logStage1Skipped(intent.id, source);
 			return { status: "gone" };
 		}
 		layer = "upsert";
@@ -224,10 +241,18 @@ export const runEmbeddingStage = async (
 		]);
 		layer = "d1";
 		const db = drizzle(env.DB);
-		await db
+		// embedded_atは埋め込んだ版のときだけ書く(upsertの間に版が上がったら書かずに止める)
+		const updated = await db
 			.update(intents)
 			.set({ embeddingModel: embedder.modelId, embeddedAt: clock.now() })
-			.where(eq(intents.id, intent.id));
+			.where(
+				and(eq(intents.id, intent.id), eq(intents.version, intent.version)),
+			)
+			.returning({ id: intents.id });
+		if (updated.length === 0) {
+			logStage1Skipped(intent.id, source);
+			return { status: "gone" };
+		}
 		layer = "emit";
 		// キューの経路(embedding_completedを投入する)だけが、投入の失敗をretryで
 		// やり直せる。Cronの経路はvector_reflectionの失敗をログだけにする
@@ -254,6 +279,9 @@ export const runEmbeddingStage = async (
 		return { status: "failed", layer };
 	}
 };
+
+/** 意思の行の読み取りが例外で終わった印(第1段のやり直しの判定に使う) */
+const READ_FAILED = Symbol("READ_FAILED");
 
 /**
  * 起点イベントをprocessedへ倒す。payloadの上書きがあれば合わせて記録する
@@ -355,11 +383,48 @@ const consumeEvent = async (
 		);
 		return;
 	}
-	const [intent] = await db
-		.select()
-		.from(intents)
-		.where(eq(intents.id, event.sourceIntentId))
-		.limit(1);
+	const stage1 =
+		event.eventType === "intent_created" ||
+		event.eventType === "intent_updated";
+	// 第1段の失敗のやり直し(設計 §4)。起点の行はpendingのまま残し、配信の回数に
+	// 応じた遅延でretryする(max_retriesを超えたらDLQでdead→Cronのバックフィル(e))
+	const retry = {
+		retryDelaySeconds:
+			PIPELINE.STAGE1_RETRY_DELAYS_S[
+				Math.min(
+					Math.max(attempts, 1) - 1,
+					PIPELINE.STAGE1_RETRY_DELAYS_S.length - 1,
+				)
+			],
+	};
+	// 意思の行を読む。第1段では読み取りの一時的な失敗(D1_ERROR等)もやり直す
+	// (ackすると未処理の回収とバックフィルまで待つことになる)
+	const readIntent = async (): Promise<
+		IntentRow | undefined | typeof READ_FAILED
+	> => {
+		try {
+			const [row] = await db
+				.select()
+				.from(intents)
+				.where(eq(intents.id, event.sourceIntentId))
+				.limit(1);
+			return row;
+		} catch (error) {
+			if (!stage1) {
+				throw error;
+			}
+			logger.warn("pipeline.stage1.failed", {
+				error_code: errorCodeOf(error, "EMBEDDING_FAILED"),
+				intent_id: event.sourceIntentId,
+				layer: "d1",
+			});
+			return READ_FAILED;
+		}
+	};
+	const intent = await readIntent();
+	if (intent === READ_FAILED) {
+		return retry;
+	}
 	// 本体行が消えている(削除競合)なら処理対象なしとしてprocessedへ
 	if (intent === undefined) {
 		await markProcessed(env, event.id, clock);
@@ -375,33 +440,19 @@ const consumeEvent = async (
 		await markProcessed(env, event.id, clock);
 		return;
 	}
-	if (
-		event.eventType === "intent_created" ||
-		event.eventType === "intent_updated"
-	) {
+	if (stage1) {
 		// upsert直前の再読込: 最初の読み取り〜ここまでの間の削除で
 		// 孤立ベクトルを作らない(台帳引継ぎ・docs/06 §5)
-		const [current] = await db
-			.select()
-			.from(intents)
-			.where(eq(intents.id, intent.id))
-			.limit(1);
+		const current = await readIntent();
+		if (current === READ_FAILED) {
+			return retry;
+		}
 		if (current === undefined || current.status !== "active") {
 			await markProcessed(env, event.id, clock);
 			return;
 		}
-		// 第1段の失敗のやり直し(設計 §4)。起点の行はpendingのまま残し、配信の回数に
-		// 応じた遅延でretryする(max_retriesを超えたらDLQでdead→Cronのバックフィル(e))
-		const retry = {
-			retryDelaySeconds:
-				PIPELINE.STAGE1_RETRY_DELAYS_S[
-					Math.min(
-						Math.max(attempts, 1) - 1,
-						PIPELINE.STAGE1_RETRY_DELAYS_S.length - 1,
-					)
-				],
-		};
-		// 投入だけの失敗の再配信: このイベントの後に同versionの埋め込みが書かれていれば、
+		// 投入だけの失敗の再配信: このイベントの後に同versionの埋め込みが書かれていれば
+		// (embedded_atは埋め込んだ版のときだけ書かれる・runEmbeddingStage)、
 		// 埋め込み・upsertを繰り返さず、まだ送れていない後続イベントだけを投入する
 		// (行がある種別は送れているので飛ばす)。ベクトルは保持していないため
 		// embedding_completedはvector無しで送る(第2段はgetByIdsで読み、未反映なら

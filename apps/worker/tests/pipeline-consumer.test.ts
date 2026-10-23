@@ -511,11 +511,15 @@ const fakeAiEnv = (state: { fail: boolean }) => {
 
 /** SQLの先頭がprefixに一致する問い合わせだけを例外にするD1(他はそのまま通す) */
 const failingDb = (prefix: string): D1Database =>
+	failingDbWhere((sql) => sql.startsWith(prefix));
+
+/** shouldFailが真を返す問い合わせだけを例外にするD1(他はそのまま通す) */
+const failingDbWhere = (shouldFail: (sql: string) => boolean): D1Database =>
 	new Proxy(testEnv.DB, {
 		get(target, prop) {
 			if (prop === "prepare") {
 				return (sql: string) => {
-					if (sql.startsWith(prefix)) {
+					if (shouldFail(sql)) {
 						throw new Error("D1_ERROR: 試験用の書き込みの失敗");
 					}
 					return target.prepare(sql);
@@ -737,6 +741,37 @@ describe("第1段の失敗(段ごとの扱い・#17)", () => {
 		expect((await originOf(eventId))?.status).toBe("processed");
 	});
 
+	it("第1段の前の意思の読み取り(最初の読み取り・upsert直前の読み直し)の例外も、起点はpendingのままretryする", async () => {
+		for (const failAt of [1, 2]) {
+			const { intentId, eventId } = await seedEvent();
+			const send = spySend();
+			const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+			// failAt回目のintentsの読み取りだけを例外にする
+			let reads = 0;
+			const brokenEnv = {
+				...testEnv,
+				DB: failingDbWhere((sql) => {
+					if (!/^select .* from "intents"/.test(sql)) {
+						return false;
+					}
+					reads += 1;
+					return reads === failAt;
+				}),
+			} as unknown as WorkerEnv;
+
+			const { result, retrySpy } = await runStage1(eventId, brokenEnv, 2);
+
+			expect(result.retryMessages).toEqual([{ msgId: "msg-0" }]);
+			expect(retrySpy).toHaveBeenCalledWith({ delaySeconds: 30 });
+			expect((await originOf(eventId))?.status).toBe("pending");
+			expect(send).not.toHaveBeenCalled();
+			expect(logsOf(logSpy, "pipeline.stage1.failed")).toEqual([
+				expect.objectContaining({ intent_id: intentId, layer: "d1" }),
+			]);
+			vi.restoreAllMocks();
+		}
+	});
+
 	it("投入の再配信の判定: embedded_atが起点の行より前(古い埋め込み)なら埋め込み直す", async () => {
 		const { intentId, eventId } = await seedEvent();
 		spySend();
@@ -821,6 +856,80 @@ describe("削除の後の書き戻しの防止(第1段・#20・設計 §5.2)", (
 			.where(eq(intents.id, intentId));
 		expect(row.embeddedAt).toBeNull();
 		expect((await eventsOf(intentId)).length).toBe(1);
+	});
+
+	it("埋め込みの間に内容が直されたら、古い版はベクトルもembedded_atも書かず、新しい版のイベントで埋め込み直す", async () => {
+		const { intentId, eventId } = await seedEvent();
+		const send = spySend();
+		const upsertSpy = vi.spyOn(memoryVectorStore(), "upsert");
+		const updatedEventId = ulid();
+		// 埋め込みの最中に意味フィールドの更新(version 2とintent_updatedの行)が入る
+		const aiEnv = aiEnvWith(async () => {
+			if ((await originOf(updatedEventId)) !== undefined) {
+				return;
+			}
+			await db
+				.update(intents)
+				.set({ topic: "直した後の学習仲間", version: 2 })
+				.where(eq(intents.id, intentId));
+			await db.insert(matchEvents).values({
+				id: updatedEventId,
+				eventType: "intent_updated",
+				sourceIntentId: intentId,
+				version: 2,
+				payload: {},
+				status: "pending",
+				createdAt: clock.now(),
+			});
+		});
+
+		const first = await runStage1(eventId, aiEnv);
+
+		// 古い版(version 1)の第1段は何も書かずに終える(やり直さない)
+		expect(first.result.retryMessages).toEqual([]);
+		expect(upsertSpy).not.toHaveBeenCalled();
+		expect(send).not.toHaveBeenCalled();
+		expect((await originOf(eventId))?.status).toBe("processed");
+		const [afterFirst] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		expect(afterFirst.embeddedAt).toBeNull();
+
+		// 新しい版のイベントは、投入だけのやり直しにならず埋め込み直す
+		const second = await runStage1(updatedEventId, aiEnv);
+
+		expect(second.result.retryMessages).toEqual([]);
+		expect(upsertSpy).toHaveBeenCalledTimes(1);
+		const [stored] = await memoryVectorStore().getByIds([intentId]);
+		expect(stored?.metadata.version).toBe(2);
+		expect((await originOf(updatedEventId))?.status).toBe("processed");
+	});
+
+	it("embedded_atを書く前に版が上がったら、embedded_atを書かず投入もしない", async () => {
+		const { intentId, eventId } = await seedEvent();
+		const send = spySend();
+		// upsertの後(embedded_atの更新の前)に版が上がる
+		const store = memoryVectorStore();
+		const upsert = store.upsert.bind(store);
+		vi.spyOn(store, "upsert").mockImplementation(async (vectors) => {
+			await upsert(vectors);
+			await db
+				.update(intents)
+				.set({ version: 2 })
+				.where(eq(intents.id, intentId));
+		});
+
+		const { result } = await runStage1(eventId);
+
+		expect(result.retryMessages).toEqual([]);
+		expect(send).not.toHaveBeenCalled();
+		expect((await originOf(eventId))?.status).toBe("processed");
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		expect(row.embeddedAt).toBeNull();
 	});
 });
 

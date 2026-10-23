@@ -490,7 +490,7 @@ const runBackfillSweep = async (env: Env, clock: Clock): Promise<void> => {
 				emitCompleted: false,
 				source: "backfill",
 			});
-			// 埋め込みの間に削除・一時停止された意思は書かずに止めた(失敗に数えない・#20)
+			// 埋め込みの間に削除・一時停止・版の更新があった意思は書かずに止めた(失敗に数えない・#20)
 			if (stage.status === "gone") {
 				continue;
 			}
