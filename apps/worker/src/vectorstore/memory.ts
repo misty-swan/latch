@@ -32,12 +32,13 @@ const byScoreDescThenIdAsc = (
 	return a.id < b.id ? -1 : 1;
 };
 
+/** 試験専用の件数の上限(Vectorizeの上限の再現・未設定なら上限なし) */
+let limits: { getByIds?: number } | null = null;
+
 /**
  * インメモリVectorStore(モジュール内Mapを閉じ込めた単一インスタンス)。
  * モジュールレベルで1回だけ生成し、memoryVectorStore()は常に同一オブジェクトを返す。
  */
-let limits: { getByIds?: number } | null = null;
-
 const singleton: VectorStore = {
 	upsert: async (vectors) => {
 		// 同一idは上書き(Vectorizeのupsertと同じセマンティクス)

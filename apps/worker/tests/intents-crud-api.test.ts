@@ -1046,6 +1046,42 @@ describe("DELETE /v1/intents/{id}(削除・docs/05 §3.1・§3.2)", () => {
 		expect(left.map((r) => r.id)).toEqual([othersId]);
 	});
 
+	it("本人の意思を含むgroup_candidatesが51件あっても、50件ずつに分けて全部消す(#16)", async () => {
+		const accessToken = await registerUser("delete-groupcand-51");
+		const created = await createActiveConnection(
+			accessToken,
+			"グループ候補が多いときの掃除を確かめる学習仲間",
+		);
+		// 組ごとに新しい相手を2人ずつ作り、dedup_keyが重ならないようにする
+		const rows = Array.from({ length: 51 }, () => {
+			const ids = [created.id, ulid(), ulid()].sort();
+			return {
+				id: ulid(),
+				intentIds: ids,
+				dedupKey: ids.map((x) => `${x}@1`).join(","),
+				aggregateScore: 0.5,
+				prevAggregateScore: null,
+				status: "candidate" as const,
+				createdAt: new Date(),
+			};
+		});
+		for (const row of rows) {
+			await db.insert(groupCandidates).values(row);
+		}
+		const res = await deleteReq(`/v1/intents/${created.id}`, accessToken);
+		expect(res.status).toBe(204);
+		const left = await db
+			.select({ id: groupCandidates.id })
+			.from(groupCandidates)
+			.where(
+				inArray(
+					groupCandidates.id,
+					rows.map((r) => r.id),
+				),
+			);
+		expect(left).toEqual([]);
+	});
+
 	it("削除でそのIntentのintent_expired通知だけが消え、他の通知は残る", async () => {
 		const accessToken = await registerUser("delete-notif");
 		const created = await createActiveConnection(

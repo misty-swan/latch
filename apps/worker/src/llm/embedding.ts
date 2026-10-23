@@ -70,7 +70,7 @@ export const createEmbedder = (env: Env): Embedder => {
 							timer = setTimeout(() => {
 								reject(
 									new Error(
-										"EMBEDDING_TIMEOUT: Embeddingが5秒でタイムアウト(07 §4・再試行なし・06 §5のバックフィルで回収)",
+										"EMBEDDING_TIMEOUT: Embeddingが5秒でタイムアウト(07 §4・呼び出しの中では再試行しない・キューのやり直しの後は06 §5のバックフィル)",
 									),
 								);
 							}, PIPELINE.EMBEDDING_TIMEOUT_MS);
