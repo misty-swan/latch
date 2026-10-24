@@ -20,6 +20,7 @@ import {
 import { k6Row, readK6Metrics, renderChatTable } from "./lib/k6summary.mjs";
 import {
 	buildQueries,
+	judgePathBreakdown,
 	notifyFromRows,
 	reflectionBreakdown,
 	reflectionFromRows,
@@ -49,6 +50,7 @@ export function buildReport(runId, k6, rows, scenario) {
 	const m = readK6Metrics(k6);
 	const retrieval = retrievalFromRows(rows.retrieval);
 	const judge = splitJudgeRows(rows.judge);
+	const judgePath = judgePathBreakdown(rows.judge);
 	const reflectionRows = rows.reflection ?? [];
 	const breakdown = reflectionBreakdown(reflectionRows);
 	const table = renderTable([
@@ -88,6 +90,7 @@ export function buildReport(runId, k6, rows, scenario) {
 		"- Vectorizeの反映は、意思のversionごとの反映確認の行(vector_reflection)の作成から反映の確認までの時間である。01 §20に目標値は無く、合否は付けず実測だけを出す。「欠け」は確認できず諦めた(failed)・古い版などで値の無い行の数。確認中(pending)は集計の時点で反映確認が終わっていない行で、これが多いときは反映確認の打ち切り(8分)を待ってから集計し直す。内訳のskippedは、意思が無い・古い版・activeでないために反映を確かめずに処理済みにした行(payload.skipped)の数",
 		`- Vectorizeの反映の欠けの内訳: skipped ${breakdown.skipped}件・failed ${breakdown.failed}件・確認中(pending) ${breakdown.pending}件・その他 ${breakdown.other}件`,
 		"- 初期判定は、組の相手の意思の反映確認(vector_reflection)が反映を確かめてprocessedになった時刻(payload.skippedが無いかnot_evaluatedの行。not_found・stale_version・inactiveは反映を確かめていないため除く)と、自分の有効化(intent_created)の行の作成時刻を比べて振り分ける。相手の反映が自分の有効化より前(同時刻は含めない)なら「相手が先に反映済み」で、これだけに目標(p95 10秒・01 §20)の合否を付ける。それ以外((d)の組・先に保存した側・相手が未反映のとき)は「同時」で、合否を付けない参考値である。(b)は片方が先に保存して反映を確かめてからもう片方が保存するため、後から保存した側が「相手が先に反映済み」の標本になる",
+		`- 初期判定の行の経路の内訳: 応答の後の処理(inline) ${judgePath.inline}件・キュー(queue) ${judgePath.queue}件・不明 ${judgePath.unknown}件(有効化の行(intent_created)のpayload.path。不明は印が無い・まだ処理されていない行)`,
 		"- 初期判定の起点は有効化のイベント行(intent_created)の作成時刻で、有効化の保存の直後に応答の後の処理(waitUntil)で書かれる。保存のコミットよりわずかに後の時刻を起点にしている",
 		"- 送信記録(push_attempted_at)は送信の順番を取った時刻である。試験用の利用者は購読を持たないためno_subscriptionで確定し、暗号化と送信の時間は含まれない",
 		"- Parser・初期判定の行のLLM(Parser・Jev)の動作は、計測の時点のstagingの設定(LATCH_LLM_MODE)による。このツールは設定を知らないため、実行条件は報告書に記録する",

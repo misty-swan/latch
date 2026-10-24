@@ -151,6 +151,7 @@ Parser(real)は「今度の日曜17時に渋谷で…カレー…」のtopicを�
 - 応答の後(`c.executionCtx.waitUntil`)で、キューの消費と同じ処理(その intent_created の行の消費 → 第1段 → 同じ実行の第2段 → 提案の通知の送出)を行う。計測の書き込みの残り(§4)は、この処理ごとに1つ作る
 - キューへの intent_created のメッセージは `PIPELINE.INLINE_FALLBACK_DELAY_S = 60` 秒遅らせて送る(waitUntil の上限30秒より長く、応答の後の処理と重ならない)。キューの消費は、行がprocessedなら何もしない・埋め込み済みなら足りない後続のイベントだけを送る(今の冪等の仕組み)ため、応答の後の処理が済んでいれば何も起きず、途中で失敗していればやり直す
 - 応答の後の処理の例外は応答に波及させず、ログだけにする
+- 経路の印(最終点検の直し): 起点の intent_created の行は processed にするとき payload に `{ path: "inline" }`(応答の後の処理)か `{ path: "queue" }`(キュー)を載せる(既存の項目は保つ。処理は変えない)。第1段の完了ログ pipeline.stage1.completed の layer も応答の後の処理では `inline`。負荷試験の集計(tools/load)は初期判定の行の経路の内訳(inline / queue / 不明)を注記に出す
 - 環境変数 `LATCH_INLINE_PIPELINE`(既定 `on`。workerの単体・統合試験の設定では `off` にして、キューを直接呼ぶ今の試験の作法を保つ。応答の後の処理の試験だけ `on` で確かめる)
 - 失敗した場合のやり直しは、これまでの10秒ではなく60秒後になる
 

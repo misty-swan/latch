@@ -208,6 +208,8 @@ describe("activeでの作成の応答の後の第1段・第2段(#30・設計 §3
 
 		const origin = await eventOfType(created.id, "intent_created");
 		expect(origin?.status).toBe("processed");
+		// 応答の後の処理で済んだ印(D1から経路の内訳を集計するため)
+		expect(origin?.payload).toEqual({ path: "inline" });
 		const completed = await eventOfType(created.id, "embedding_completed");
 		expect(completed?.status).toBe("processed");
 		expect(completed?.payload).toHaveProperty("retrieval_count");
@@ -294,24 +296,43 @@ describe("activeでの作成の応答の後の第1段・第2段(#30・設計 §3
 		upsert.mockRestore();
 		const result = await consumeLater(origin?.id ?? "");
 		expect(result.retryMessages).toEqual([]);
-		expect((await eventOfType(created.id, "intent_created"))?.status).toBe(
-			"processed",
-		);
+		const retried = await eventOfType(created.id, "intent_created");
+		expect(retried?.status).toBe("processed");
+		// キューのやり直しで済んだ行はpath=queue
+		expect(retried?.payload).toEqual({ path: "queue" });
 		expect((await eventOfType(created.id, "embedding_completed"))?.status).toBe(
 			"processed",
 		);
+	});
+
+	it("応答の後の処理の第1段の完了ログはlayer=inline", async () => {
+		const a = await registerUser("即壬");
+		spySend();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		const res = await createActive(a, "経路の印の学習仲間", inlineEnv());
+		expect(res.status).toBe(201);
+
+		const completed = logsOf(logSpy, "pipeline.stage1.completed");
+		expect(completed).toHaveLength(1);
+		expect(completed[0]?.layer).toBe("inline");
 	});
 
 	it("応答の後の処理が例外を投げても応答は201のまま、pipeline.inline.failedが出る", async () => {
 		const a = await registerUser("即丁");
 		spySend();
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		// 起点の行をprocessedへ倒す更新だけを失敗させる(第1段の後の例外)
+		// 起点の行をprocessedへ倒す更新だけを失敗させる(第1段の後の例外)。
+		// intent_createdは経路の印(payload)と一緒にstatusを書く
 		const failingDb = new Proxy(testEnv.DB, {
 			get(target, prop) {
 				if (prop === "prepare") {
 					return (query: string) => {
-						if (/^update "match_events" set "status"/i.test(query)) {
+						if (
+							/^update "match_events" set ("payload" = \?, )?"status"/i.test(
+								query,
+							)
+						) {
 							throw new Error("forced");
 						}
 						return target.prepare(query);

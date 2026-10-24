@@ -166,13 +166,16 @@ const emittedStage1Events = async (
 };
 
 /**
+ * 第1段を呼んだ経路(完了ログ・スキップのログのlayer)。inlineは意思を有効にした要求の
+ * 応答の後の処理(processMatchEventInline・設計 §3.5)
+ */
+type Stage1Source = "queue" | "inline" | "backfill" | "repair";
+
+/**
  * 第1段を何も書かずに止めたことを記録する(削除・一時停止・版の更新)。
  * 書き戻しの防止が働いた回数をstagingで数えるためのinfo(layer=呼び出した経路)
  */
-const logStage1Skipped = (
-	intentId: string,
-	source: "queue" | "backfill" | "repair",
-): void => {
+const logStage1Skipped = (intentId: string, source: Stage1Source): void => {
 	logger.info("pipeline.stage1.skipped", {
 		intent_id: intentId,
 		layer: source,
@@ -204,7 +207,7 @@ export const runEmbeddingStage = async (
 	options: {
 		emitCompleted?: boolean;
 		/** 第1段を呼んだ経路(完了ログのlayer・既定queue) */
-		source?: "queue" | "backfill" | "repair";
+		source?: Stage1Source;
 	} = {},
 ): Promise<EmbeddingStageResult> => {
 	const emitCompleted = options.emitCompleted ?? true;
@@ -286,7 +289,7 @@ export const runEmbeddingStage = async (
 				)
 			: undefined;
 		// count=upsertしたベクトル数(1Intent=1ベクトル・06 §7の層別観測)・
-		// layer=第1段を呼んだ経路(queue/backfill/repair)
+		// layer=第1段を呼んだ経路(queue/inline/backfill/repair)
 		logger.info("pipeline.stage1.completed", {
 			intent_id: intent.id,
 			count: 1,
@@ -418,16 +421,20 @@ const continueStage2 = async (
  * 失敗はD1のイベント行statusで記録し、ここでは例外を握って呼び出し側へは
  * 正常復帰する(ackが原則・06 §5)。やり直すべき一時的な失敗だけを
  * { retryDelaySeconds }で返す(第1段の失敗・#17、反映確認の送り直しの失敗・#23)。
- * attemptsはこのメッセージの配信の回数(1始まり)で、第1段の遅延の選択に使う
+ * attemptsはこのメッセージの配信の回数(1始まり)で、第1段の遅延の選択に使う。
+ * pathは処理した経路(既定queue・応答の後の処理はinline)。intent_createdの起点の行を
+ * processedにするとき、payloadに{ path }を載せる(既存の項目は保つ)。負荷試験の集計が
+ * 初期判定の行の経路の内訳をD1から数えるための印で、処理は変えない
  */
 const consumeEvent = async (
 	env: Env,
 	eventId: string,
 	clock: Clock,
-	message: { vector?: number[]; attempts: number },
+	message: { vector?: number[]; attempts: number; path?: "queue" | "inline" },
 	metricsBudget: MetricsBudget,
 ): Promise<ConsumeOutcome> => {
 	const { vector, attempts } = message;
+	const path = message.path ?? "queue";
 	const db = drizzle(env.DB);
 	// イベント行の取得。無ければ何もせずack(送信だけが先行したメッセージ・Task 6引継ぎ)
 	const [event] = await db
@@ -465,6 +472,24 @@ const consumeEvent = async (
 	const stage1 =
 		event.eventType === "intent_created" ||
 		event.eventType === "intent_updated";
+	// 起点の行をprocessedへ倒す。intent_createdは処理した経路の印pathを載せる
+	// (既存のpayloadの項目は保つ)。それ以外の種別は今までどおり
+	const markOrigin = (payload?: Record<string, unknown>): Promise<void> => {
+		if (event.eventType !== "intent_created") {
+			return markProcessed(env, event.id, clock, payload);
+		}
+		const existing =
+			typeof event.payload === "object" &&
+			event.payload !== null &&
+			!Array.isArray(event.payload)
+				? (event.payload as Record<string, unknown>)
+				: {};
+		return markProcessed(env, event.id, clock, {
+			...existing,
+			...payload,
+			path,
+		});
+	};
 	// 第1段の失敗のやり直し(設計 §4)。起点の行はpendingのまま残し、配信の回数に
 	// 応じた遅延でretryする(max_retriesを超えたらDLQでdead→Cronのバックフィル(e))
 	const retry = {
@@ -506,17 +531,17 @@ const consumeEvent = async (
 	}
 	// 本体行が消えている(削除競合)なら処理対象なしとしてprocessedへ
 	if (intent === undefined) {
-		await markProcessed(env, event.id, clock);
+		await markOrigin();
 		return;
 	}
 	// 古いversionのイベントは破棄する(更新の10秒遅延配信の間に次の更新が来た場合・06 §2)
 	if (event.version !== intent.version) {
-		await markProcessed(env, event.id, clock, { skipped: "stale_version" });
+		await markOrigin({ skipped: "stale_version" });
 		return;
 	}
 	// 非active(draft/paused/expired)は評価対象外(docs/06 §2)
 	if (intent.status !== "active") {
-		await markProcessed(env, event.id, clock);
+		await markOrigin();
 		return;
 	}
 	if (stage1) {
@@ -527,7 +552,7 @@ const consumeEvent = async (
 			return retry;
 		}
 		if (current === undefined || current.status !== "active") {
-			await markProcessed(env, event.id, clock);
+			await markOrigin();
 			return;
 		}
 		// 投入だけの失敗の再配信: このイベントの後に同versionの埋め込みが書かれていれば
@@ -555,16 +580,18 @@ const consumeEvent = async (
 				});
 				return retry;
 			}
-			await markProcessed(env, event.id, clock);
+			await markOrigin();
 			return;
 		}
-		const result = await runEmbeddingStage(env, current, clock);
+		const result = await runEmbeddingStage(env, current, clock, {
+			source: path,
+		});
 		if (result.status === "failed") {
 			return retry;
 		}
 		// embedded・gone(埋め込みの間の削除・一時停止で書かずに止めた)はどちらもprocessedへ
 		// (goneは上の「本体行が消えている」と同じ扱いでやり直さない・#20)
-		await markProcessed(env, event.id, clock);
+		await markOrigin();
 		// 成功したら同じ実行で第2段を続ける(#30)。ここで作られた提案の通知は、
 		// このメッセージの処理の後のflushFreshPushで送り出される(#19)
 		if (result.status === "embedded" && result.completedEventId !== undefined) {
@@ -646,7 +673,7 @@ export const processMatchEventInline = async (
 			env,
 			eventId,
 			clock,
-			{ attempts: 1 },
+			{ attempts: 1, path: "inline" },
 			createMetricsBudget(),
 		);
 		if (outcome !== undefined) {

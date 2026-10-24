@@ -42,12 +42,15 @@ export function buildQueries(runId, scenario) {
 		// 相手が先に反映済みかの振り分け(splitJudgeRows)のため、利用者のsubjectと、
 		// そのIntentの反映確認の最小のprocessed_atも取る。反映確認のskipped(payload.skipped)の
 		// うち反映を確かめたのはnot_evaluated(評価が抑制された)だけで、not_found・stale_version・
-		// inactiveは反映を確かめずにprocessedになるため数えない
+		// inactiveは反映を確かめずにprocessedになるため数えない。
+		// 有効化の行のpayload.path(応答の後の処理=inline・キュー=queue)も取り、経路の内訳を出す
 		judge: [
 			"SELECT i.id AS intent_id, u.auth_subject AS auth_subject,",
 			"(SELECT min(me.processed_at) FROM match_events me WHERE me.source_intent_id = i.id AND me.event_type = 'vector_reflection' AND me.status = 'processed'",
 			`AND ${REFLECTED_SKIP}) AS reflected_at,`,
 			"(SELECT min(me.created_at) FROM match_events me WHERE me.source_intent_id = i.id AND me.event_type = 'intent_created') AS activated_at,",
+			"(SELECT json_extract(me.payload, '$.path') FROM match_events me WHERE me.source_intent_id = i.id AND me.event_type = 'intent_created'",
+			"ORDER BY me.created_at LIMIT 1) AS origin_path,",
 			"(SELECT min(n.push_attempted_at) FROM latches l JOIN json_each(l.intent_ids) j JOIN notifications n ON n.latch_id = l.id",
 			"WHERE j.value = i.id AND n.user_id = i.user_id AND n.type = 'proposal') AS push_attempted_at",
 			`FROM intents i JOIN users u ON u.id = i.user_id WHERE ${subject}`,
@@ -88,6 +91,23 @@ export function judgeFromRows(rows) {
 		const to = num(r.push_attempted_at);
 		return from === null || to === null ? null : to - from;
 	});
+}
+
+/**
+ * 初期判定の行の経路の内訳。有効化の行(intent_created)のpayload.pathがinline(応答の後の処理)・
+ * queue(キュー)のものを数え、それ以外(印が無い・まだ処理されていない・Cronが処理した・
+ * 想定外の値)は不明に数える
+ * @param {Array<{ origin_path?: unknown }>} rows
+ * @returns {{ inline: number, queue: number, unknown: number }}
+ */
+export function judgePathBreakdown(rows) {
+	const out = { inline: 0, queue: 0, unknown: 0 };
+	for (const r of rows) {
+		if (r.origin_path === "inline") out.inline += 1;
+		else if (r.origin_path === "queue") out.queue += 1;
+		else out.unknown += 1;
+	}
+	return out;
 }
 
 /**

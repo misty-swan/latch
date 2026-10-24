@@ -225,14 +225,14 @@ describe("第1段の消費(intent_created・docs/06 §2)", () => {
 			[{ event_id: reflection[0]?.id }, { delaySeconds: 2 }],
 		]);
 
-		// 起点イベントはprocessed(payloadに件数等は載せない)
+		// 起点イベントはprocessed(payloadに件数等は載せず、キューで処理した印path=queueだけを載せる)
 		const [origin] = await db
 			.select()
 			.from(matchEvents)
 			.where(eq(matchEvents.id, eventId));
 		expect(origin?.status).toBe("processed");
 		expect(origin?.processedAt?.getTime()).toBe(clock.now().getTime());
-		expect(origin?.payload).toEqual({});
+		expect(origin?.payload).toEqual({ path: "queue" });
 	});
 
 	it("ストアの反映が遅れていても(hold中)第1段はprocessedになり計算したベクトルで第2段を続ける", async () => {

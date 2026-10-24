@@ -3,6 +3,7 @@ import {
 	buildQueries,
 	isReflected,
 	judgeFromRows,
+	judgePathBreakdown,
 	notifyFromRows,
 	reflectionBreakdown,
 	reflectionFromRows,
@@ -274,5 +275,26 @@ describe("isReflected(GET /v1/dev/match-eventsの項目)", () => {
 		).toBe(false);
 		expect(isReflected([])).toBe(false);
 		expect(isReflected(undefined)).toBe(false);
+	});
+});
+
+describe("初期判定の行の経路の内訳(応答の後の処理/キュー)", () => {
+	it("SQL: 有効化の行(intent_created)のpayload.pathをorigin_pathとして取る", () => {
+		const { judge } = buildQueries("202610220442");
+		expect(judge).toContain("json_extract(me.payload, '$.path')");
+		expect(judge).toContain("AS origin_path");
+	});
+	it("inline・queueを数え、それ以外(印なし・想定外の値)は不明に数える", () => {
+		expect(
+			judgePathBreakdown([
+				{ origin_path: "inline" },
+				{ origin_path: "inline" },
+				{ origin_path: "queue" },
+				{ origin_path: null },
+				{ origin_path: "other" },
+				{},
+			]),
+		).toEqual({ inline: 2, queue: 1, unknown: 3 });
+		expect(judgePathBreakdown([])).toEqual({ inline: 0, queue: 0, unknown: 0 });
 	});
 });

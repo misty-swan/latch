@@ -140,3 +140,23 @@ describe("buildReport: 対象の表示(#33)", () => {
 		expect(r(undefined)).toContain("対象: (b)(d)");
 	});
 });
+
+describe("buildReport: 初期判定の行の経路の内訳", () => {
+	it("inline・queue・不明の件数を1行の注記で出す", () => {
+		const out = buildReport(
+			"202610221200",
+			{ a: null, c: null },
+			{
+				...empty,
+				judge: [
+					{ auth_subject: "load-202610221200-b1", origin_path: "inline" },
+					{ auth_subject: "load-202610221200-b2", origin_path: "queue" },
+					{ auth_subject: "load-202610221200-b3", origin_path: null },
+				],
+			},
+		);
+		expect(out).toContain(
+			"初期判定の行の経路の内訳: 応答の後の処理(inline) 1件・キュー(queue) 1件・不明 1件",
+		);
+	});
+});
