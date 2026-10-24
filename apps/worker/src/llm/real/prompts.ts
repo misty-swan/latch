@@ -18,9 +18,9 @@ export const ANTHROPIC_MODEL = "claude-haiku-5-5";
 
 /**
  * Jevの第一候補TypeSafeのモデル。採点に合格した版の名前に固定する(設計書§0.4)。
- * 初期値"jev-latest"のままでは採点の記録を合格にしない(採点の道具で検査する)
+ * 2026-10-24の採点で応答した版jev-1.14.0に固定した。"jev-latest"のままでは採点の記録を合格にしない(採点の道具で検査する)
  */
-export const TYPESAFE_MODEL = "jev-latest";
+export const TYPESAFE_MODEL = "jev-1.14.0";
 
 /**
  * Parserのsystem文(07 §3・設計書§4.1)。入力はraw_textと現在時刻(JST)だけ。

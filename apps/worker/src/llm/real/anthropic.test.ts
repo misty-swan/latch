@@ -203,7 +203,7 @@ describe("callAnthropicJson(設計書§4.1・07 §3/§5)", () => {
 describe("指示文とモデル名(設計書§0.4・§4.1・§5)", () => {
 	it("モデル名はIDを固定する", () => {
 		expect(ANTHROPIC_MODEL).toBe("claude-haiku-5-5");
-		expect(TYPESAFE_MODEL).toBe("jev-latest");
+		expect(TYPESAFE_MODEL).toBe("jev-1.14.0");
 	});
 
 	it("Parserのsystem文は現在時刻とカテゴリの一覧を含む", () => {
