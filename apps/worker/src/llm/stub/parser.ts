@@ -57,7 +57,7 @@ const clampParticipants = (count: number): number =>
 	Math.min(Math.max(count, PARTICIPANTS_MIN), PARTICIPANTS_MAX);
 
 /** 人数を丸めた場合の注意表示(warningSchema・05 §3.3の{field, note}形状) */
-const PARTICIPANTS_WARNING: ParseWarning = {
+export const PARTICIPANTS_WARNING: ParseWarning = {
 	field: "participants",
 	note: "人数は2〜4人の範囲で設定してください",
 };

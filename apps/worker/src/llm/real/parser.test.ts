@@ -57,6 +57,27 @@ describe("realParser", () => {
 		]);
 	});
 
+	it("人数が範囲外なら2〜4へ丸めて注意表示を1件だけ載せる", async () => {
+		const over = await run({
+			...valid,
+			participants: { min: 10, max: 10 },
+			warnings: [],
+		});
+		expect(over.ok && over.output.participants).toEqual({ min: 4, max: 4 });
+		expect(over.ok && over.output.warnings).toEqual([
+			{ field: "participants", note: "人数は2〜4人の範囲で設定してください" },
+		]);
+		const under = await run({
+			...valid,
+			participants: { min: 1, max: 3 },
+			warnings: [{ field: "participants", note: "x" }],
+		});
+		expect(under.ok && under.output.participants).toEqual({ min: 2, max: 3 });
+		expect(under.ok && under.output.warnings).toEqual([
+			{ field: "participants", note: "x" },
+		]);
+	});
+
 	it("categoryがnullなら通す", async () => {
 		expect((await run({ ...valid, category: null })).ok).toBe(true);
 	});
@@ -71,7 +92,8 @@ describe("realParser", () => {
 			"time.startにオフセットが無い",
 			{ ...valid, time: { start: "2026-10-25T19:00:00", end: null } },
 		],
-		["participants.maxが5", { ...valid, participants: { min: 2, max: 5 } }],
+		["participantsが0", { ...valid, participants: { min: 0, max: 2 } }],
+		["participantsが小数", { ...valid, participants: { min: 2, max: 2.5 } }],
 		[
 			"participants.minがmaxより大きい",
 			{ ...valid, participants: { min: 4, max: 3 } },

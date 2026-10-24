@@ -13,6 +13,7 @@ import {
 import { z } from "zod";
 import type { Clock } from "../../clock/clock";
 import { expiryOptions, toJstIso } from "../expiry";
+import { PARTICIPANTS_WARNING } from "../stub/parser";
 import type { ParserOutcome, ParserOutput } from "../types";
 import { callAnthropicJson } from "./anthropic";
 import { PARSER_OUTPUT_SCHEMA, PARSER_SYSTEM_PROMPT } from "./prompts";
@@ -26,11 +27,11 @@ const jstIso = z
 	.regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00$/)
 	.refine((s) => !Number.isNaN(new Date(s).getTime()));
 
-const participantCount = z
-	.number()
-	.int()
-	.min(PARTICIPANTS_MIN)
-	.max(PARTICIPANTS_MAX);
+/** モデルの人数は正の整数なら受け、2〜4人への丸めは後段で行う(07 §3) */
+const participantCount = z.number().int().positive();
+
+const clampParticipants = (n: number): number =>
+	Math.min(Math.max(n, PARTICIPANTS_MIN), PARTICIPANTS_MAX);
 
 const modelOutputSchema = z.object({
 	form: z.enum(["connection", "occasion"]),
@@ -64,17 +65,29 @@ export const realParser =
 		const parsed = modelOutputSchema.safeParse(res.value);
 		if (!parsed.success) return { ok: false, kind: "invalid_output" };
 		const v = parsed.data;
+		// 範囲外の人数は2〜4人へ丸め、注意表示を載せる(stubと同じ・モデルが載せ済みなら重ねない)
+		const participants = {
+			min: clampParticipants(v.participants.min),
+			max: clampParticipants(v.participants.max),
+		};
+		const clamped =
+			participants.min !== v.participants.min ||
+			participants.max !== v.participants.max;
+		const warnings =
+			clamped && !v.warnings.some((w) => w.field === "participants")
+				? [...v.warnings, PARTICIPANTS_WARNING]
+				: v.warnings;
 		const output: ParserOutput = {
 			form: v.form,
 			topic: v.topic,
 			category: v.category,
 			time: v.time,
-			participants: v.participants,
+			participants,
 			budget: v.budget,
 			alcohol_involved: v.alcohol_involved,
 			// モデルの値は使わない(設計書§4)
 			expires_at_options: expiryOptions(deps.clock, v.form, v.time),
-			warnings: v.warnings,
+			warnings,
 		};
 		return { ok: true, output };
 	};
