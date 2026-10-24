@@ -150,12 +150,13 @@ const loadList = <T>(
 	idOf: (item: T) => string,
 ): { version: number; approved_by_owner: string | null; list: T[] } => {
 	const doc = readYaml(path);
+	// 計算されたキーは型が広がるため、ヘッダ2項目と件のリストを分けて型付けする
 	const head = z
 		.object({
 			version: z.number().int().positive(),
 			approved_by_owner: approvedSchema,
-			[listKey]: z.array(z.unknown()),
 		})
+		.and(z.object({ [listKey]: z.array(z.unknown()) }))
 		.safeParse(doc);
 	if (!head.success) {
 		throw new Error(`${path}: 形式が不正です: ${head.error.message}`);
