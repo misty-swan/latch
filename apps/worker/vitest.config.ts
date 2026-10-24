@@ -56,6 +56,9 @@ export default defineConfig(async () => {
 						// テストがsendしたメッセージの消費による副作用を防ぎ、消費の試験は
 						// createMessageBatchでhandleQueueBatchを直接呼んで行う
 						TEST_QUEUES_DISABLED: "1",
+						// 応答の後の第1段・第2段(#30・設計 §3.5)を止める。既存の試験はキューの消費を
+						// handleQueueBatchで直接呼ぶ作法のため。応答の後の処理の試験だけenvを差し替えてonにする
+						LATCH_INLINE_PIPELINE: "off",
 					},
 				},
 			}),

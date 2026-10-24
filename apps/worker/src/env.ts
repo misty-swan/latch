@@ -66,6 +66,13 @@ export interface Env {
 	TEST_QUEUES_DISABLED?: string;
 	/** Web Pushの送り手(既定stub・push/sender.ts)。prodはreal必須(F7b設計 §5.5) */
 	LATCH_PUSH_MODE?: string;
+	/**
+	 * 意思を有効にした要求(作成・下書きの有効化)の応答の後に、同じ要求の続きで第1段・
+	 * 第2段を行うか(#30・不具合の修正工程(第3回)の設計 §3.5)。"on"のときだけ行い、
+	 * それ以外(off・未設定)はキューのメッセージを即時で送る今の動き。既定はwrangler.jsoncのon。
+	 * workerの単体・統合試験(vitest.config.ts)はoffにしてキューを直接呼ぶ作法を保つ
+	 */
+	LATCH_INLINE_PIPELINE?: string;
 	/** VAPID公開鍵(base64url・非圧縮P-256点)。stubでも公開鍵APIが返す */
 	VAPID_PUBLIC_KEY?: string;
 	/** VAPID秘密鍵(JWKのJSON文字列) */

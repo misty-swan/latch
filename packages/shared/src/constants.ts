@@ -264,6 +264,10 @@ export const PIPELINE = {
 	// n回目の配信の失敗はn番目の値(使い切ったら最後の値)。合計(100秒)はpending残留の
 	// 掃査(LATCH.PENDING_STALE_MS・10分)より十分に短い。max_retriesを超えたものはDLQでdead
 	STAGE1_RETRY_DELAYS_S: [10, 30, 60],
+	// 意思を有効にした要求(作成・下書きの有効化)のintent_createdのメッセージを遅らせる秒数。
+	// 第1段・第2段は応答の後(waitUntil・上限30秒)に同じ要求の続きで行い、キューのメッセージは
+	// それと重ならないよう遅らせて、済んでいなければやり直す役にする(#30・設計 §3.5)
+	INLINE_FALLBACK_DELAY_S: 60,
 	// 孤立したベクトル(Layer 2のhitのうちD1に意思の行が無いもの)を1回の評価で消す上限(10件)。
 	// 意思の行は必ずベクトルより先に作られるため、行の無いhitは削除の後に残ったベクトルと判断できる
 	ORPHAN_DELETE_MAX: 10,

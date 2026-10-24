@@ -138,7 +138,9 @@
 		// Embeddingの動作モード(既定stub・07 §2)。Parser/JevのLATCH_LLM_MODEとは独立
 		"LATCH_EMBEDDING_MODE": "stub",
 		// 実行環境の識別(docs/10 §1)。local既定で、デプロイ時にstaging/productionへ上書き
-		"LATCH_ENV": "local"
+		"LATCH_ENV": "local",
+		// 意思を有効にした要求の応答の後に第1段・第2段を行う(#30・設計 §3.5)。onのときだけ
+		"LATCH_INLINE_PIPELINE": "on"
 	},
 
 	// staging環境(F8b設計 §1・docs/04 §6)。wranglerの環境ではバインディングと
@@ -235,7 +237,9 @@
 				// EmbeddingとParser/Jevがreal。Pushはstub(LLM real接続の設計 §8.1。精度ゲートの合格記録eval/records/gate.jsonが前提)
 				"LATCH_EMBEDDING_MODE": "real",
 				"LATCH_LLM_MODE": "real",
-				"LATCH_PUSH_MODE": "stub"
+				"LATCH_PUSH_MODE": "stub",
+				// 応答の後の第1段・第2段(#30・設計 §3.5)
+				"LATCH_INLINE_PIPELINE": "on"
 			}
 		}
 	}

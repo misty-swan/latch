@@ -74,8 +74,13 @@ import {
 import { createLlm } from "../llm/mode";
 import type { Llm } from "../llm/types";
 import { createLogger } from "../logging/logger";
+import { processMatchEventInline } from "../pipeline/consumer";
 import { errorCodeOf } from "../pipeline/errors";
-import { emitMatchEvent } from "../pipeline/events";
+import {
+	emitMatchEvent,
+	recordMatchEvent,
+	sendToMatchQueue,
+} from "../pipeline/events";
 import { flushPush } from "../push/dispatch";
 import { pushFlushAfterWrite } from "../push/flush-middleware";
 import { pushSenderOf } from "../push/sender";
@@ -93,6 +98,62 @@ intentRoutes.use("*", pushFlushAfterWrite);
 
 /** D1接続。envのバインディングからdrizzleインスタンスを作る(軽量オブジェクトのため関数ごとの生成でよい) */
 const dbOf = (env: Env): DrizzleD1Database => drizzle(env.DB);
+
+/**
+ * 意思を有効にした要求(activeでの作成・下書きの有効化)のintent_createdを投入する(docs/06 §2)。
+ * 呼び出し側がwaitUntilへ渡し、応答をブロックしない(04 §7の保存p95)。
+ * LATCH_INLINE_PIPELINE=onなら、行を作ってキューへPIPELINE.INLINE_FALLBACK_DELAY_S(60秒)
+ * 遅らせて送り、続けて同じ行のidで第1段・第2段・提案の通知の送出を行う(processMatchEventInline・
+ * #30・オーナー決定3b・不具合の修正工程(第3回)の設計 §3.5)。遅らせたメッセージは、応答の
+ * 後の処理が済んでいれば何もせずに終わり、途中で失敗していればやり直す。送信が失敗しても
+ * 行はあるため応答の後の処理は行う(済まなければ行はpendingのまま、Cronの回収に任せる)。
+ * それ以外(off・未設定)は今と同じく即時で送る(送信の失敗はwaitUntilの拒否のまま)。
+ * onEmittedは投入(行の作成と送信)の後に呼ぶ(所要時間の記録・#32)。onの経路は例外を外へ出さない
+ */
+const emitIntentCreated = async (
+	env: Env,
+	ctx: Pick<ExecutionContext, "waitUntil">,
+	params: { intentId: string; version: number },
+	onEmitted?: () => void,
+): Promise<void> => {
+	const event = {
+		eventType: "intent_created" as const,
+		intentId: params.intentId,
+		version: params.version,
+	};
+	if (env.LATCH_INLINE_PIPELINE !== "on") {
+		// 今と同じ(即時で送る・失敗はwaitUntilの拒否のまま)
+		await emitMatchEvent(env, event, undefined, systemClock).finally(() =>
+			onEmitted?.(),
+		);
+		return;
+	}
+	let eventId: string;
+	try {
+		eventId = await recordMatchEvent(env, event, systemClock);
+	} catch (error) {
+		// 行が無いと消費は何もしないため、応答の後の処理も行わない(Cronのバックフィルが拾う)
+		logger.warn("pipeline.emit.failed", {
+			error_code: errorCodeOf(error, "EMIT_FAILED"),
+			intent_id: params.intentId,
+		});
+		onEmitted?.();
+		return;
+	}
+	try {
+		await sendToMatchQueue(env, eventId, {
+			delaySeconds: PIPELINE.INLINE_FALLBACK_DELAY_S,
+		});
+	} catch (error) {
+		logger.warn("pipeline.emit.failed", {
+			error_code: errorCodeOf(error, "EMIT_FAILED"),
+			intent_id: params.intentId,
+		});
+	} finally {
+		onEmitted?.();
+	}
+	await processMatchEventInline(env, eventId, ctx, systemClock);
+};
 
 /** JSONボディを読む。空ボディは{}・JSON不正はundefined(400扱い)(users.tsと同一のhelper) */
 const readJsonBody = async (c: Context<AppEnv>): Promise<unknown> => {
@@ -548,28 +609,25 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 		status: inserted.status,
 		version: inserted.version,
 	});
-	// イベント発行(docs/06 §2): active作成はintent_createdを即時投入する。
-	// draft保存では発行しない。waitUntilでsendし、応答をブロックしない(04 §7の保存p95)
+	// イベント発行(docs/06 §2): active作成はintent_createdを投入し、onなら応答の後に
+	// 第1段・第2段を続ける(emitIntentCreated・#30)。draft保存では発行しない。
+	// waitUntilで行い、応答をブロックしない(04 §7の保存p95)
 	if (inserted.status === "active") {
 		const emitStartedAt = systemClock.now().getTime();
 		c.executionCtx.waitUntil(
-			emitMatchEvent(
+			emitIntentCreated(
 				c.env,
-				{
-					eventType: "intent_created",
-					intentId: inserted.id,
-					version: inserted.version,
+				c.executionCtx,
+				{ intentId: inserted.id, version: inserted.version },
+				() => {
+					// 応答の後のキュー送出の所要時間(応答は待たない・#32)
+					logger.info("intents.create.timing", {
+						intent_id: inserted.id,
+						layer: "emit",
+						latency: systemClock.now().getTime() - emitStartedAt,
+					});
 				},
-				undefined,
-				systemClock,
-			).finally(() => {
-				// 応答の後のキュー送出の所要時間(応答は待たない・#32)
-				logger.info("intents.create.timing", {
-					intent_id: inserted.id,
-					layer: "emit",
-					latency: systemClock.now().getTime() - emitStartedAt,
-				});
-			}),
+			),
 		);
 	}
 	return c.json(toIntentDto(inserted), 201);
@@ -1011,22 +1069,17 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 				),
 			);
 	}
-	// イベント発行(docs/06 §2): draft→active化はintent_createdを即時投入。activeは
+	// イベント発行(docs/06 §2): draft→active化はintent_createdを投入し、onなら応答の後に
+	// 第1段・第2段を続ける(emitIntentCreated・#30)。activeは
 	// 意味フィールド(topic・time・geo・participants・budget・constraints)が変わったとき
 	// だけintent_updatedを10秒遅延で投入する(notification_levelのみの変更と
 	// draftままでの編集は発行しない)。waitUntilでsendし、応答をブロックしない
 	if (row.status === "draft" && result.row.status === "active") {
 		c.executionCtx.waitUntil(
-			emitMatchEvent(
-				c.env,
-				{
-					eventType: "intent_created",
-					intentId: result.row.id,
-					version: result.row.version,
-				},
-				undefined,
-				systemClock,
-			),
+			emitIntentCreated(c.env, c.executionCtx, {
+				intentId: result.row.id,
+				version: result.row.version,
+			}),
 		);
 	} else if (row.status === "active" && intentMeaningChanged(row, result.row)) {
 		c.executionCtx.waitUntil(

@@ -590,7 +590,7 @@ const consumeEvent = async (
  */
 const flushFreshPush = async (
 	env: Env,
-	ctx: ExecutionContext,
+	ctx: Pick<ExecutionContext, "waitUntil">,
 	clock: Clock,
 	startedAt: Date,
 ): Promise<void> => {
@@ -617,6 +617,58 @@ const flushFreshPush = async (
 	} catch (error) {
 		logger.warn("push.flush.failed", {
 			error_code: errorCodeOf(error, "PUSH_FLUSH_FAILED"),
+		});
+	}
+};
+
+/**
+ * 1つのイベントを、キューの1メッセージの処理と同じ形で、キューを通さずに処理する
+ * (#30・オーナー決定3b・不具合の修正工程(第3回)の設計 §3.5)。意思を有効にした要求
+ * (activeでの作成・下書きの有効化)の応答の後(waitUntil)から、intent_createdの行を
+ * 作り終えた後に同じ行のidで呼ぶ。処理はconsumeEvent(第1段→同じ実行の第2段)→
+ * このイベントで作られた通知の送出(flushFreshPush)。計測の書き込みの残りはこの呼び出し
+ * ごとに1つ作る(同時に動く別の要求と共有しない・#28)。
+ * 消費の結果がやり直し(retry)なら何もしない。行はpendingのまま残り、遅らせて送った
+ * キューのメッセージ(PIPELINE.INLINE_FALLBACK_DELAY_S)がやり直す。済んでいれば、その
+ * メッセージは今の冪等の仕組み(processedは何もしない)で何もせずに終わる。
+ * 例外は外へ出さず、pipeline.inline.failed(error_code・intent_id)を出す
+ */
+export const processMatchEventInline = async (
+	env: Env,
+	eventId: string,
+	// 使うのはwaitUntilだけ(HonoのexecutionCtxもそのまま渡せる)
+	ctx: Pick<ExecutionContext, "waitUntil">,
+	clock: Clock,
+): Promise<void> => {
+	const startedAt = clock.now();
+	try {
+		const outcome = await consumeEvent(
+			env,
+			eventId,
+			clock,
+			{ attempts: 1 },
+			createMetricsBudget(),
+		);
+		if (outcome !== undefined) {
+			return;
+		}
+		await flushFreshPush(env, ctx, clock, startedAt);
+	} catch (error) {
+		// intent_idは行から読み直す(読めなければ載せない・許可リストの項目だけ)
+		let intentId: string | undefined;
+		try {
+			const [event] = await drizzle(env.DB)
+				.select({ sourceIntentId: matchEvents.sourceIntentId })
+				.from(matchEvents)
+				.where(eq(matchEvents.id, eventId))
+				.limit(1);
+			intentId = event?.sourceIntentId;
+		} catch {
+			// 読めなくても失敗のログは出す
+		}
+		logger.warn("pipeline.inline.failed", {
+			error_code: errorCodeOf(error, "INLINE_PIPELINE_FAILED"),
+			...(intentId !== undefined ? { intent_id: intentId } : {}),
 		});
 	}
 };

@@ -57,13 +57,19 @@ describe("wrangler.jsonc の env.staging", () => {
 		expect(staging.ai?.binding).toBe("AI");
 	});
 
-	it("varsが設計 §1.3の4値に一致する", () => {
+	it("varsが設計 §1.3の4値と応答の後の処理の切り替え(#30)に一致する", () => {
 		expect(staging.vars).toEqual({
 			LATCH_ENV: "staging",
 			LATCH_EMBEDDING_MODE: "real",
 			LATCH_LLM_MODE: "real",
 			LATCH_PUSH_MODE: "stub",
+			LATCH_INLINE_PIPELINE: "on",
 		});
+	});
+
+	it("応答の後の第1段・第2段(LATCH_INLINE_PIPELINE)はトップレベルもstagingもon(#30)", () => {
+		expect(top.vars?.LATCH_INLINE_PIPELINE).toBe("on");
+		expect(staging.vars?.LATCH_INLINE_PIPELINE).toBe("on");
 	});
 
 	it("資源名がトップレベルと異なり、設計 §1.2の名前である", () => {
