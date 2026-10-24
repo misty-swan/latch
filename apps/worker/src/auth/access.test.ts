@@ -223,3 +223,31 @@ describe("assertEnvSafety(staging)", () => {
 		).not.toThrow();
 	});
 });
+
+describe("assertEnvSafety(LLM real のキー・全環境)", () => {
+	for (const e of ["local", "staging", "production"]) {
+		it(`${e}でreal+キー欠落は ENV_MISSING_LLM_KEY`, () => {
+			const base = {
+				LATCH_ENV: e,
+				LATCH_LLM_MODE: "real",
+				ACCESS_AUD: AUD,
+				ACCESS_TEAM_DOMAIN: TEAM,
+			} as unknown as Env;
+			expect(() => assertEnvSafety(base)).toThrow(/^ENV_MISSING_LLM_KEY/);
+			expect(() =>
+				assertEnvSafety({ ...base, ANTHROPIC_API_KEY: "a" } as Env),
+			).toThrow(/^ENV_MISSING_LLM_KEY/);
+			expect(() =>
+				assertEnvSafety({ ...base, TYPESAFE_API_KEY: "t" } as Env),
+			).toThrow(/^ENV_MISSING_LLM_KEY/);
+		});
+	}
+	it("stubならキー無しでも例外なし", () => {
+		expect(() =>
+			assertEnvSafety({
+				LATCH_ENV: "local",
+				LATCH_LLM_MODE: "stub",
+			} as unknown as Env),
+		).not.toThrow();
+	});
+});

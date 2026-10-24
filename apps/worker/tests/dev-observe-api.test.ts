@@ -928,3 +928,27 @@ describe("GET /v1/dev/notifications", () => {
 		expect(res.status).toBe(404);
 	});
 });
+
+describe("GET /v1/dev/usage", () => {
+	it("指定日の外部送信の回数を返す", async () => {
+		const a = await registerAccount("devusage");
+		await testEnv.DB.prepare(
+			"INSERT INTO usage_counters (scope, key, period, count) VALUES ('external_send','anthropic:parser','2032-01-05',3)",
+		).run();
+		const res = await getReq("/v1/dev/usage?date=2032-01-05", a.token);
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			date: "2032-01-05",
+			counts: { "anthropic:parser": 3 },
+		});
+		const bad = await getReq("/v1/dev/usage?date=nope", a.token);
+		expect(bad.status).toBe(400);
+	});
+
+	it("存在隠し: production相当では404", async () => {
+		const res = await getFromDevRoutes("/usage?date=2032-01-05", {
+			LATCH_ENV: "production",
+		});
+		expect(res.status).toBe(404);
+	});
+});

@@ -27,10 +27,25 @@ describe("resolveLlmMode(07 §2: 既定stub・不正値もstub)", () => {
 });
 
 describe("createLlm(07 §2: 3系統の束ね・realは未接続)", () => {
-	it("mode=realは未実装として例外を投げる", () => {
+	it("mode=realでキーが揃えば例外なく関数を返す", () => {
+		const llm = createLlm(
+			{
+				LATCH_LLM_MODE: "real",
+				ANTHROPIC_API_KEY: "test-a",
+				TYPESAFE_API_KEY: "test-t",
+				DB: {},
+			} as unknown as Env,
+			fixed,
+		);
+		expect(typeof llm.parser).toBe("function");
+		expect(typeof llm.jev.primary).toBe("function");
+		expect(typeof llm.jev.fallback).toBe("function");
+	});
+
+	it("mode=realでキーが無ければ ENV_MISSING_LLM_KEY", () => {
 		expect(() =>
 			createLlm({ LATCH_LLM_MODE: "real" } as unknown as Env, fixed),
-		).toThrow("LLM_REAL_NOT_IMPLEMENTED");
+		).toThrow(/^ENV_MISSING_LLM_KEY/);
 	});
 
 	it("mode=stubはparser/embedding/jevの3コンポーネントを持つLlmを返す", () => {

@@ -11,6 +11,7 @@
  *   (成立候補は2ユーザーのIntentで構成されるため・E2Eユーザーが証拠を読む経路)。
  *   応答はテーブル列の範囲のみ(raw_text等は含まれない)
  * - GET /v1/dev/notifications: F7b(Task 8)。本人のアプリ内通知とPush送出状態の観測(id降順)
+ * - GET /v1/dev/usage?date=YYYY-MM-DD: 外部送信(LLM)の日次集計の観測(08 §5・usage_counters)
  * - GET /v1/dev/reports: F7a(Task 4)。本人が出した通報の観測(reporter=本人の行・created_at降順)
  * - GET /v1/dev/latches・GET /v1/dev/proposal-history・POST /v1/dev/latches/:id/backdate:
  *   F4a(Task 17)。提案・履歴の観測と、期限経過をE2Eが時計操作なしで作る書き換え口
@@ -620,3 +621,29 @@ devRoutes.get(
 		);
 	},
 );
+
+/**
+ * GET /v1/dev/usage?date=YYYY-MM-DD(観測API・LLM real接続Task 7)。
+ * 指定日(JST)の外部送信の回数を「宛先:用途」ごとに返す(08 §5)。
+ * 存在隠し404 → requireRegistered → クエリ検証の順
+ */
+devRoutes.get("/usage", hideWhenDisabled, requireRegistered, async (c) => {
+	const date = c.req.query("date") ?? "";
+	if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) {
+		const r = errorJson(
+			"VALIDATION_FAILED",
+			"dateはYYYY-MM-DDで指定してください",
+		);
+		return c.json(r.body, r.status);
+	}
+	const { results } = await c.env.DB.prepare(
+		"SELECT key, count FROM usage_counters WHERE scope = 'external_send' AND period = ?",
+	)
+		.bind(date)
+		.all<{ key: string; count: number }>();
+	const counts: Record<string, number> = {};
+	for (const row of results) {
+		counts[row.key] = row.count;
+	}
+	return c.json({ date, counts }, 200);
+});

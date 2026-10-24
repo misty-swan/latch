@@ -76,6 +76,10 @@ export interface Env {
 	ACCESS_AUD?: string;
 	/** Accessのチームのドメイン(https://<team>.cloudflareaccess.com・staging必須) */
 	ACCESS_TEAM_DOMAIN?: string;
+	/** LLM real(Parser・Jevの予備)のAnthropic APIキー(secret・LATCH_LLM_MODE=real必須) */
+	ANTHROPIC_API_KEY?: string;
+	/** Jev primary(TypeSafe)のAPIキー(secret・LATCH_LLM_MODE=real必須) */
+	TYPESAFE_API_KEY?: string;
 	GOOGLE_CLIENT_ID?: string;
 	APPLE_CLIENT_ID?: string;
 }
@@ -138,6 +142,8 @@ export const vapidKeysOf = (env: Env): VapidKeys => {
  * - prodでLATCH_PUSH_MODEがreal以外 → 例外(ENV_UNSAFE_PUSH)・VAPID_*の欠落 → 例外
  *   (ENV_MISSING_VAPID)・VAPID公開鍵がテスト鍵 → 例外(ENV_UNSAFE_TEST_KEY)(F7b設計 §5.5)
  * - stagingでACCESS_AUD・ACCESS_TEAM_DOMAINの欠落 → 例外(ENV_MISSING_ACCESS・#11)
+ * - 全環境でLATCH_LLM_MODE=realなのにANTHROPIC_API_KEY・TYPESAFE_API_KEYのどちらかが
+ *   欠落 → 例外(ENV_MISSING_LLM_KEY)
  * それ以外のprod以外(LATCH_ENVがproduction以外)は何もしない
  */
 export const assertEnvSafety = (env: Env): void => {
@@ -148,6 +154,15 @@ export const assertEnvSafety = (env: Env): void => {
 	) {
 		throw new Error(
 			"ENV_MISSING_ACCESS: staging環境ではACCESS_AUDとACCESS_TEAM_DOMAINが必須(#11)",
+		);
+	}
+	// real接続のキーが無いまま起動させない(全環境・prodの早期returnより前)
+	if (
+		env.LATCH_LLM_MODE === "real" &&
+		(!env.ANTHROPIC_API_KEY || !env.TYPESAFE_API_KEY)
+	) {
+		throw new Error(
+			"ENV_MISSING_LLM_KEY: LATCH_LLM_MODE=realではANTHROPIC_API_KEYとTYPESAFE_API_KEYが必須",
 		);
 	}
 	if (env.LATCH_ENV !== "production") {

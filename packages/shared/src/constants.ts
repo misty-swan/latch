@@ -99,6 +99,8 @@ export const COUNTER_SCOPES = [
 	"jev_user",
 	"jev_global_daily",
 	"jev_global_monthly",
+	// 外部送信の日次集計(08 §5・key=宛先:用途・period=JST日付)
+	"external_send",
 ] as const;
 export type CounterScope = (typeof COUNTER_SCOPES)[number];
 
