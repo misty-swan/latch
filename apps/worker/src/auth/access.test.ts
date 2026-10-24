@@ -199,6 +199,78 @@ describe("verifyAccessRequest(設定の正規化・境界)", () => {
 	});
 });
 
+describe("verifyAccessRequest(Cache APIの使い回し・#32)", () => {
+	beforeEach(() => resetAccessKeyCacheForTest());
+	const certsUrl = `${TEAM}/cdn-cgi/access/certs`;
+	const putCache = async (...keys: TestKey[]) => {
+		await caches.default.put(
+			certsUrl,
+			Response.json(
+				{ keys: keys.map((k) => k.jwk) },
+				{ headers: { "Cache-Control": "max-age=600" } },
+			),
+		);
+	};
+
+	it("isolate内が空でもCache APIに鍵があればfetchせずに通る", async () => {
+		const key = await makeKey("k1");
+		await putCache(key);
+		const f = jwksFetch();
+		expect(await verifyAccessRequest(req(await sign(key)), env, f)).toEqual({
+			ok: true,
+		});
+		expect(f).not.toHaveBeenCalled();
+	});
+
+	it("Cache APIに無ければfetchで取り、max-age=600で置く", async () => {
+		const key = await makeKey("k1");
+		const f = jwksFetch(key);
+		expect(await verifyAccessRequest(req(await sign(key)), env, f)).toEqual({
+			ok: true,
+		});
+		expect(f).toHaveBeenCalledTimes(1);
+		const cached = await caches.default.match(certsUrl);
+		expect(cached?.headers.get("Cache-Control")).toBe("max-age=600");
+		const body = (await cached?.json()) as { keys: unknown[] } | undefined;
+		expect(body?.keys).toHaveLength(1);
+	});
+
+	it("未知のkidはCache APIを使わずfetchで取り直し、Cache APIも置き換える", async () => {
+		const k1 = await makeKey("k1");
+		const k2 = await makeKey("k2");
+		await putCache(k1);
+		const f = jwksFetch(k2);
+		expect(await verifyAccessRequest(req(await sign(k2)), env, f)).toEqual({
+			ok: true,
+		});
+		expect(f).toHaveBeenCalledTimes(1);
+		const cached = (await (await caches.default.match(certsUrl))?.json()) as {
+			keys: Array<{ kid: string }>;
+		};
+		expect(cached.keys.map((k) => k.kid)).toEqual(["k2"]);
+	});
+
+	it("Cache APIの読み書きが例外でも検証は動く", async () => {
+		const key = await makeKey("k1");
+		const spy1 = vi
+			.spyOn(caches.default, "match")
+			.mockRejectedValue(new Error("boom"));
+		const spy2 = vi
+			.spyOn(caches.default, "put")
+			.mockRejectedValue(new Error("boom"));
+		try {
+			const f = jwksFetch(key);
+			expect(await verifyAccessRequest(req(await sign(key)), env, f)).toEqual({
+				ok: true,
+			});
+			expect(f).toHaveBeenCalledTimes(1);
+		} finally {
+			spy1.mockRestore();
+			spy2.mockRestore();
+		}
+	});
+});
+
 describe("assertEnvSafety(staging)", () => {
 	const base = { LATCH_ENV: "staging" } as unknown as Env;
 	it("stagingでACCESS_*が欠けると例外", () => {

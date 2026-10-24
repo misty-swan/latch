@@ -23,41 +23,112 @@ class JwksUnavailableError extends Error {}
 /** 公開鍵のキャッシュ(チームのドメインごとにkid→鍵)。isolate内で保持する */
 const keyCache = new Map<string, Map<string, CryptoKey | Uint8Array>>();
 
-/** 試験用: 公開鍵のキャッシュを空にする */
-export const resetAccessKeyCacheForTest = (): void => {
+/** 公開鍵の集合(JWK)のCache APIでの保持秒数(10分)。#32 */
+export const ACCESS_CERTS_CACHE_TTL_S = 600;
+
+type CertsBody = { keys?: Array<JWK & { kid?: string }> };
+
+/**
+ * 試験用: isolate内の公開鍵のキャッシュとCache APIの置き場を空にする。
+ * 新しいisolateの初回を模すために使う
+ */
+export const resetAccessKeyCacheForTest = async (): Promise<void> => {
 	keyCache.clear();
+	try {
+		await caches.default.delete(
+			"https://fake-team.cloudflareaccess.com/cdn-cgi/access/certs",
+		);
+	} catch {
+		// 置き場が使えない環境では何もしない
+	}
 };
 
-/** チームのドメインのJWKSを取り直してキャッシュを置き換える */
-const refreshKeys = async (
-	teamDomain: string,
-	fetchFn: typeof fetch,
-): Promise<Map<string, CryptoKey | Uint8Array>> => {
-	let body: { keys?: Array<JWK & { kid?: string }> };
+const certsUrlOf = (teamDomain: string): string =>
+	`${teamDomain}/cdn-cgi/access/certs`;
+
+/**
+ * #32: isolateごとの初回に証明書の集合を取ると約0.45秒かかり、負荷でisolateが
+ * 次々に立つと保存のp95を押し上げた。同じデータセンター内ではCache APIで使い回す。
+ * 置くのは公開鍵のJWKの集合だけ(秘密の値は含まない)。読み書きの失敗は取得に落とす
+ */
+const readCertsCache = async (url: string): Promise<CertsBody | undefined> => {
 	try {
-		const response = await fetchFn(`${teamDomain}/cdn-cgi/access/certs`);
-		if (!response.ok) {
-			throw new JwksUnavailableError(`status ${response.status}`);
-		}
-		body = (await response.json()) as typeof body;
-	} catch (error) {
-		throw error instanceof JwksUnavailableError
-			? error
-			: new JwksUnavailableError(String(error));
+		const cached = await caches.default.match(url);
+		if (cached === undefined) return undefined;
+		return (await cached.json()) as CertsBody;
+	} catch {
+		return undefined;
 	}
+};
+
+const writeCertsCache = async (url: string, body: CertsBody): Promise<void> => {
+	try {
+		await caches.default.put(
+			url,
+			new Response(JSON.stringify(body), {
+				headers: {
+					"Content-Type": "application/json",
+					"Cache-Control": `max-age=${ACCESS_CERTS_CACHE_TTL_S}`,
+				},
+			}),
+		);
+	} catch {
+		// 保存できなくても検証は続ける
+	}
+};
+
+/** JWKの集合を鍵の表へ読み込む(読めない鍵は無視する。該当kidの証明はinvalidになる) */
+const importKeys = async (
+	body: CertsBody,
+): Promise<Map<string, CryptoKey | Uint8Array>> => {
 	const keys = new Map<string, CryptoKey | Uint8Array>();
 	for (const jwk of body.keys ?? []) {
 		if (typeof jwk.kid !== "string") continue;
 		try {
 			keys.set(jwk.kid, await importJWK(jwk, "RS256"));
 		} catch {
-			// 読めない鍵は無視する(該当kidの証明はinvalidになる)
+			// 読めない鍵は無視する
 		}
 	}
+	return keys;
+};
+
+/** チームのドメインのJWKSを取り直してキャッシュ(isolate内とCache API)を置き換える */
+const refreshKeys = async (
+	teamDomain: string,
+	fetchFn: typeof fetch,
+): Promise<Map<string, CryptoKey | Uint8Array>> => {
+	const url = certsUrlOf(teamDomain);
+	let body: CertsBody;
+	try {
+		const response = await fetchFn(url);
+		if (!response.ok) {
+			throw new JwksUnavailableError(`status ${response.status}`);
+		}
+		body = (await response.json()) as CertsBody;
+	} catch (error) {
+		throw error instanceof JwksUnavailableError
+			? error
+			: new JwksUnavailableError(String(error));
+	}
+	const keys = await importKeys(body);
 	// 空の鍵集合では既存の鍵を捨てない(一時的な異常で全kidが失効するのを避ける)
 	if (keys.size === 0) {
 		return keyCache.get(teamDomain) ?? keys;
 	}
+	keyCache.set(teamDomain, keys);
+	await writeCertsCache(url, body);
+	return keys;
+};
+
+/** 新しいisolateの初回: Cache APIの集合をisolate内へ読み込む(無ければ空) */
+const loadKeysFromCache = async (
+	teamDomain: string,
+): Promise<Map<string, CryptoKey | Uint8Array> | undefined> => {
+	const body = await readCertsCache(certsUrlOf(teamDomain));
+	if (body === undefined) return undefined;
+	const keys = await importKeys(body);
+	if (keys.size === 0) return undefined;
 	keyCache.set(teamDomain, keys);
 	return keys;
 };
@@ -90,9 +161,13 @@ export const verifyAccessRequest = async (
 				const kid = header.kid;
 				if (typeof kid !== "string") throw new Error("kid missing");
 				let keys = keyCache.get(teamDomain);
+				if (keys === undefined) {
+					// isolateの初回はCache APIを先に見る(#32)
+					keys = await loadKeysFromCache(teamDomain);
+				}
 				let key = keys?.get(kid);
 				if (key === undefined) {
-					// 未知のkid(初回・鍵の入れ替え)は1回だけ取り直す
+					// 未知のkid(Cache APIにも無い・鍵の入れ替え)はCache APIを使わず1回だけ取り直す
 					keys = await refreshKeys(teamDomain, fetchFn);
 					key = keys.get(kid);
 				}
