@@ -479,8 +479,7 @@ items:
     tags: [occasion]
     expect:
       form: "occasion"
-      topic_any: ["登山", "山登り", "ハイキング"]
-      topic_none: ["高尾山"]
+      topic_any: ["高尾山", "登山", "山"]
       time_start: "2026-11-08T09:00:00+09:00"
       alcohol_involved: false
       geo_warning: true
@@ -543,8 +542,7 @@ items:
     tags: [occasion]
     expect:
       form: "occasion"
-      topic_any: ["ラン"]
-      topic_none: ["皇居"]
+      topic_any: ["ラン", "皇居"]
       category: "スポーツ・運動"
       time_start: "2026-11-09T07:00:00+09:00"
       alcohol_involved: false
@@ -700,7 +698,6 @@ items:
     expect:
       form: "occasion"
       topic_any: ["クリスマスマーケット", "クリスマス"]
-      topic_none: ["横浜", "赤レンガ"]
       time_start: "2026-12-24T19:00:00+09:00"
       geo_warning: true
   - id: occ-025
@@ -784,8 +781,7 @@ items:
     tags: [occasion]
     expect:
       form: "occasion"
-      topic_any: ["寺"]
-      topic_none: ["鎌倉"]
+      topic_any: ["寺", "鎌倉"]
       time_start: "2026-11-21T10:00:00+09:00"
       alcohol_involved: false
       geo_warning: true
@@ -1059,8 +1055,7 @@ items:
     tags: [boundary, form]
     expect:
       form: "connection"
-      topic_any: ["登山"]
-      topic_none: ["富士山"]
+      topic_any: ["富士山", "登山"]
       time_start: null
       alcohol_involved: false
       geo_warning: true

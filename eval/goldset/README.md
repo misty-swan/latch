@@ -28,6 +28,7 @@ items:
       form: connection                  # connection | occasion
       topic: ボードゲーム               # 出力のtopicに含まれるべき主題語
       # topic_any: [ボドゲ, ボードゲーム]  # どれか1つが出力のtopicに含まれればよい(topicとは併用不可)
+      # topic_none: [渋谷]                 # 出力のtopicに含まれてはならない語(集合場所・店・駅・住んでいる地域。topicかtopic_anyが必須・それらの語と互いに含み合う語は不可)
       # category: 食・飲み               # CATEGORIES(@latch/shared)のいずれか。nullは「categoryなし」
       # time_start: "2026-11-07T19:00:00+09:00"  # 時刻の同一性(Date.parseが等しい)で比べる。文字列一致ではない。nullは「時刻なし」
       # participants: { min: 2, max: 4 }  # 1以上・min<=max
