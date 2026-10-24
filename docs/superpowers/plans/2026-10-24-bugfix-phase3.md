@@ -227,6 +227,44 @@
 - [ ] **Step 3: 報告書** — 「9. 不具合の修正工程(第3回)の後の測り直し」の節を足す(実行条件・件数・01 §20の目標との比較(前回 §8.3 との差)・チャット(参考)・直した不具合の確かめ(#27〜#30・#32〜#34)・外部送信の件数と費用・登録したissue)。stagingのURLは書かない
 - [ ] **Step 4: コミット**
 
+### Task 14: 通知の送出の順番取りを1文にまとめ、対象を呼び出した処理の通知に限る(#39・設計 §3.7の1・2)
+
+**Files:**
+- Modify: `apps/worker/src/push/dispatch.ts`・`apps/worker/src/push/flush-middleware.ts`・`apps/worker/src/routes/intents.ts`(`afterCancel`)・`apps/worker/src/pipeline/consumer.ts`(主キューの実行の最後の送出)
+- Test: `apps/worker/tests/` の既存のPushの送出の試験の隣(既存の試験は振る舞いが変わらない限り直さない)
+
+**Interfaces:**
+- `flushPush(db, sender, clock, opts: { minAgeMs: number; createdFrom?: Date }): Promise<number>` の形は変えない(戻り値=順番を取れた件数)。`dispatchPush(ids)` は他に呼び出し元が無いので、順番を取った行(id・userId・type・latchId と順番取りの時刻)を受け取る内部の関数に置き換えてよい
+
+- [ ] **Step 1: 失敗する試験** — (a) 2つの `flushPush` を同時に走らせても、同じ通知が2回送られない(送信の偽物で回数を数える)。(b) 順番取りは1文: 対象が3件あるとき、送信の結果は今と同じ(muted・no_subscription・sent・failed・retryのそれぞれ)。(c) 45秒の時間の上限を越えて判断しなかった行はpendingのまま残り、60秒後の `flushPush`(Cronと同じ `minAgeMs: 30_000`)が取り直す。(d) 入口の送出は要求の開始より前に作られた未送信を拾わない(`createdFrom`)。主キューの実行の最後の送出も同じ
+- [ ] **Step 2: 実装** — 設計 §3.7の1の1文の条件付きUPDATE(副問い合わせ・id昇順・100件・RETURNING)。drizzleで書きにくければ `sql` テンプレートでよい。D1の束縛変数の上限(100個)の内側に収める。`pushFlushAfterWrite` は `await next()` の前に開始時刻を取り、`createdFrom` に渡す。`afterCancel` と主キューの実行の最後の送出も、それぞれの開始時刻を `createdFrom` に渡す
+- [ ] **Step 3: 確認とコミット** — `pnpm lint`・`pnpm typecheck`・`pnpm test` が緑
+
+### Task 15: Jevの予算の確保を波ごとに1回にまとめる(#39・設計 §3.7の3)
+
+**Files:**
+- Modify: `apps/worker/src/jev/budget.ts`・`apps/worker/src/jev/runner.ts`
+- Test: 既存の予算とrunnerの試験の隣
+
+**Interfaces:**
+- `reserveJevCalls(db, origin: { intentId: string; userId: string }, now: Date, n: number): Promise<{ allowed: number; exhausted?: JevBudgetScope }>`(`allowed` は0〜n。`allowed < n` なら最初に尽きたカウンタを intent → user → global_daily → global_monthly の順で `exhausted` に入れる)。`reserveJevCall` は他に呼び出し元が無ければ消してよい
+
+- [ ] **Step 1: 失敗する試験** — 4つのカウンタの上限(試験ではカウンタの初期値で上限の手前を作る)に対し、n=8 で (a) 余裕がある → allowed 8・各カウンタ+8 (b) 残り3 → allowed 3・各カウンタは今の1件ずつの確保と同じ値(+4) (c) 残り0 → allowed 0・+1 (d) runnerが allowed の件数だけJevを呼び、残りを held.budget に数える
+- [ ] **Step 2: 実装** — 設計 §3.7の3。加算と引き戻しはそれぞれ1回の `db.batch`
+- [ ] **Step 3: 確認とコミット** — `pnpm lint`・`pnpm typecheck`・`pnpm test` が緑
+
+### Task 16: 文書と手元の全体の確認(#39)
+
+**Files:** `docs/06-matching-pipeline.md`(§5・§6)・F7bの送出の記述のある文書(`rg "順番を取" docs` などで探す)・`docs/12-development-roadmap.md`(§2の第3回の記録に#39の決定5)・`docs/00-document-roadmap.md`・前提文書欄・古くなったコードのコメント
+
+- [ ] **Step 1: 文書** — 設計 §3.7の1〜3を該当箇所へ反映し、12 §2へオーナー決定5(2026-10-24・案A)を書く。docs/00 §3の版数の規則に従う
+- [ ] **Step 2: 全体の確認** — Task 8と同じ(単体・統合・worker E2E・web E2E)。精度ゲートの指紋の対象を変えていないことを `pnpm test`(記録の照合)で確かめる
+- [ ] **Step 3: コミット**
+
+### Task 17: 負荷試験の流し直し(2回目)と報告書 §10(コントローラーが承認を取ってから)
+
+Task 12と同じ手順(push・`deploy:staging`・小さな(b)の確かめ・全規模・集計は後始末の前)。報告書に「10. #39の直しの後の測り直し」を足し、§9との差(保存・(d)の通知・D1_OVERLOADED・push.failed・jev_reserve・waitUntilの打ち切り)を書く。新しい不具合はissueに登録する。
+
 ### Task 13: 状態の更新とissue(コントローラー)
 
 **Files:**
