@@ -23,55 +23,63 @@ class JwksUnavailableError extends Error {}
 /** 公開鍵のキャッシュ(チームのドメインごとにkid→鍵)。isolate内で保持する */
 const keyCache = new Map<string, Map<string, CryptoKey | Uint8Array>>();
 
-/** 公開鍵の集合(JWK)のCache APIでの保持秒数(10分)。#32 */
+/** 公開鍵の集合(JWK)のKVでの保持秒数(10分)。#32 */
 export const ACCESS_CERTS_CACHE_TTL_S = 600;
 
 type CertsBody = { keys?: Array<JWK & { kid?: string }> };
 
+const certsUrlOf = (teamDomain: string): string =>
+	`${teamDomain}/cdn-cgi/access/certs`;
+
+const certsKvKey = (teamDomain: string): string => `access:certs:${teamDomain}`;
+
 /**
- * 試験用: isolate内の公開鍵のキャッシュとCache APIの置き場を空にする。
- * 新しいisolateの初回を模すために使う
+ * 試験用: isolate内の公開鍵のキャッシュを空にし、envとチームのドメインを渡したときは
+ * KVの置き場も空にする。新しいisolateの初回を模すために使う
  */
-export const resetAccessKeyCacheForTest = async (): Promise<void> => {
+export const resetAccessKeyCacheForTest = async (
+	env?: Pick<Env, "PIPELINE_KV">,
+	teamDomain?: string,
+): Promise<void> => {
 	keyCache.clear();
+	if (env === undefined || teamDomain === undefined) return;
 	try {
-		await caches.default.delete(
-			"https://fake-team.cloudflareaccess.com/cdn-cgi/access/certs",
-		);
+		await env.PIPELINE_KV.delete(certsKvKey(teamDomain));
 	} catch {
 		// 置き場が使えない環境では何もしない
 	}
 };
 
-const certsUrlOf = (teamDomain: string): string =>
-	`${teamDomain}/cdn-cgi/access/certs`;
-
 /**
  * #32: isolateごとの初回に証明書の集合を取ると約0.45秒かかり、負荷でisolateが
- * 次々に立つと保存のp95を押し上げた。同じデータセンター内ではCache APIで使い回す。
- * 置くのは公開鍵のJWKの集合だけ(秘密の値は含まない)。読み書きの失敗は取得に落とす
+ * 次々に立つと保存のp95を押し上げた。そこでKV(PIPELINE_KV)で使い回す。
+ * Cache APIはworkers.devのデプロイでは何も保存しないため使えない(stagingがworkers.dev)。
+ * 置くのは公開鍵のJWKの集合の本文だけ(秘密の値は含まない)。読み書きの失敗は取得に落とす。
+ * 入れ替え・失効したkidは、isolateが入れ替わるまでisolate内に、KVには最大600秒残りうる
+ * (失効の意味は従来どおり)
  */
-const readCertsCache = async (url: string): Promise<CertsBody | undefined> => {
+const readCertsKv = async (
+	env: Pick<Env, "PIPELINE_KV">,
+	teamDomain: string,
+): Promise<CertsBody | undefined> => {
 	try {
-		const cached = await caches.default.match(url);
-		if (cached === undefined) return undefined;
-		return (await cached.json()) as CertsBody;
+		const text = await env.PIPELINE_KV.get(certsKvKey(teamDomain));
+		if (text === null) return undefined;
+		return JSON.parse(text) as CertsBody;
 	} catch {
 		return undefined;
 	}
 };
 
-const writeCertsCache = async (url: string, body: CertsBody): Promise<void> => {
+const writeCertsKv = async (
+	env: Pick<Env, "PIPELINE_KV">,
+	teamDomain: string,
+	body: CertsBody,
+): Promise<void> => {
 	try {
-		await caches.default.put(
-			url,
-			new Response(JSON.stringify(body), {
-				headers: {
-					"Content-Type": "application/json",
-					"Cache-Control": `max-age=${ACCESS_CERTS_CACHE_TTL_S}`,
-				},
-			}),
-		);
+		await env.PIPELINE_KV.put(certsKvKey(teamDomain), JSON.stringify(body), {
+			expirationTtl: ACCESS_CERTS_CACHE_TTL_S,
+		});
 	} catch {
 		// 保存できなくても検証は続ける
 	}
@@ -93,8 +101,9 @@ const importKeys = async (
 	return keys;
 };
 
-/** チームのドメインのJWKSを取り直してキャッシュ(isolate内とCache API)を置き換える */
+/** チームのドメインのJWKSを取り直してキャッシュ(isolate内とKV)を置き換える */
 const refreshKeys = async (
+	env: Pick<Env, "PIPELINE_KV">,
 	teamDomain: string,
 	fetchFn: typeof fetch,
 ): Promise<Map<string, CryptoKey | Uint8Array>> => {
@@ -117,15 +126,16 @@ const refreshKeys = async (
 		return keyCache.get(teamDomain) ?? keys;
 	}
 	keyCache.set(teamDomain, keys);
-	await writeCertsCache(url, body);
+	await writeCertsKv(env, teamDomain, body);
 	return keys;
 };
 
-/** 新しいisolateの初回: Cache APIの集合をisolate内へ読み込む(無ければ空) */
+/** 新しいisolateの初回: KVの集合をisolate内へ読み込む(無ければ空) */
 const loadKeysFromCache = async (
+	env: Pick<Env, "PIPELINE_KV">,
 	teamDomain: string,
 ): Promise<Map<string, CryptoKey | Uint8Array> | undefined> => {
-	const body = await readCertsCache(certsUrlOf(teamDomain));
+	const body = await readCertsKv(env, teamDomain);
 	if (body === undefined) return undefined;
 	const keys = await importKeys(body);
 	if (keys.size === 0) return undefined;
@@ -162,13 +172,13 @@ export const verifyAccessRequest = async (
 				if (typeof kid !== "string") throw new Error("kid missing");
 				let keys = keyCache.get(teamDomain);
 				if (keys === undefined) {
-					// isolateの初回はCache APIを先に見る(#32)
-					keys = await loadKeysFromCache(teamDomain);
+					// isolateの初回はKVを先に見る(#32)
+					keys = await loadKeysFromCache(env, teamDomain);
 				}
 				let key = keys?.get(kid);
 				if (key === undefined) {
-					// 未知のkid(Cache APIにも無い・鍵の入れ替え)はCache APIを使わず1回だけ取り直す
-					keys = await refreshKeys(teamDomain, fetchFn);
+					// 未知のkid(KVにも無い・鍵の入れ替え)はKVを使わず1回だけ取り直す
+					keys = await refreshKeys(env, teamDomain, fetchFn);
 					key = keys.get(kid);
 				}
 				if (key === undefined) throw new Error("kid unknown");

@@ -1,3 +1,4 @@
+import { env as testEnv } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assertEnvSafety, type Env } from "../env";
@@ -47,10 +48,14 @@ const req = (token?: string) =>
 		headers: token === undefined ? {} : { "Cf-Access-Jwt-Assertion": token },
 	});
 
-const env = { ACCESS_AUD: AUD, ACCESS_TEAM_DOMAIN: TEAM } as unknown as Env;
+const env = {
+	ACCESS_AUD: AUD,
+	ACCESS_TEAM_DOMAIN: TEAM,
+	PIPELINE_KV: testEnv.PIPELINE_KV,
+} as unknown as Env;
 
 describe("verifyAccessRequest", () => {
-	beforeEach(() => resetAccessKeyCacheForTest());
+	beforeEach(() => resetAccessKeyCacheForTest(testEnv, TEAM));
 
 	it("ヘッダー無しはmissing", async () => {
 		const f = jwksFetch();
@@ -121,7 +126,7 @@ describe("verifyAccessRequest", () => {
 });
 
 describe("verifyAccessRequest(設定の正規化・境界)", () => {
-	beforeEach(() => resetAccessKeyCacheForTest());
+	beforeEach(() => resetAccessKeyCacheForTest(testEnv, TEAM));
 
 	it("ACCESS_TEAM_DOMAINの末尾スラッシュ・空白があってもokでJWKSのURLは二重スラッシュにならない", async () => {
 		const key = await makeKey("k1");
@@ -199,22 +204,19 @@ describe("verifyAccessRequest(設定の正規化・境界)", () => {
 	});
 });
 
-describe("verifyAccessRequest(Cache APIの使い回し・#32)", () => {
-	beforeEach(() => resetAccessKeyCacheForTest());
-	const certsUrl = `${TEAM}/cdn-cgi/access/certs`;
-	const putCache = async (...keys: TestKey[]) => {
-		await caches.default.put(
-			certsUrl,
-			Response.json(
-				{ keys: keys.map((k) => k.jwk) },
-				{ headers: { "Cache-Control": "max-age=600" } },
-			),
+describe("verifyAccessRequest(KVの使い回し・#32)", () => {
+	beforeEach(() => resetAccessKeyCacheForTest(testEnv, TEAM));
+	const kvKey = `access:certs:${TEAM}`;
+	const putKv = (...keys: TestKey[]) =>
+		testEnv.PIPELINE_KV.put(
+			kvKey,
+			JSON.stringify({ keys: keys.map((k) => k.jwk) }),
+			{ expirationTtl: 600 },
 		);
-	};
 
-	it("isolate内が空でもCache APIに鍵があればfetchせずに通る", async () => {
+	it("isolate内が空でもKVに鍵があればfetchせずに通る", async () => {
 		const key = await makeKey("k1");
-		await putCache(key);
+		await putKv(key);
 		const f = jwksFetch();
 		expect(await verifyAccessRequest(req(await sign(key)), env, f)).toEqual({
 			ok: true,
@@ -222,52 +224,72 @@ describe("verifyAccessRequest(Cache APIの使い回し・#32)", () => {
 		expect(f).not.toHaveBeenCalled();
 	});
 
-	it("Cache APIに無ければfetchで取り、max-age=600で置く", async () => {
+	it("KVに無ければfetchで取り、KVへ置く", async () => {
 		const key = await makeKey("k1");
 		const f = jwksFetch(key);
 		expect(await verifyAccessRequest(req(await sign(key)), env, f)).toEqual({
 			ok: true,
 		});
 		expect(f).toHaveBeenCalledTimes(1);
-		const cached = await caches.default.match(certsUrl);
-		expect(cached?.headers.get("Cache-Control")).toBe("max-age=600");
-		const body = (await cached?.json()) as { keys: unknown[] } | undefined;
-		expect(body?.keys).toHaveLength(1);
+		const body = JSON.parse((await testEnv.PIPELINE_KV.get(kvKey)) ?? "{}") as {
+			keys?: unknown[];
+		};
+		expect(body.keys).toHaveLength(1);
 	});
 
-	it("未知のkidはCache APIを使わずfetchで取り直し、Cache APIも置き換える", async () => {
+	it("空の鍵集合はKVへ置かない", async () => {
+		const key = await makeKey("k1");
+		await verifyAccessRequest(req(await sign(key)), env, jwksFetch());
+		expect(await testEnv.PIPELINE_KV.get(kvKey)).toBeNull();
+	});
+
+	it("putにはexpirationTtl=600を渡す", async () => {
+		const key = await makeKey("k1");
+		const put = vi.fn(async () => {});
+		const kv = {
+			get: async () => null,
+			put,
+			delete: async () => {},
+		} as unknown as KVNamespace;
+		const e = { ...env, PIPELINE_KV: kv } as Env;
+		await verifyAccessRequest(req(await sign(key)), e, jwksFetch(key));
+		expect(put).toHaveBeenCalledWith(kvKey, expect.any(String), {
+			expirationTtl: 600,
+		});
+	});
+
+	it("未知のkidはKVを使わずfetchで取り直し、KVも置き換える", async () => {
 		const k1 = await makeKey("k1");
 		const k2 = await makeKey("k2");
-		await putCache(k1);
+		await putKv(k1);
 		const f = jwksFetch(k2);
 		expect(await verifyAccessRequest(req(await sign(k2)), env, f)).toEqual({
 			ok: true,
 		});
 		expect(f).toHaveBeenCalledTimes(1);
-		const cached = (await (await caches.default.match(certsUrl))?.json()) as {
-			keys: Array<{ kid: string }>;
-		};
+		const cached = JSON.parse(
+			(await testEnv.PIPELINE_KV.get(kvKey)) ?? "{}",
+		) as { keys: Array<{ kid: string }> };
 		expect(cached.keys.map((k) => k.kid)).toEqual(["k2"]);
 	});
 
-	it("Cache APIの読み書きが例外でも検証は動く", async () => {
+	it("KVの読み書きが例外でも検証は動く", async () => {
 		const key = await makeKey("k1");
-		const spy1 = vi
-			.spyOn(caches.default, "match")
-			.mockRejectedValue(new Error("boom"));
-		const spy2 = vi
-			.spyOn(caches.default, "put")
-			.mockRejectedValue(new Error("boom"));
-		try {
-			const f = jwksFetch(key);
-			expect(await verifyAccessRequest(req(await sign(key)), env, f)).toEqual({
-				ok: true,
-			});
-			expect(f).toHaveBeenCalledTimes(1);
-		} finally {
-			spy1.mockRestore();
-			spy2.mockRestore();
-		}
+		const kv = {
+			get: async () => {
+				throw new Error("boom");
+			},
+			put: async () => {
+				throw new Error("boom");
+			},
+			delete: async () => {},
+		} as unknown as KVNamespace;
+		const e = { ...env, PIPELINE_KV: kv } as Env;
+		const f = jwksFetch(key);
+		expect(await verifyAccessRequest(req(await sign(key)), e, f)).toEqual({
+			ok: true,
+		});
+		expect(f).toHaveBeenCalledTimes(1);
 	});
 });
 
