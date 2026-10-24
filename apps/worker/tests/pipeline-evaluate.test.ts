@@ -1453,6 +1453,53 @@ describe("Layer 4・Layer 5・提案化の連結(F4a設計 §2.6・§3.1)", () =
 		expect(row?.status).toBe("proposed");
 	});
 
+	it("提案ができる評価は pipeline.stage2.timing を段ごとに1行ずつ出し、項目は許可リストの範囲だけ(#36)", async () => {
+		const { origin } = await seedConnectionPair();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		try {
+			const result = await evaluateIntent(testEnv, origin.id, directClock);
+			expect(result?.proposed).toBe(1);
+			const lines = logSpy.mock.calls
+				.map(
+					(call: unknown[]) =>
+						JSON.parse(String(call[0])) as Record<string, unknown>,
+				)
+				.filter(
+					(l: Record<string, unknown>) => l.event === "pipeline.stage2.timing",
+				);
+			const layers = lines.map((l) => l.layer);
+			expect([...layers].sort()).toEqual(
+				[
+					"prepare",
+					"retrieval",
+					"layer1",
+					"candidates",
+					"layer3",
+					"group",
+					"jev_pre",
+					"jev_call",
+					"jev_post",
+					"layer5",
+					"propose",
+					"finish",
+				].sort(),
+			);
+			for (const l of lines) {
+				expect(l.intent_id).toBe(origin.id);
+				expect(typeof l.latency).toBe("number");
+				expect(l.latency as number).toBeGreaterThanOrEqual(0);
+				// event・level・時刻などの共通項目を除くと intent_id・layer・latency だけ
+				const extra = Object.keys(l).filter(
+					(k) =>
+						!["intent_id", "layer", "latency", "event", "level"].includes(k),
+				);
+				expect(extra).toEqual([]);
+			}
+		} finally {
+			logSpy.mockRestore();
+		}
+	});
+
 	it("提案済みペアを反対側のIntentから再評価しても候補行はproposedのまま", async () => {
 		const { origin, other } = await seedConnectionPair();
 		const first = await evaluateIntent(testEnv, origin.id, directClock);

@@ -88,6 +88,9 @@
 				"max_retries": 3,
 				// 1件目が来てから待つ秒数。既定(5秒)だと小さいバッチでも5秒待つため1秒にする(#19)
 				"max_batch_timeout": 1,
+				// 1通ずつ処理する。バッチ内は直列で、第2段が第1段の続きで走る(1通約5秒)ため、
+				// 10通まとめると後ろの通が前の通の処理を待つ(初期判定p95 30秒・#30)
+				"max_batch_size": 1,
 				"dead_letter_queue": "match-events-dlq"
 			},
 			{
@@ -204,6 +207,7 @@
 						"queue": "match-events-staging",
 						"max_retries": 3,
 						"max_batch_timeout": 1,
+						"max_batch_size": 1,
 						"dead_letter_queue": "match-events-dlq-staging"
 					},
 					{

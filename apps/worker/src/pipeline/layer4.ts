@@ -9,7 +9,7 @@
 
 import { eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { Clock } from "../clock/clock";
+import { type Clock, systemClock } from "../clock/clock";
 import { type intents, matchCandidates } from "../db/schema";
 import type { Env } from "../env";
 import { type JevRunResult, type JevTarget, runJev } from "../jev/runner";
@@ -32,6 +32,12 @@ export interface L4Result {
 	axesByRow: Map<string, JevAxes>;
 	reused: number;
 	run: JevRunResult;
+	/**
+	 * 段ごとの実時間(ミリ秒・#36の記録用)。pre=既存jev_resultの読み込みと対象の組み立て、
+	 * call=Jev実行器(予算の確保・circuit breaker・外部送信の集計を含む呼び出し)、
+	 * post=得た結果のjev_resultへの保存
+	 */
+	timingsMs: { pre: number; call: number; post: number };
 }
 
 export const runLayer4 = async (
@@ -47,6 +53,8 @@ export const runLayer4 = async (
 	).jev,
 ): Promise<L4Result> => {
 	const db = drizzle(env.DB);
+	// 段の所要時間は実時間で測る(渡されたClockは試験で止まっているため・#36)
+	const preStartedAt = systemClock.now().getTime();
 	const axesByRow = new Map<string, JevAxes>();
 	if (candidates.length === 0) {
 		return {
@@ -58,6 +66,7 @@ export const runLayer4 = async (
 				held: { budget: 0, breaker: 0, failed: 0, cap: 0 },
 				latencyMs: 0,
 			},
+			timingsMs: { pre: 0, call: 0, post: 0 },
 		};
 	}
 
@@ -102,6 +111,7 @@ export const runLayer4 = async (
 		});
 	}
 
+	const callStartedAt = systemClock.now().getTime();
 	const run = await runJev(
 		{
 			jev,
@@ -113,6 +123,7 @@ export const runLayer4 = async (
 		targets,
 	);
 
+	const postStartedAt = systemClock.now().getTime();
 	const now = clock.now();
 	for (const [rowId, axes] of run.axes) {
 		await db
@@ -121,5 +132,14 @@ export const runLayer4 = async (
 			.where(eq(matchCandidates.id, rowId));
 		axesByRow.set(rowId, axes);
 	}
-	return { axesByRow, reused, run };
+	return {
+		axesByRow,
+		reused,
+		run,
+		timingsMs: {
+			pre: callStartedAt - preStartedAt,
+			call: postStartedAt - callStartedAt,
+			post: systemClock.now().getTime() - postStartedAt,
+		},
+	};
 };

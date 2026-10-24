@@ -14,7 +14,7 @@
 import { LATCH, PIPELINE } from "@latch/shared";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import type { Clock } from "../clock/clock";
+import { type Clock, systemClock } from "../clock/clock";
 import { intents, matchCandidates } from "../db/schema";
 import type { Env } from "../env";
 import { newUlid } from "../ids";
@@ -139,6 +139,51 @@ export interface EvaluateOptions {
 	metricsBudget?: MetricsBudget;
 }
 
+/**
+ * 第2段の段ごとの所要時間(#36・stagingのwrangler tailで内訳を読む用)。
+ * 時刻は渡されたClockでなく実時間(systemClock)で測る(Clockは試験で止まっているため)。
+ * 項目はintent_id・layer・latencyだけ(許可リストを増やさない)。
+ * lap(layer)は「直前のlapの終わり(最初は評価の開始)から今まで」を1行出して区切りを進める。
+ * 段の名前と範囲:
+ * - prepare: 意思の読み込み・30分抑制の判定・自分のベクトルの取得(getByIds)
+ * - retrieval: Layer 2 Candidate Retrieval(store.query)
+ * - layer1: Layer 1(D1の読み込みfetchL1Data・孤立ベクトルの自己修復・判定・上位K_vの選択)
+ * - layer3: Layer 3の点数付けと上位K_cの選択・match_candidatesの行の組み立て(計算のみ)
+ * - candidates: match_candidatesへのupsert・提案履歴による除外・1対1の対象の組み立て
+ * - group: グループの準備(prepareGroups)+Jev配分の計画+集合の仕上げ(finishGroups)の合計
+ * - jev_pre / jev_call / jev_post: runLayer4の内訳(L4Result.timingsMs・layer4.tsに範囲を記す)
+ * - layer5: Lの保存とL5の対象・提案候補の選択
+ * - propose: 提案直前の再検証(recheckHard)と1対1のproposeSet
+ * - finish: last_evaluated_atの更新と計測(writeStage2Metrics)
+ */
+const createStageTimer = (intentId: string) => {
+	const nowMs = () => systemClock.now().getTime();
+	let mark = nowMs();
+	const emit = (layer: string, latency: number): void => {
+		logger.info("pipeline.stage2.timing", {
+			intent_id: intentId,
+			layer,
+			latency,
+		});
+	};
+	return {
+		/** 直前の区切りからの経過を返し、区切りを今に進める(行は出さない) */
+		take: (): number => {
+			const t = nowMs();
+			const elapsed = t - mark;
+			mark = t;
+			return elapsed;
+		},
+		/** 区切りを進めずに1行出す(合算した値や内側で測った値を出すとき) */
+		emit,
+		lap(layer: string): number {
+			const elapsed = this.take();
+			emit(layer, elapsed);
+			return elapsed;
+		},
+	};
+};
+
 /** スコア降順・同点はULID昇順(docs/06 §3の同点の規律)の比較関数 */
 const byScoreDescThenIdAsc = (
 	a: { id: string; score: number },
@@ -187,6 +232,7 @@ export const evaluateIntent = async (
 	clock: Clock,
 	options?: EvaluateOptions,
 ): Promise<Stage2Result | null> => {
+	const timer = createStageTimer(intentId);
 	const db = drizzle(env.DB);
 	const now = clock.now();
 	const [intent] = await db
@@ -224,6 +270,7 @@ export const evaluateIntent = async (
 		ownValues = vector.values;
 	}
 	const startedAtMs = now.getTime();
+	timer.lap("prepare");
 	// Layer 2 Candidate Retrieval(docs/06 §3): filter={form, status:"active"}付きで
 	// topK=100。取り出し後の判定はLayer 1が担う
 	// 所要時間は処理時間の計測でありClockを使う時刻依存のロジックではないため
@@ -234,6 +281,7 @@ export const evaluateIntent = async (
 		filter: { form, status: "active" },
 	});
 	const retrievalMs = Math.round(performance.now() - retrievalStart);
+	timer.lap("retrieval");
 	const retrievalCount = hits.length;
 	// 自己idの除外は呼び出し側が担う(vectorstore/types.tsの契約)
 	const retrieved = hits.filter((hit) => hit.id !== intentId);
@@ -290,6 +338,7 @@ export const evaluateIntent = async (
 	const l1Top = passed
 		.sort(byScoreDescThenIdAsc)
 		.slice(0, PIPELINE.LAYER1_OUTPUT_MAX);
+	timer.lap("layer1");
 
 	// Layer 3 Cheap Judge(docs/06 §3・課金ゼロ): 合成スコアで上位K_c=20を選ぶ。
 	// topicは確定後の値を渡す。activeではtopic非nullが原則だが、防御としてnullは
@@ -318,6 +367,7 @@ export const evaluateIntent = async (
 		}))
 		.sort(byScoreDescThenIdAsc);
 	const l3Scored = l1Scored.slice(0, PIPELINE.LAYER3_OUTPUT_MAX);
+	timer.lap("layer3");
 
 	// match_candidatesへupsert(docs/05 §2.2): a<b正規化。UNIQUE(a,b,va,vb)の
 	// 衝突はON CONFLICT DO UPDATEで再評価のスコアを上書きする(行は増やさない・statusは保持)
@@ -378,6 +428,8 @@ export const evaluateIntent = async (
 		}
 	}
 
+	timer.lap("candidates");
+
 	// グループの準備とJev配分(F4b設計 §2.2〜§2.4)。失敗しても1対1だけで続ける(§5)
 	let prep: GroupPrep | null = null;
 	let groupFailed: 0 | 1 = 0;
@@ -431,6 +483,8 @@ export const evaluateIntent = async (
 			l4Candidates.push({ rowId: row.id, origin: row.a, other: row.b });
 		}
 	}
+	// グループの準備とJev配分の計画までの時間はgroupに数える(仕上げの分と最後に合算して出す)
+	let groupMs = timer.take();
 	const l4 = await runLayer4(
 		env,
 		clock,
@@ -438,6 +492,10 @@ export const evaluateIntent = async (
 		l4Candidates,
 		options?.jev,
 	);
+	timer.take();
+	timer.emit("jev_pre", l4.timingsMs.pre);
+	timer.emit("jev_call", l4.timingsMs.call);
+	timer.emit("jev_post", l4.timingsMs.post);
 	// 枠に収まらずJevへ渡さなかった1対1は「1イベントの呼び出し枠」の保留として数える
 	const jevHeld = {
 		...l4.run.held,
@@ -477,6 +535,7 @@ export const evaluateIntent = async (
 		(item) => item.score > LATCH.THRESHOLD,
 	).length;
 	const picks = pickProposals(l5Items);
+	timer.lap("layer5");
 
 	// 提案の直前にHをD1の現行値で再検証し、合格した相手だけを
 	// L降順に提案化する(docs/06 §6・F4a設計 §3.1〜§3.2)
@@ -516,6 +575,8 @@ export const evaluateIntent = async (
 		}
 	}
 
+	timer.lap("propose");
+
 	// 集合の点数・保存・提案(F4b設計 §2.5)。1対1の提案の後に1集合だけ。失敗は隔離する(§5)
 	let group: GroupOutcome | null = null;
 	if (prep !== null) {
@@ -529,6 +590,9 @@ export const evaluateIntent = async (
 			});
 		}
 	}
+
+	groupMs += timer.take();
+	timer.emit("group", groupMs);
 
 	// 30分再評価抑制の起点を更新する(docs/05 §2.6)
 	await db
@@ -574,6 +638,7 @@ export const evaluateIntent = async (
 		// 本番の呼び出し元は共有の残り(キューのバッチ・scheduledの1回)を必ず渡す。ここは単体呼び出し用
 		options?.metricsBudget ?? createMetricsBudget(),
 	);
+	timer.lap("finish");
 	logger.info("pipeline.stage2.completed", {
 		intent_id: intentId,
 		count: result.l3Pass,
