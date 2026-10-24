@@ -12,7 +12,12 @@ import { drizzle } from "drizzle-orm/d1";
 import { type Clock, systemClock } from "../clock/clock";
 import { type intents, matchCandidates } from "../db/schema";
 import type { Env } from "../env";
-import { type JevRunResult, type JevTarget, runJev } from "../jev/runner";
+import {
+	type JevRunResult,
+	type JevTarget,
+	type JevTimingLabel,
+	runJev,
+} from "../jev/runner";
 import { createLlm } from "../llm/mode";
 import type { JevAxes, JevFn } from "../llm/types";
 import { buildNormalizedText } from "./normalize";
@@ -38,7 +43,16 @@ export interface L4Result {
 	 * post=得た結果のjev_resultへの保存
 	 */
 	timingsMs: { pre: number; call: number; post: number };
+	/** callの内訳(全波の合計・ミリ秒)。breaker確認・予算確保・外部呼び出し・breaker記録 */
+	callBreakdownMs: Record<JevTimingLabel, number>;
 }
+
+const emptyBreakdown = (): Record<JevTimingLabel, number> => ({
+	jev_breaker: 0,
+	jev_reserve: 0,
+	jev_http: 0,
+	jev_record: 0,
+});
 
 export const runLayer4 = async (
 	env: Env,
@@ -67,6 +81,7 @@ export const runLayer4 = async (
 				latencyMs: 0,
 			},
 			timingsMs: { pre: 0, call: 0, post: 0 },
+			callBreakdownMs: emptyBreakdown(),
 		};
 	}
 
@@ -112,12 +127,16 @@ export const runLayer4 = async (
 	}
 
 	const callStartedAt = systemClock.now().getTime();
+	const callBreakdownMs = emptyBreakdown();
 	const run = await runJev(
 		{
 			jev,
 			db,
 			kv: env.PIPELINE_KV,
 			clock,
+			onTiming: (label, ms) => {
+				callBreakdownMs[label] += ms;
+			},
 		},
 		budgetOrigin,
 		targets,
@@ -136,6 +155,7 @@ export const runLayer4 = async (
 		axesByRow,
 		reused,
 		run,
+		callBreakdownMs,
 		timingsMs: {
 			pre: callStartedAt - preStartedAt,
 			call: postStartedAt - callStartedAt,

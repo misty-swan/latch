@@ -152,6 +152,7 @@ export interface EvaluateOptions {
  * - candidates: match_candidatesへのupsert・提案履歴による除外・1対1の対象の組み立て
  * - group: グループの準備(prepareGroups)+Jev配分の計画+集合の仕上げ(finishGroups)の合計
  * - jev_pre / jev_call / jev_post: runLayer4の内訳(L4Result.timingsMs・layer4.tsに範囲を記す)
+ * - jev_breaker / jev_reserve / jev_http / jev_record: jev_callの内訳(全波の合計・jev/runner.ts)
  * - layer5: Lの保存とL5の対象・提案候補の選択
  * - propose: 提案直前の再検証(recheckHard)と1対1のproposeSet
  * - finish: last_evaluated_atの更新と計測(writeStage2Metrics)
@@ -492,9 +493,14 @@ export const evaluateIntent = async (
 		l4Candidates,
 		options?.jev,
 	);
+	// マークを進めるだけ。Jevの時間はtimingsMsから出す
 	timer.take();
 	timer.emit("jev_pre", l4.timingsMs.pre);
 	timer.emit("jev_call", l4.timingsMs.call);
+	// jev_callの内訳(jev_http: 外部呼び出しの並列区間。外部送信の集計の書き込みを含み分けられない)
+	for (const [label, ms] of Object.entries(l4.callBreakdownMs)) {
+		timer.emit(label, ms);
+	}
 	timer.emit("jev_post", l4.timingsMs.post);
 	// 枠に収まらずJevへ渡さなかった1対1は「1イベントの呼び出し枠」の保留として数える
 	const jevHeld = {

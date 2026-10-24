@@ -6,7 +6,7 @@
 
 import { LATCH } from "@latch/shared";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import type { Clock } from "../clock/clock";
+import { type Clock, systemClock } from "../clock/clock";
 import {
 	isFallbackEligible,
 	type JevAxes,
@@ -34,6 +34,13 @@ export interface JevRunResult {
 	latencyMs: number;
 }
 
+/** 区間の所要時間の計測先(#36・試験と評価の記録用)。ラベルごとに全波の合計を呼び出し側が足す */
+export type JevTimingLabel =
+	| "jev_breaker"
+	| "jev_reserve"
+	| "jev_http"
+	| "jev_record";
+
 type QueueItem = { target: JevTarget; useFallback: boolean };
 
 /**
@@ -54,11 +61,28 @@ export const runJev = async (
 		db: DrizzleD1Database;
 		kv: KVNamespace;
 		clock: Clock;
+		/** 区間ごとの実時間(ミリ秒)を受け取る。省略時は計測しない。振る舞いは変えない */
+		onTiming?: (label: JevTimingLabel, ms: number) => void;
 	},
 	origin: { intentId: string; userId: string },
 	targets: JevTarget[],
 ): Promise<JevRunResult> => {
-	const { jev, db, kv, clock } = deps;
+	const { jev, db, kv, clock, onTiming } = deps;
+	// 区間の計測は実時間(systemClock)。Clockは試験で止まっているため
+	const timed = async <T>(
+		label: JevTimingLabel,
+		run: () => Promise<T>,
+	): Promise<T> => {
+		if (onTiming === undefined) {
+			return run();
+		}
+		const t0 = systemClock.now().getTime();
+		try {
+			return await run();
+		} finally {
+			onTiming(label, systemClock.now().getTime() - t0);
+		}
+	};
 	const startedAt = clock.now().getTime();
 	const axes = new Map<string, JevAxes>();
 	const held: Record<JevHeldReason, number> = {
@@ -77,7 +101,7 @@ export const runJev = async (
 
 	while (slots > 0 && queue.length > 0) {
 		// 波の前にbreakerを確認し、開いていれば残り全件を保留する
-		if (await isBreakerOpen(kv, clock.now())) {
+		if (await timed("jev_breaker", () => isBreakerOpen(kv, clock.now()))) {
 			held.breaker += queue.length;
 			queue = [];
 			break;
@@ -89,20 +113,25 @@ export const runJev = async (
 		// 1件ずつ予算を確保し、最初に尽きた件以降は呼ばない
 		const reserved: QueueItem[] = [];
 		let budgetStopped = false;
-		for (const item of wave) {
-			const r = await reserveJevCall(db, origin, clock.now());
-			if (!r.ok) {
-				budgetStopped = true;
-				break;
+		await timed("jev_reserve", async () => {
+			for (const item of wave) {
+				const r = await reserveJevCall(db, origin, clock.now());
+				if (!r.ok) {
+					budgetStopped = true;
+					break;
+				}
+				reserved.push(item);
 			}
-			reserved.push(item);
-		}
+		});
 
-		const outcomes = await Promise.all(
-			reserved.map((item) =>
-				callSafely(
-					item.useFallback ? jev.fallback : jev.primary,
-					item.target.input,
+		// 外部呼び出し(並列)。外部送信の集計の書き込み(llm/mode.tsの包み)もここに含まれる
+		const outcomes = await timed("jev_http", () =>
+			Promise.all(
+				reserved.map((item) =>
+					callSafely(
+						item.useFallback ? jev.fallback : jev.primary,
+						item.target.input,
+					),
 				),
 			),
 		);
@@ -110,10 +139,12 @@ export const runJev = async (
 		slots -= n;
 
 		// breakerへの記録は1波につき1回にまとめる(KVの同一キー書き込みは1秒1回まで・docs/04 §4・docs/06 §5)
-		await recordJevOutcomes(
-			kv,
-			outcomes.map((o) => o.ok),
-			clock.now(),
+		await timed("jev_record", () =>
+			recordJevOutcomes(
+				kv,
+				outcomes.map((o) => o.ok),
+				clock.now(),
+			),
 		);
 		const nextFallback: QueueItem[] = [];
 		for (let i = 0; i < reserved.length; i++) {
