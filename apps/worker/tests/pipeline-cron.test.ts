@@ -556,6 +556,7 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 			await insertIntentRow(row);
 			await upsertVector(row);
 		}
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		const writeDataPoint = vi.fn();
 		const envWithAx = {
 			...testEnv,
@@ -572,10 +573,51 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 				and(eq(intents.userId, userId), isNotNull(intents.lastEvaluatedAt)),
 			);
 		expect(evaluated).toHaveLength(total);
+		// 評価の計測は予算アラートの2件を除いた238件で止まり、省いたことをちょうど1回warnする
+		expect(writeDataPoint).toHaveBeenCalledTimes(
+			PIPELINE.METRICS_WRITES_PER_INVOCATION - 2,
+		);
+		expect(logsOf(logSpy, "pipeline.metrics.skipped")).toHaveLength(1);
+	});
+
+	it("計測の残り(#28): 評価の計測で残りを使い切っても、予算アラートのdata pointは書く", async () => {
+		const day = jstDayKey(FIXED_NOW);
+		const month = jstMonthKey(FIXED_NOW);
+		await testEnv.PIPELINE_KV.delete(`jev:alert:jev_global_daily:${day}`);
+		await testEnv.PIPELINE_KV.delete(`jev:alert:jev_global_monthly:${month}`);
+		await db.insert(usageCounters).values({
+			scope: "jev_global_daily",
+			key: "-",
+			period: day,
+			count: LIMITS.JEV_GLOBAL_DAILY * LATCH.BUDGET_ALERT_RATIO,
+		});
+		const userId = ulid();
+		await insertUserRow(userId);
+		for (let i = 0; i < 130; i += 1) {
+			const row = intentFixture({
+				id: ulid(),
+				userId,
+				topic: `アラートの確保の試験 ${i}`,
+				embeddedAt: new Date(BASE - 6 * MIN),
+			});
+			await insertIntentRow(row);
+			await upsertVector(row);
+		}
+		const writeDataPoint = vi.fn();
+		const envWithAx = {
+			...testEnv,
+			PIPELINE_AX: { writeDataPoint },
+		} as unknown as WorkerEnv;
+
+		await runScheduledPipeline(envWithAx, directClock);
+
+		const alerts = writeDataPoint.mock.calls.filter(
+			([point]) => point.indexes[0] === "jev_budget_alert",
+		);
+		expect(alerts).toHaveLength(1);
 		expect(writeDataPoint.mock.calls.length).toBeLessThanOrEqual(
 			PIPELINE.METRICS_WRITES_PER_INVOCATION,
 		);
-		expect(writeDataPoint.mock.calls.length).toBeGreaterThan(0);
 	});
 
 	it("遅延再評価: つながりを10分経過後に1回だけ再評価する(2度目は実行しない)", async () => {

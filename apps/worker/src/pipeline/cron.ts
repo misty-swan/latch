@@ -83,6 +83,9 @@ const CLOSE_CHUNK = 40;
 /** ベクトル削除のチャンク幅(deleteByIds。公式の文書に上限の記載が無いため従来の100のまま) */
 const VECTOR_CHUNK = 100;
 
+/** 予算アラートのdata pointの確保数(スコープ2つ分・#28) */
+const ALERT_METRICS_WRITES = 2;
+
 /**
  * 1件分の評価を実行する。例外は1件ごとに握って続行し、Cron全体を止めない
  * (失敗はwarnログのみ・許可フィールドはintent_idとerror_code・docs/08 §6)。
@@ -929,7 +932,11 @@ export const runScheduledPipeline = async (
 	// この実行の中で作られた通知(Cronの評価で作った提案など)だけを後でその場で送るための起点
 	const startedAt = clock.now();
 	// この実行の計測の書き込みの残り(実行ごとに作る・同時に動く別の実行と共有しない・#28)
-	const metricsBudget = createMetricsBudget();
+	// 予算アラートの書き込み2件(スコープごとに1件)は先に確保し、評価の計測で使い切られても書けるようにする
+	const alertBudget = createMetricsBudget(ALERT_METRICS_WRITES);
+	const metricsBudget = createMetricsBudget(
+		PIPELINE.METRICS_WRITES_PER_INVOCATION - ALERT_METRICS_WRITES,
+	);
 	await runIsolated("bucket", () => runBucketSweep(env, clock, metricsBudget));
 	await runIsolated("catch_up", () =>
 		runCatchUpSweep(env, clock, metricsBudget),
@@ -963,7 +970,7 @@ export const runScheduledPipeline = async (
 		});
 	});
 	await runIsolated("budget_alert", () =>
-		runBudgetAlert(env, clock, metricsBudget),
+		runBudgetAlert(env, clock, alertBudget),
 	);
 	await runIsolated("pending", () => runPendingSweep(env, clock));
 	await runIsolated("completion", async () => {

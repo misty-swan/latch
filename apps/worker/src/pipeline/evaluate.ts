@@ -571,6 +571,7 @@ export const evaluateIntent = async (
 			origin: options?.origin ?? "cron_other",
 			joinKey: crypto.randomUUID(),
 		},
+		// 本番の呼び出し元は共有の残り(キューのバッチ・scheduledの1回)を必ず渡す。ここは単体呼び出し用
 		options?.metricsBudget ?? createMetricsBudget(),
 	);
 	logger.info("pipeline.stage2.completed", {
