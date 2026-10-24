@@ -60,7 +60,7 @@ describe("wrangler.jsonc の env.staging", () => {
 		expect(staging.vars).toEqual({
 			LATCH_ENV: "staging",
 			LATCH_EMBEDDING_MODE: "real",
-			LATCH_LLM_MODE: "stub",
+			LATCH_LLM_MODE: "real",
 			LATCH_PUSH_MODE: "stub",
 		});
 	});

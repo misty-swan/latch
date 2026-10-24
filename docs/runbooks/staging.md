@@ -64,6 +64,25 @@ pnpm --filter worker secrets:staging
 
 (6件を順に登録し、「登録: 名前」と表示する。値は画面に出ない)
 
+### 3.1 LLMのAPIキー(stagingはLATCH_LLM_MODE=real)
+
+stagingはParser/Jevを本物のLLMで動かす(`LATCH_LLM_MODE=real`)。そのため、次の2件のシークレットが要る。値は画面にも記録にも出さず、オーナーが自分の端末で1件ずつ登録する(実行すると値の入力を求められる)。
+
+| 名前 | 中身 |
+|---|---|
+| ANTHROPIC_API_KEY | Anthropic(Parser)のAPIキー |
+| TYPESAFE_API_KEY | TypeSafe(Jev)のAPIキー |
+
+```bash
+pnpm --filter worker exec wrangler secret put ANTHROPIC_API_KEY --env staging
+pnpm --filter worker exec wrangler secret put TYPESAFE_API_KEY --env staging
+```
+
+(名前ごとに値の入力を求められ、入力するとstagingのWorkerへ保存される)
+
+- 精度ゲートの合格記録は`eval/records/gate.json`にある。CIはこの記録と、プロンプトやreal実装の指紋・固定したモデル名を照合する
+- プロンプトやrealのコードを変えたときは、`pnpm eval:gate`で採点し直して記録を更新しないとCIが通らない
+
 - Workerがまだ無いときは、wranglerが空のWorkerを作ってから登録する
 - 登録済みの名前は`pnpm --filter worker exec wrangler secret list --env staging`で確かめられる(値は見えない)
 - もう一度実行するとJWT_SECRETが新しい値に変わる。そのときは、それまでのログインが切れる
