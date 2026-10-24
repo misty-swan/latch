@@ -102,7 +102,9 @@ test("4. form切替: つながり判定を機会へ切り替えて日時を入�
 }) => {
 	await signInAndRegister(page);
 	// 時刻語・日付語が無いためつながり判定(飲みは飲酒語でしかない・07 §3)
-	const words = "今度飲みに行く仲間が欲しい";
+	// 先頭の__jev_low__はstub Jevを低値にし提案を作らせない目印(topicが先頭から作られる)。
+	// 同じスイート内の他の意思との提案で「預けている」が崩れるのを防ぐ
+	const words = "__jev_low__ 今度飲みに行く仲間が欲しい";
 	await composeAndRead(page, words);
 	await expect(
 		page.locator('input[name="form"][value="connection"]'),
@@ -138,8 +140,9 @@ test("5. 下書き: 残す→home→再開して預けるとdraftからactiveに
 	page,
 }) => {
 	await signInAndRegister(page);
+	// 先頭の__jev_low__はstub Jevを低値にし提案を作らせない目印(test 4と同じ理由)
 	const words =
-		"写真を一緒に撮ってくれる人を探しています。急ぎではありません。";
+		"__jev_low__ 写真を一緒に撮ってくれる人を探しています。急ぎではありません。";
 	await page.getByRole("link", { name: "ひとこと置く" }).click();
 	await page.locator("#c-text").fill(words);
 	await page.getByRole("button", { name: "下書きに残す" }).click();
