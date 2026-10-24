@@ -20,7 +20,9 @@ describe("buildReport", () => {
 		expect(out).toContain(
 			"| Vectorizeの反映 | 3 | 1 | 1.00秒 | 3.00秒 | 3.00秒 |",
 		);
-		expect(out).toContain("欠けの内訳: skipped 0件・failed 1件・その他 0件");
+		expect(out).toContain(
+			"欠けの内訳: skipped 0件・failed 1件・確認中(pending) 0件・その他 0件",
+		);
 		const none = buildReport("202610221200", { a: null, c: null }, empty);
 		expect(none).toContain(
 			"| Vectorizeの反映 | 0 | 0 | 計測なし | 計測なし | 計測なし |",
@@ -110,5 +112,22 @@ describe("buildReport", () => {
 		expect(out).toContain("計測の時点のstagingの設定(LATCH_LLM_MODE)");
 		expect(out).not.toContain("stubで動かした");
 		expect(out).toContain("no_subscription");
+	});
+});
+
+describe("buildReport: 確認中の内訳(#34)", () => {
+	it("pendingの行を「確認中(pending)」の件数として出す", () => {
+		const out = buildReport(
+			"202610221200",
+			{ a: null, c: null },
+			{
+				...empty,
+				reflection: [
+					{ status: "pending", reflect_ms: null },
+					{ status: "pending", reflect_ms: null },
+				],
+			},
+		);
+		expect(out).toContain("確認中(pending) 2件・その他 0件");
 	});
 });

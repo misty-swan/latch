@@ -41,6 +41,14 @@ describe("buildQueries", () => {
 			expect(sql).not.toContain(";");
 		}
 	});
+	it("シナリオを指定すると(b)か(d)の利用者だけに絞る。不正な値は例外(#33)", () => {
+		for (const sql of Object.values(buildQueries("202610220442", "d"))) {
+			expect(sql).toContain("u.auth_subject LIKE 'load-202610220442-d%'");
+			expect(sql).not.toContain("load-202610220442-b%");
+		}
+		expect(buildQueries("202610220442", "b").notify).not.toContain("-d%");
+		expect(() => buildQueries("202610220442", "x")).toThrow("シナリオ");
+	});
 	it("初期判定: intent_createdの作成時刻と、そのIntentを含むLATCHの提案の通知の最小のpush_attempted_at", () => {
 		const { judge } = buildQueries("202610220442");
 		expect(judge).toContain("event_type = 'intent_created'");
@@ -203,6 +211,16 @@ describe("反映確認のskipped(payload.skipped)", () => {
 			]),
 		).toEqual({ skipped: 3, failed: 0, other: 1 });
 	});
+	it("reflectionBreakdown: pendingは確認中として数え、otherに入れない(#34)", () => {
+		expect(
+			reflectionBreakdown([
+				{ status: "pending", reflect_ms: null },
+				{ status: "pending", reflect_ms: null },
+				{ status: "failed", reflect_ms: null },
+				{ status: "dead", reflect_ms: null },
+			]),
+		).toEqual({ skipped: 0, failed: 1, pending: 2, other: 1 });
+	});
 	it("isReflected: processedでもskipped(not_evaluated以外)なら反映済みとしない", () => {
 		const item = (skipped) => ({
 			event_type: "vector_reflection",
@@ -226,7 +244,7 @@ describe("反映の欠けの内訳", () => {
 				{ status: "processed", reflect_ms: null, skipped: "not_found" },
 				{ status: "processed", reflect_ms: null },
 			]),
-		).toEqual({ skipped: 1, failed: 2, other: 1 });
+		).toEqual({ skipped: 1, failed: 2, pending: 0, other: 1 });
 	});
 });
 

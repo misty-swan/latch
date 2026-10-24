@@ -17,15 +17,25 @@ const REFLECTED_SKIPPED_VALUE = "not_evaluated";
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 /**
- * 集計のSQLを返す。runIdは12桁の数字のみ(SQLへ文字列として差し込むため、それ以外は例外)
+ * 集計のSQLを返す。runIdは12桁の数字のみ(SQLへ文字列として差し込むため、それ以外は例外)。
+ * scenarioを`b`か`d`にすると、そのシナリオの利用者だけに絞る(省略は(b)(d)の両方)。
+ * 同じ実行の印で(b)(d)を両方流すと、絞らない集計は両方の通知の行を合わせて数える(#33)
  * @param {string} runId
+ * @param {"b" | "d"} [scenario]
  * @returns {{ judge: string, notify: string, retrieval: string, reflection: string }}
  */
-export function buildQueries(runId) {
+export function buildQueries(runId, scenario) {
 	if (typeof runId !== "string" || !/^\d{12}$/.test(runId)) {
 		throw new Error("実行の印(runId)は12桁の数字で指定してください");
 	}
-	const subject = `u.auth_subject LIKE 'load-${runId}-%' AND (u.auth_subject LIKE 'load-${runId}-b%' OR u.auth_subject LIKE 'load-${runId}-d%')`;
+	if (scenario !== undefined && scenario !== "b" && scenario !== "d") {
+		throw new Error("シナリオはbかdで指定してください");
+	}
+	const tagged =
+		scenario === undefined
+			? `(u.auth_subject LIKE 'load-${runId}-b%' OR u.auth_subject LIKE 'load-${runId}-d%')`
+			: `u.auth_subject LIKE 'load-${runId}-${scenario}%'`;
+	const subject = `u.auth_subject LIKE 'load-${runId}-%' AND ${tagged}`;
 	return {
 		// 初期判定: 有効化のイベント行の作成時刻(起点)→そのIntentを含むLATCHの、
 		// そのIntentの利用者への提案の通知の最小のpush_attempted_at(提案が無ければnull)。
@@ -155,12 +165,13 @@ export function splitJudgeRows(rows) {
 
 /**
  * 反映の行の欠けの内訳。processedで値のある行(not_evaluatedを含む)は数えず、failed・
- * skipped(processedでpayload.skippedがnot_evaluated以外)・それ以外(processedで値なしなど)を分ける
+ * skipped(processedでpayload.skippedがnot_evaluated以外)・確認中(pending。集計の時点で
+ * 反映確認が終わっていない)・それ以外(processedで値なしなど)を分ける
  * @param {Array<{ status: unknown, reflect_ms: unknown, skipped?: unknown }>} rows
- * @returns {{ skipped: number, failed: number, other: number }}
+ * @returns {{ skipped: number, failed: number, pending: number, other: number }}
  */
 export function reflectionBreakdown(rows) {
-	const out = { skipped: 0, failed: 0, other: 0 };
+	const out = { skipped: 0, failed: 0, pending: 0, other: 0 };
 	for (const r of rows) {
 		if (r.status === "processed" && num(r.reflect_ms) !== null) continue;
 		if (
@@ -170,6 +181,7 @@ export function reflectionBreakdown(rows) {
 		)
 			out.skipped += 1;
 		else if (r.status === "failed") out.failed += 1;
+		else if (r.status === "pending") out.pending += 1;
 		else out.other += 1;
 	}
 	return out;

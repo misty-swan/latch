@@ -5,7 +5,8 @@
  * 初期判定・通知・Candidate Retrievalは(b)(d)の利用者の行で測るため、後始末(cleanup.mjs)で
  * 意思を消す前に実行する(意思を消すとその意思のmatch_eventsの行も消える)。
  *
- * 使い方: node tools/load/report.mjs <runId>
+ * 使い方: node tools/load/report.mjs <runId> [b|d]
+ * 第2引数で(b)か(d)の利用者だけに絞る(省略は両方。同じ実行の印で両方流したときの混ざりを避ける・#33)
  * stagingのURLは使わない。wranglerの出力に混じるworkers.devのURLは伏せる(設計 §2.1)。
  */
 
@@ -81,8 +82,8 @@ export function buildReport(runId, k6, rows) {
 		`- k6の結果のファイル: ${found}。Intent保存・Parserは(a)、チャットは(c)の結果から読む(k6のsummaryはp95だけを持つため、件数の欄は—)`,
 		"- Candidate Retrieval・初期判定・通知は、stagingのD1の(b)(d)の利用者の行から集計する。「欠け」は計測できなかった件数(提案の通知が無い・送信試行が無い・イベント行が無い)。欠けが1件でもあれば、計測した分のp95が目標以内でも判定は「—(欠けあり)」(合格としない)。目標を超えれば欠けがあっても不合格",
 		`- embedding_completedのイベント行が無い意思: ${retrieval.withoutEvent}件(埋め込みを毎分Cronのバックフィルで行った意思はこの行を持たず、Candidate Retrievalの欠けになる)`,
-		"- Vectorizeの反映は、意思のversionごとの反映確認の行(vector_reflection)の作成から反映の確認までの時間である。01 §20に目標値は無く、合否は付けず実測だけを出す。「欠け」は確認できず諦めた(failed)・古い版などで値の無い行の数。内訳のskippedは、意思が無い・古い版・activeでないために反映を確かめずに処理済みにした行(payload.skipped)の数",
-		`- Vectorizeの反映の欠けの内訳: skipped ${breakdown.skipped}件・failed ${breakdown.failed}件・その他 ${breakdown.other}件`,
+		"- Vectorizeの反映は、意思のversionごとの反映確認の行(vector_reflection)の作成から反映の確認までの時間である。01 §20に目標値は無く、合否は付けず実測だけを出す。「欠け」は確認できず諦めた(failed)・古い版などで値の無い行の数。確認中(pending)は集計の時点で反映確認が終わっていない行で、これが多いときは反映確認の打ち切り(8分)を待ってから集計し直す。内訳のskippedは、意思が無い・古い版・activeでないために反映を確かめずに処理済みにした行(payload.skipped)の数",
+		`- Vectorizeの反映の欠けの内訳: skipped ${breakdown.skipped}件・failed ${breakdown.failed}件・確認中(pending) ${breakdown.pending}件・その他 ${breakdown.other}件`,
 		"- 初期判定は、組の相手の意思の反映確認(vector_reflection)が反映を確かめてprocessedになった時刻(payload.skippedが無いかnot_evaluatedの行。not_found・stale_version・inactiveは反映を確かめていないため除く)と、自分の有効化(intent_created)の行の作成時刻を比べて振り分ける。相手の反映が自分の有効化より前(同時刻は含めない)なら「相手が先に反映済み」で、これだけに目標(p95 10秒・01 §20)の合否を付ける。それ以外((d)の組・先に保存した側・相手が未反映のとき)は「同時」で、合否を付けない参考値である。(b)は片方が先に保存して反映を確かめてからもう片方が保存するため、後から保存した側が「相手が先に反映済み」の標本になる",
 		"- 初期判定の起点は有効化のイベント行(intent_created)の作成時刻で、有効化の保存の直後に応答の後の処理(waitUntil)で書かれる。保存のコミットよりわずかに後の時刻を起点にしている",
 		"- 送信記録(push_attempted_at)は送信の順番を取った時刻である。試験用の利用者は購読を持たないためno_subscriptionで確定し、暗号化と送信の時間は含まれない",
@@ -122,7 +123,7 @@ function queryRows(sql) {
 
 function main() {
 	const runId = process.argv[2];
-	const sql = buildQueries(runId);
+	const sql = buildQueries(runId, process.argv[3]);
 	const k6 = { a: readSummary(runId, "a"), c: readSummary(runId, "c") };
 	const rows = {
 		judge: queryRows(sql.judge),
