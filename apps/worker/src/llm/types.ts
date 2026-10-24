@@ -72,7 +72,7 @@ export type JevFn = (input: JevInput) => Promise<JevOutcome>;
 
 /**
  * fallbackモデルへ切り替える対象か。timeout/rate_limited/overloaded/unavailableのみtrue。
- * unavailableは接続の失敗と500・502(オーナー決定2026-10-24・#35)。
+ * unavailableは接続の失敗と503/529以外の5xx(オーナー決定2026-10-24・#35)。
  * 400番台(鍵の誤りなど)のotherと出力の誤りのinvalid_outputは切り替えても直らないので対象外
  */
 export const isFallbackEligible = (kind: JevFailureKind): boolean =>

@@ -273,6 +273,25 @@ describe("verifyAccessRequest(KVの使い回し・#32)", () => {
 		expect(cached.keys.map((k) => k.kid)).toEqual(["k2"]);
 	});
 
+	it("KVの値の形が崩れていれば(keysが配列でない)使わずにfetchで取る", async () => {
+		const key = await makeKey("k1");
+		for (const broken of [
+			"null",
+			"[]",
+			"{}",
+			JSON.stringify({ keys: {} }),
+			JSON.stringify({ keys: "k1" }),
+		]) {
+			await resetAccessKeyCacheForTest(testEnv, TEAM);
+			await testEnv.PIPELINE_KV.put(kvKey, broken, { expirationTtl: 600 });
+			const f = jwksFetch(key);
+			expect(await verifyAccessRequest(req(await sign(key)), env, f)).toEqual({
+				ok: true,
+			});
+			expect(f).toHaveBeenCalledTimes(1);
+		}
+	});
+
 	it("KVの読み書きが例外でも検証は動く", async () => {
 		const key = await makeKey("k1");
 		const kv = {

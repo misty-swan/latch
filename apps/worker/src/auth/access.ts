@@ -65,7 +65,10 @@ const readCertsKv = async (
 	try {
 		const text = await env.PIPELINE_KV.get(certsKvKey(teamDomain));
 		if (text === null) return undefined;
-		return JSON.parse(text) as CertsBody;
+		const body = JSON.parse(text) as CertsBody | null;
+		// 形の崩れた値(keysが配列でない)は使わずに取得へ進む。使うとimportKeysが例外になり、
+		// KVの保持秒数(最大600秒)の間403を返し続けるため
+		return body !== null && Array.isArray(body.keys) ? body : undefined;
 	} catch {
 		return undefined;
 	}
