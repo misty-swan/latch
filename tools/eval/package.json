@@ -1,0 +1,15 @@
+{
+	"name": "eval",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"test": "vitest run"
+	},
+	"devDependencies": {
+		"tsx": "4.23.15",
+		"vitest": "4.1.12",
+		"yaml": "2.9.1",
+		"zod": "4.6.7"
+	}
+}

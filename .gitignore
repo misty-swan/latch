@@ -7,3 +7,4 @@ coverage/
 *.tsbuildinfo
 .vscode/
 __pycache__/
+tools/eval/.env
