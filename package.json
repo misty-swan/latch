@@ -10,7 +10,8 @@
     "format": "biome check --write .",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
-    "eval:gate": "pnpm --filter eval exec tsx gate.ts"
+    "eval:gate": "pnpm --filter eval exec tsx gate.ts",
+    "eval:region": "pnpm --filter eval exec tsx region.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
