@@ -334,7 +334,7 @@ node tools/load/cleanup.mjs
 node tools/load/run.mjs tools/load/scenarios/bd-proposal.js -e MODE=staggered -e RUN_ID=$RUN_ID \
   --summary-export tools/load/results/$RUN_ID-b.json
 # 集計の前に、反映確認が終わるのを待つ(7.8)
-node tools/load/report.mjs $RUN_ID b
+node tools/load/report.mjs $RUN_ID b   # (d)のときは MODE=burst・-d.json で流し、node tools/load/report.mjs $RUN_ID d
 node tools/load/cleanup.mjs
 ```
 
@@ -387,7 +387,7 @@ node tools/load/report.mjs <RUN_ID> [b|d]
 (`tools/load/results/<RUN_ID>-a.json`・`-c.json`のk6の結果を読み、stagingのD1へ読み取りの問い合わせ(SELECTだけ)を送って、Intent保存・Parser・Candidate Retrieval・初期判定(相手が先に反映済み)・通知のp95と合否、チャットと初期判定(同時)・Vectorizeの反映の参考値をMarkdownの表で出す。宛先のURLは使わないため`LATCH_LOAD_BASE_URL`は要らない)
 
 - 初期判定・通知・Candidate Retrievalは、その実行の印の(b)(d)の利用者の行から出す。後始末で意思を消すと、その意思の有効化や埋め込みの記録(match_events)も消えて集計できなくなるため、**集計は後始末の前に行う**(7.6の手順の順番)。提案の通知の行は後始末の後も残る
-- 第2引数に`b`か`d`を付けると、その実行の印のうち(b)か(d)の利用者の行だけで集計する。付けないと両方を合わせて数える。後始末(cleanup.mjs)は意思と利用者を消すが提案の通知の行は残るため、**同じ実行の印を2回の実行で使い回さない**。集計に失敗したシナリオを流し直すときは、必ず新しい実行の印を使う。同じ印で流し直すと、前の実行の通知の行が同じsubjectの利用者に結び付いたまま集計に入り、件数が倍になる。この規則は照会では直せない(同じsubjectの前回と今回の行を区別する印が無い)ため運用で守る(#33)
+- 第2引数に`b`か`d`を付けると、その実行の印のうち(b)か(d)の利用者の行だけで集計する。付けないと両方を合わせて数える。照会は通知の行を利用者(subject `load-<RUN_ID>-b<連番>`・`-d<連番>`)に結び付けて数えるため、同じ実行の印で(b)と(d)を流すと両方の通知の行が1つの集計に混ざる(#33)。`b`か`d`を付けて分ける。また、後始末(cleanup.mjs)が消すのは意思(DELETE /v1/intents/{id})だけで、利用者と通知の行は残る。同じsubjectで入り直すと同じ利用者に戻る(認証は(auth_provider, auth_subject)の一意の索引で登録済みの利用者を探す)ため、**同じ実行の印で流し直すと前回の通知の行が今回の集計に入る**。前回と今回の行を区別する印が照会に無いので、集計に失敗したシナリオの流し直しは必ず新しい実行の印で行う
 - 実行の印は1回に1つで、シナリオごとに印が違うときは印ごとに実行する。結果のファイルやD1の行が無い項目は「計測なし」と出る
 - 「判定」は、欠けが0件で計測したp95が目標以内なら「合格」、計測したp95が目標を超えれば欠けの有無によらず「不合格」と出る。計測したp95が目標以内でも欠けが1件でもあれば「—(欠けあり)」と出て合格としない(欠けた分が遅かった可能性を否定できないため)。計測が0件なら「—」。「—(欠けあり)」の行は、欠けの理由(下の注記)を確かめ、直してから測り直す
 - 「欠け」は計測できなかった件数(提案の通知が来なかった意思など)。表の下に、埋め込みの記録(embedding_completed)が無い意思の件数も出る。埋め込みを毎分の定期処理(バックフィル)が行った意思はこの記録を持たず、そのぶんCandidate Retrievalの「欠け」になる。不具合#7を直した後は、埋め込みの失敗が無ければ0件になる

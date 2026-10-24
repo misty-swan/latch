@@ -131,3 +131,12 @@ describe("buildReport: 確認中の内訳(#34)", () => {
 		expect(out).toContain("確認中(pending) 2件・その他 0件");
 	});
 });
+
+describe("buildReport: 対象の表示(#33)", () => {
+	it("シナリオの指定を出す", () => {
+		const r = (sc) =>
+			buildReport("202610221200", { a: null, c: null }, empty, sc);
+		expect(r("b")).toContain("対象: (b)のみ");
+		expect(r(undefined)).toContain("対象: (b)(d)");
+	});
+});

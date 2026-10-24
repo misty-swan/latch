@@ -42,9 +42,10 @@ const TARGET_MS = {
  * @param {string} runId
  * @param {{ a: object | null, c: object | null }} k6 シナリオごとのk6の結果(無ければnull)
  * @param {{ judge: object[], notify: object[], retrieval: object[], reflection?: object[] }} rows D1の行
+ * @param {"b" | "d"} [scenario] 集計の対象。省略は(b)(d)の両方
  * @returns {string}
  */
-export function buildReport(runId, k6, rows) {
+export function buildReport(runId, k6, rows, scenario) {
 	const m = readK6Metrics(k6);
 	const retrieval = retrievalFromRows(rows.retrieval);
 	const judge = splitJudgeRows(rows.judge);
@@ -66,6 +67,8 @@ export function buildReport(runId, k6, rows) {
 		.join("・");
 	return [
 		`## 負荷試験の集計(実行の印 ${runId})`,
+		"",
+		`- 対象: ${scenario ? `(${scenario})のみ` : "(b)(d)"}`,
 		"",
 		table,
 		"",
@@ -131,7 +134,7 @@ function main() {
 		retrieval: queryRows(sql.retrieval),
 		reflection: queryRows(sql.reflection),
 	};
-	console.log(buildReport(runId, k6, rows));
+	console.log(buildReport(runId, k6, rows, process.argv[3]));
 }
 
 if (

@@ -48,6 +48,14 @@ describe("buildQueries", () => {
 		}
 		expect(buildQueries("202610220442", "b").notify).not.toContain("-d%");
 		expect(() => buildQueries("202610220442", "x")).toThrow("シナリオ");
+		const all = buildQueries("202610220442");
+		for (const sql of Object.values(all)) {
+			expect(sql).toContain("load-202610220442-b%");
+			expect(sql).toContain("load-202610220442-d%");
+		}
+		const d = buildQueries("202610220442", "d").notify;
+		expect(d).toContain("load-202610220442-d%");
+		expect(d).not.toContain("-b%");
 	});
 	it("初期判定: intent_createdの作成時刻と、そのIntentを含むLATCHの提案の通知の最小のpush_attempted_at", () => {
 		const { judge } = buildQueries("202610220442");
