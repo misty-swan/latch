@@ -131,3 +131,55 @@ describe("loadJevGoldset", () => {
 		).toThrow(/m1/);
 	});
 });
+
+describe("期待値の形式", () => {
+	const withExpect = (expectYaml: string) =>
+		write(
+			`version: 1\napproved_by_owner: null\nitems:\n  - id: e1\n    raw_text: x\n    now: "2026-11-02T10:00:00+09:00"\n    tags: []\n    expect:\n${expectYaml}`,
+		);
+
+	it("topic_any・participants・budget・nullを読める", () => {
+		const g = loadParserGoldset(
+			withExpect(
+				"      topic_any: [ボドゲ, ボードゲーム]\n      participants: {min: 2, max: 4}\n      budget: null\n      time_start: null\n      category: null\n      geo_warning: true",
+			),
+		);
+		const e = g.items[0]?.expect;
+		expect(e?.topic_any).toEqual(["ボドゲ", "ボードゲーム"]);
+		expect(e?.participants).toEqual({ min: 2, max: 4 });
+		expect(e?.budget).toBeNull();
+		expect(e?.time_start).toBeNull();
+		expect(e?.category).toBeNull();
+	});
+
+	it("budgetの {min,max} と時刻付きtime_startを読める", () => {
+		const g = loadParserGoldset(
+			withExpect(
+				'      budget: {min: 3000, max: null}\n      time_start: "2026-11-07T19:00:00+09:00"\n      category: 食・飲み',
+			),
+		);
+		expect(g.items[0]?.expect.budget).toEqual({ min: 3000, max: null });
+	});
+
+	it("未知のキー・topicとtopic_anyの併用・includes_owner・不正なcategory・min>maxは例外", () => {
+		for (const bad of [
+			"      unknown: 1",
+			"      topic: a\n      topic_any: [b]",
+			"      participants: {min: 2, max: 4, includes_owner: true}",
+			"      category: 旅行",
+			"      participants: {min: 5, max: 2}",
+			"      budget: {min: 5000, max: 3000}",
+		]) {
+			expect(() => loadParserGoldset(withExpect(bad)), bad).toThrow(/e1/);
+		}
+	});
+});
+
+describe("Jevの検証", () => {
+	it("ヘッダ欠け・min>maxは例外", () => {
+		expect(() => loadJevGoldset(write("pairs: []\n"))).toThrow();
+		const f = (extra: string) =>
+			`version: 1\napproved_by_owner: null\npairs:\n  - id: q\n    match: yes\n    a:\n${fixture("      ", extra)}\n    b:\n${fixture("      ")}\n`;
+		expect(() => loadJevGoldset(write(f("participantsMin: 5")))).toThrow(/q/);
+	});
+});

@@ -3,6 +3,7 @@
  * zodで検証し、違反は件のidつきで例外にする。
  */
 import { readFileSync } from "node:fs";
+import { CATEGORIES } from "@latch/shared";
 import { parse } from "yaml";
 import { z } from "zod";
 
@@ -24,30 +25,44 @@ const approvedSchema = z.union([z.string().min(1), z.null()]);
 
 // ---- Parser ----
 
+/**
+ * 期待値。キーを書かない=採点しない。null=「出力にその値が無いこと」を期待する(time_start・budget・category)。
+ * - topic: 出力のtopicに含まれるべき主題語。topic_any: そのうちどれかが出力のtopicに含まれればよい(topicとは併用不可)
+ * - time_start: Date.parseによる時刻の同一性で比べる(文字列の一致ではない)
+ * - geo_warning: warnings.some(w => w.field === "geo") の真偽
+ */
 const parserExpectSchema = z
 	.object({
 		form: z.enum(["connection", "occasion"]).optional(),
 		topic: z.string().min(1).optional(),
 		topic_any: z.array(z.string().min(1)).min(1).optional(),
-		category: z.string().min(1).optional(),
-		time_start: isoDateTime.optional(),
+		category: z.enum(CATEGORIES).nullable().optional(),
+		time_start: isoDateTime.nullable().optional(),
 		participants: z
-			.object({
-				min: z.number().int(),
-				max: z.number().int(),
-				includes_owner: z.boolean().optional(),
-			})
+			.object({ min: z.number().int().min(1), max: z.number().int().min(1) })
+			.strict()
+			.refine((p) => p.min <= p.max, "participantsのmin<=maxではありません")
 			.optional(),
 		budget: z
 			.object({
 				min: z.number().int().nullable(),
 				max: z.number().int().nullable(),
 			})
+			.strict()
+			.refine(
+				(b) => b.min === null || b.max === null || b.min <= b.max,
+				"budgetのmin<=maxではありません",
+			)
+			.nullable()
 			.optional(),
 		alcohol_involved: z.boolean().optional(),
 		geo_warning: z.boolean().optional(),
 	})
-	.strict();
+	.strict()
+	.refine(
+		(e) => !(e.topic !== undefined && e.topic_any !== undefined),
+		"topicとtopic_anyは併用できません",
+	);
 
 const parserItemSchema = z
 	.object({
@@ -76,8 +91,8 @@ const intentFixtureSchema = z
 		topic: z.string().min(1),
 		softConstraints: z.array(z.string()),
 		negativeConstraints: z.array(z.string()),
-		participantsMin: z.number().int(),
-		participantsMax: z.number().int(),
+		participantsMin: z.number().int().min(1),
+		participantsMax: z.number().int().min(1),
 		participantsIncludesOwner: z.boolean(),
 		startsAt: dateFromIso.nullable().default(null),
 		endsAt: dateFromIso.nullable().default(null),
@@ -86,7 +101,18 @@ const intentFixtureSchema = z
 		/** 地域名の比較(設計書 §6)に使う任意の地域名 */
 		area: z.string().min(1).optional(),
 	})
-	.strict();
+	.strict()
+	.refine(
+		(f) => f.participantsMin <= f.participantsMax,
+		"participantsMin<=maxではありません",
+	)
+	.refine(
+		(f) =>
+			f.budgetMin === null ||
+			f.budgetMax === null ||
+			f.budgetMin <= f.budgetMax,
+		"budgetMin<=maxではありません",
+	);
 
 export type IntentFixture = z.infer<typeof intentFixtureSchema>;
 

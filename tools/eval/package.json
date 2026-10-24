@@ -6,6 +6,9 @@
 	"scripts": {
 		"test": "vitest run"
 	},
+	"dependencies": {
+		"@latch/shared": "workspace:*"
+	},
 	"devDependencies": {
 		"tsx": "4.23.15",
 		"vitest": "4.1.12",

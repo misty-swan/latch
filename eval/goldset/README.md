@@ -16,7 +16,7 @@ approved_by_owner: null   # 承認日(例 "2026-11-05")またはnull
 
 ## parser.yaml
 
-`items` に次の形を並べます。idは重複不可。`expect` には採点するフィールドだけを書きます(書かないものは採点しない)。
+`items` に次の形を並べます。idは重複不可。`expect` には採点するフィールドだけを書きます。**キーを書かない=採点しない**。`null` は「出力にその値が無いこと」を期待する意味です(`time_start`・`budget`・`category` のみ)。
 
 ```yaml
 items:
@@ -27,13 +27,13 @@ items:
     expect:
       form: connection                  # connection | occasion
       topic: ボードゲーム               # 出力のtopicに含まれるべき主題語
-      # topic_any: [ボドゲ, ボードゲーム]  # 表記ゆれを複数許す場合
-      # category: 食・飲み
-      # time_start: "2026-11-07T19:00:00+09:00"
-      # participants: { min: 2, max: 4, includes_owner: true }
-      # budget: { min: 3000, max: 5000 }
+      # topic_any: [ボドゲ, ボードゲーム]  # どれか1つが出力のtopicに含まれればよい(topicとは併用不可)
+      # category: 食・飲み               # CATEGORIES(@latch/shared)のいずれか。nullは「categoryなし」
+      # time_start: "2026-11-07T19:00:00+09:00"  # 時刻の同一性(Date.parseが等しい)で比べる。文字列一致ではない。nullは「時刻なし」
+      # participants: { min: 2, max: 4 }  # 1以上・min<=max
+      # budget: { min: 3000, max: 5000 }  # 片側はnull可。budget: null は「予算なし」
       alcohol_involved: false
-      # geo_warning: true                # 場所の言及でwarningsが出るべきか
+      # geo_warning: true                # warnings.some(w => w.field === "geo") の真偽
 ```
 
 ## jev-pairs.yaml
@@ -43,7 +43,7 @@ items:
 ```yaml
 pairs:
   - id: pair-001
-    match: yes                # yes | no(手で付けた正解)
+    match: "yes"              # "yes" | "no"(手で付けた正解・必ず引用符で囲む)
     a:
       form: occasion
       topic: ボードゲーム
