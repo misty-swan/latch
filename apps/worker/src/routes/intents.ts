@@ -334,7 +334,8 @@ intentRoutes.post("/parse", requireRegistered, async (c) => {
 		const r = validationFailed();
 		return c.json(r.body, r.status);
 	}
-	// Parserはstub(決定的・docs/07 §2)。real適用は精度ゲート(07 §6)合格後。
+	// ParserはLATCH_LLM_MODEで決まる(docs/07 §2)。既定stub(決定的)、realはAnthropic(07 §3)。
+	// realは精度ゲート(07 §6)の合格記録がある環境だけで使う(CIとstagingのデプロイの照合)。
 	// createLlmの引数型はwrangler生成の完全なEnv(worker-configuration.d.tsのambient型)。
 	// c.env(AppEnv.Bindings・src/env.tsのEnv)は同一実行時値の宣言部分型のため画一的に受ける
 	const parser =
