@@ -190,7 +190,7 @@ mainへの変更が入り、既存の試験(`ci`・`web-e2e`)が通ると、`dep
 LATCH_STAGING_URL=<stagingのURL> pnpm --filter worker deploy:staging
 ```
 
-(1〜4を順に実行する。最後に「OK: GET /healthz」「OK: POST /v1/dev/idp-token」「stagingへのデプロイが完了しました」と出れば成功。表示の中のURLは`<url伏せ>`に置き換わる)
+(最初に精度ゲートの照合(`pnpm --filter eval exec tsx check-gate.ts`・CIの単体試験と同じ)を行い、LATCH_LLM_MODE=realの環境があるのに採点の記録`eval/records/gate.json`が今のファイルと合わなければ「デプロイを止めました: 精度ゲートの照合が通りません。…」と出して何も変えずに止まる。通れば1〜4を順に実行する。最後に「OK: GET /healthz」「OK: POST /v1/dev/idp-token」「stagingへのデプロイが完了しました」と出れば成功。表示の中のURLは`<url伏せ>`に置き換わる)
 
 - トークンの登録前や、自動の工程が使えないときに使う。手元ではwranglerのログインを使う
 - 新しいマイグレーションが無いときは「No migrations to apply!」と出て先へ進む

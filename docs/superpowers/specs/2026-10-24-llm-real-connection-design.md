@@ -146,6 +146,7 @@ Claudeが下書きをコミットせずに置き、オーナーが読む(不自�
 - 正規化の関数のファイル
 - parser.yaml・jev-pairs.yaml
 - 固定したモデル名(Anthropic・TypeSafe)
+- 描いた値の指紋(最終レビューの修正で追加): 指示文は@latch/sharedの定数(カテゴリの一覧・字数の上限・人数の範囲・期限の日数)を埋め込むため、ファイルの指紋だけでは共有の定数の変更を拾えない。そこでモジュールをimportして、Parserの指示文(固定の時刻`2026-01-01T00:00:00+09:00`で描く)・Parserの出力スキーマ・Jevの問い・予備のJevの指示文と出力スキーマ・両方のモデル名・人数の注意表示(PARTICIPANTS_WARNING)・カテゴリの一覧・同じ時刻で計算した期限の選択肢を、キーを辞書順に並べたJSONにしてSHA-256を取り、記録の`fingerprintArtifacts`に持つ
 
 ### 3.3 合格基準(07 §6)
 
@@ -166,7 +167,9 @@ Claudeが下書きをコミットせずに置き、オーナーが読む(不自�
 `tools/eval`の単体試験(Nodeのvitest・`pnpm test`に含まれる)として置く(本物のAIは呼ばない)。workerの試験はminiflare上で動きリポジトリのファイルを読めないため、workerには置かない。
 
 - `wrangler.jsonc`のどれかの環境で`LATCH_LLM_MODE`が`real`なら、`eval/records/gate.json`が存在し、`passed: true`、ゴールドセットが承認済み、指紋が今のファイルと一致し、固定したモデル名が今の定数と同じであることを求める
-- 指紋の対象は9ファイル(指示文とモデル名の定数・realの呼び出し部品4つ・期限の計算・正規化の関数・ゴールドセット2つ。`tools/eval/lib/fingerprint.ts`)
+- 指紋の対象は11ファイル(指示文とモデル名の定数・realの呼び出し部品4つ・期限の計算2つ(`llm/expiry.ts`・`intents/expiry.ts`)・第一候補と予備のつなぎ方(`llm/mode.ts`)・正規化の関数・ゴールドセット2つ。`tools/eval/lib/fingerprint.ts`)と、描いた値の指紋(§3.2)
+- TypeSafeが応答した版(`models.typesafe_answered`)が固定した版`TYPESAFE_MODEL`の1つだけであることも求める
+- 手元からのstagingのデプロイ(`pnpm deploy:staging`)も、デプロイの前に同じ照合を行い、通らなければ止める
 - 指示文を1文字でも変えると指紋が変わり、採り直すまでCIが落ちる
 
 ## 4. Parser real

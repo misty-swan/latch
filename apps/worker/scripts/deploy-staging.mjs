@@ -1,5 +1,6 @@
 /**
  * stagingへの手元デプロイ(F8b設計 §2.2・CIと同じ手順)。どれかが失敗したらそこで止まる:
+ *   0. 精度ゲートの照合(tools/eval/check-gate.ts・CIの単体試験と同じcheckGate。LLM real接続の設計書 §3.4)
  *   1. VITE_DEV_AUTH=1 pnpm --filter web build(テスト用サインイン画面を含める)
  *   2. wrangler d1 migrations apply DB --env staging --remote
  *   3. wrangler deploy --env staging
@@ -30,6 +31,24 @@ function step(label, cmd, args, { cwd, env } = {}) {
 		console.error(`失敗: ${label}(終了コード${r.status ?? "不明"})`);
 		process.exit(r.status || 1);
 	}
+}
+
+// LATCH_LLM_MODE=realの環境があるのに採点の記録が今のファイルと合わなければ、何も変えずに止める
+const gate = spawnSync(
+	"pnpm",
+	["--filter", "eval", "exec", "tsx", "check-gate.ts"],
+	{
+		cwd: repoRoot,
+		encoding: "utf8",
+	},
+);
+process.stdout.write(gate.stdout ?? "");
+process.stderr.write(gate.stderr ?? "");
+if (gate.status !== 0) {
+	console.error(
+		"デプロイを止めました: 精度ゲートの照合が通りません。採点(pnpm eval:gate)をやり直し、記録が合格してからデプロイしてください",
+	);
+	process.exit(gate.status || 1);
 }
 
 step("webのビルド(VITE_DEV_AUTH=1)", "pnpm", ["--filter", "web", "build"], {
