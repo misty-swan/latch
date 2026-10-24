@@ -1,9 +1,9 @@
 /**
  * Web Pushの送信の判断と未送信行の拾い上げ(F7b設計 §5.1・§5.2・§5.6)。
- * 時刻はClockで受け取り、順番取りの時刻は行ごとにその時点で読む(docs/04 §4)。
+ * 時刻はClockで受け取る(docs/04 §4)。順番取りは1文の条件付きUPDATEで、全行を開始時刻で取る。
  */
 
-import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { Clock } from "../clock/clock";
 import {
@@ -24,8 +24,9 @@ const RETRY_INTERVAL_MS = 60_000;
 const MAX_AGE_MS = 10 * 60_000;
 const FLUSH_LIMIT = 100;
 /**
- * 1回のflushPushが新しい行の順番を取ってよい時間。順番取りから60秒で他の送出が
- * 同じ行を取り直せるため、1回の送出を60秒より十分短く収める(残りは後の送出が拾う)
+ * 1回のflushPushが行を判断してよい時間。順番は開始時刻で全行まとめて取るため、
+ * 期限を過ぎたら残りは判断せず、順番を取ったままpendingに残す。取りから60秒で他の送出が
+ * 同じ行を取り直せるので、1回の送出を60秒より十分短く収める(残りは後の送出・Cronの回収が拾う)
  */
 const FLUSH_BUDGET_MS = 45_000;
 
@@ -47,41 +48,6 @@ const settle = (db: Db, id: string, state: FinalState, claimedAt: Date) =>
 				eq(notifications.pushAttemptedAt, claimedAt),
 			),
 		);
-
-const dispatchOne = async (
-	db: Db,
-	sender: PushSender,
-	clock: Clock,
-	id: string,
-): Promise<void> => {
-	// 順番を取る: 1行を更新できたときだけ送る(直後の送信とCronの回収が同時に拾っても片方だけ)。
-	// 時刻はこの行の順番取りの時点で読む(前の行の送信に時間がかかっても古い時刻で取らない)
-	const claimedAt = clock.now();
-	const claimed = await db
-		.update(notifications)
-		.set({ pushAttemptedAt: claimedAt })
-		.where(
-			and(
-				eq(notifications.id, id),
-				eq(notifications.pushState, "pending"),
-				or(
-					isNull(notifications.pushAttemptedAt),
-					lte(
-						notifications.pushAttemptedAt,
-						new Date(claimedAt.getTime() - RETRY_INTERVAL_MS),
-					),
-				),
-			),
-		)
-		.returning({
-			userId: notifications.userId,
-			type: notifications.type,
-			latchId: notifications.latchId,
-		});
-	const n = claimed[0];
-	if (n === undefined) return;
-	await judgeClaimed(db, sender, clock, id, n, claimedAt);
-};
 
 type ClaimedRow = {
 	userId: string;
@@ -197,41 +163,6 @@ const judgeClaimed = async (
 		});
 	}
 };
-
-/**
- * 通知行ごとに順番を取り、判断(muted・購読なし・送信)して結果を書く(F7b設計 §5.1)。
- * deadlineMsを渡すと、その時刻(エポックミリ秒)以降は新しい行の順番を取らない。
- * 戻り値は順番取りを試みた行の数
- */
-export async function dispatchPush(
-	db: Db,
-	sender: PushSender,
-	clock: Clock,
-	ids: string[],
-	opts: { deadlineMs?: number } = {},
-): Promise<number> {
-	let tried = 0;
-	for (const id of ids) {
-		if (
-			opts.deadlineMs !== undefined &&
-			clock.now().getTime() >= opts.deadlineMs
-		) {
-			break;
-		}
-		tried += 1;
-		try {
-			await dispatchOne(db, sender, clock, id);
-		} catch (e) {
-			// 1行の失敗で他の行を止めない。pendingのまま回収に任せる
-			logger.error("push.failed", {
-				notification_id: id,
-				push_result: "error",
-				error_code: e instanceof Error ? e.name : "unknown",
-			});
-		}
-	}
-	return tried;
-}
 
 /**
  * 未送信のpendingの対象選びと順番取りを1文の条件付きUPDATEで行い(#39・D1への問い合わせを減らす)、

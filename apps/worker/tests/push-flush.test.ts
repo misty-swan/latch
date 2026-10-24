@@ -235,8 +235,11 @@ describe("変更系APIの後の送出", () => {
 		expect(await pushStateOf(b.id)).toEqual(["no_subscription"]);
 	});
 
-	it("要求の開始より前に作られた未送信は拾わず、開始以降に作られた通知は送る", async () => {
+	it("要求の開始より前に作られた未送信は拾わず、成立で作られた通知は送る", async () => {
 		const a = await registerUser("丙2");
+		const b = await registerUser("丙3");
+		const id = await seedProposed(a, b);
+		await subscribe(a.id);
 		const old = ulid();
 		await db.insert(notifications).values({
 			id: old,
@@ -249,20 +252,22 @@ describe("変更系APIの後の送出", () => {
 			pushState: "pending",
 			pushAttemptedAt: null,
 		});
-		const res = await fetchAndWait("POST", "/v1/push-subscriptions", a.token, {
-			endpoint: `https://fcm.googleapis.com/fcm/send/${ulid()}`,
-			keys: {
-				p256dh:
-					"BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM",
-				auth: "tBHItJI5svbpez7KI4CCXg",
-			},
-		});
-		expect([200, 201]).toContain(res.status);
+		for (const who of [a, b]) {
+			const res = await fetchAndWait(
+				"POST",
+				`/v1/latches/${id}/response`,
+				who.token,
+				{ response: "yes" },
+			);
+			expect(res.status).toBe(200);
+		}
 		const [row] = await db
 			.select({ s: notifications.pushState })
 			.from(notifications)
 			.where(eq(notifications.id, old));
 		expect(row?.s).toBe("pending");
+		expect(await pushStateOf(a.id)).toEqual(["sent"]);
+		expect(await pushStateOf(b.id)).toEqual(["no_subscription"]);
 	});
 
 	it("GETでは送出しない(pendingのまま)", async () => {

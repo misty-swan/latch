@@ -1,5 +1,5 @@
 /**
- * dispatchPush・flushPushの統合試験(F7b設計 §5.1・§5.2・§5.6)。
+ * flushPushの統合試験(F7b設計 §5.1・§5.2・§5.6)。
  * 行を直接INSERTで配置し、送り手は呼び出しを記録する試験実装を使う。
  */
 import { env } from "cloudflare:test";
@@ -17,7 +17,7 @@ import {
 } from "../src/db/schema";
 import type { Env as WorkerEnv } from "../src/env";
 import type { IntentRow } from "../src/pipeline/consumer";
-import { dispatchPush, flushPush } from "../src/push/dispatch";
+import { flushPush } from "../src/push/dispatch";
 import { PUSH_BODIES } from "../src/push/payload";
 import type {
 	PushSender,
@@ -214,12 +214,17 @@ const setup = async (
 	return { ua, ub, latchId, na, nb };
 };
 
-describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
+describe("送出の判断(F7b設計 §5.1・§5.2・flushPush経由)", () => {
+	// 件数を厳密に確かめるため、先行の試験が残したpending行を消す
+	beforeEach(async () => {
+		await db.delete(notifications);
+	});
+
 	it("①active購読1件へ送り、sent・last_success_at更新・汎用文のペイロード", async () => {
 		const { ua, na } = await setup();
 		const ep = await insertSub(ua);
 		const { sender, calls } = recorder();
-		await dispatchPush(db, sender, CLOCK, [na]);
+		await flushPush(db, sender, CLOCK, { minAgeMs: 0 });
 		expect((await notifOf(na)).pushState).toBe("sent");
 		expect((await subOf(ep)).lastSuccessAt?.getTime()).toBe(NOW.getTime());
 		expect(calls).toHaveLength(1);
@@ -236,10 +241,10 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		const ua = await insertUser();
 		const ia = await insertIntent(ua);
 		const latchId = await insertLatch([ia]);
-		const n = await insertNotif(ua, latchId, { type: "matched" });
+		await insertNotif(ua, latchId, { type: "matched" });
 		await insertSub(ua);
 		const { sender, calls } = recorder();
-		await dispatchPush(db, sender, CLOCK, [n]);
+		await flushPush(db, sender, CLOCK, { minAgeMs: 0 });
 		expect(calls[0].opts.ttl).toBe(86_400);
 		expect(JSON.parse(calls[0].payload).type).toBe("matched");
 	});
@@ -249,7 +254,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		await insertSub(ua);
 		await insertSub(ub);
 		const { sender, calls } = recorder();
-		await dispatchPush(db, sender, CLOCK, [na, nb]);
+		await flushPush(db, sender, CLOCK, { minAgeMs: 0 });
 		expect((await notifOf(na)).pushState).toBe("muted");
 		expect((await notifOf(nb)).pushState).toBe("sent");
 		expect(calls).toHaveLength(1);
@@ -258,7 +263,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 	it("③購読なしはno_subscription", async () => {
 		const { na } = await setup();
 		const { sender, calls } = recorder();
-		await dispatchPush(db, sender, CLOCK, [na]);
+		await flushPush(db, sender, CLOCK, { minAgeMs: 0 });
 		expect((await notifOf(na)).pushState).toBe("no_subscription");
 		expect(calls).toHaveLength(0);
 	});
@@ -267,7 +272,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		const { ua, na } = await setup();
 		await insertSub(ua, "failed");
 		const { sender, calls } = recorder();
-		await dispatchPush(db, sender, CLOCK, [na]);
+		await flushPush(db, sender, CLOCK, { minAgeMs: 0 });
 		expect((await notifOf(na)).pushState).toBe("no_subscription");
 		expect(calls).toHaveLength(0);
 	});
@@ -276,7 +281,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		const { ua, na } = await setup();
 		await insertSub(ua);
 		const { sender } = recorder(() => ({ kind: "retry", status: 503 }));
-		await dispatchPush(db, sender, CLOCK, [na]);
+		await flushPush(db, sender, CLOCK, { minAgeMs: 0 });
 		const row = await notifOf(na);
 		expect(row.pushState).toBe("pending");
 		expect(row.pushAttemptedAt?.getTime()).toBe(NOW.getTime());
@@ -289,7 +294,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		const { sender } = recorder((t) =>
 			t.endpoint === gone ? { kind: "gone" } : { kind: "ok" },
 		);
-		await dispatchPush(db, sender, CLOCK, [na]);
+		await flushPush(db, sender, CLOCK, { minAgeMs: 0 });
 		expect((await notifOf(na)).pushState).toBe("sent");
 		expect((await subOf(gone)).status).toBe("failed");
 		expect((await subOf(ok)).status).toBe("active");
@@ -299,7 +304,7 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		const { ua, na } = await setup();
 		const ep = await insertSub(ua);
 		const { sender } = recorder(() => ({ kind: "rejected", status: 400 }));
-		await dispatchPush(db, sender, CLOCK, [na]);
+		await flushPush(db, sender, CLOCK, { minAgeMs: 0 });
 		expect((await notifOf(na)).pushState).toBe("failed");
 		expect((await subOf(ep)).status).toBe("active");
 	});
@@ -308,17 +313,17 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 		const { ua, na } = await setup();
 		await insertSub(ua);
 		const { sender } = recorder(() => ({ kind: "gone" }));
-		await dispatchPush(db, sender, CLOCK, [na]);
+		await flushPush(db, sender, CLOCK, { minAgeMs: 0 });
 		expect((await notifOf(na)).pushState).toBe("failed");
 	});
 
-	it("⑧同じidの並行dispatchPushは送り手を1回だけ呼ぶ", async () => {
-		const { ua, na } = await setup();
+	it("⑧並行flushPushは送り手を1回だけ呼ぶ", async () => {
+		const { ua } = await setup();
 		await insertSub(ua);
 		const { sender, calls } = recorder();
 		await Promise.all([
-			dispatchPush(db, sender, CLOCK, [na]),
-			dispatchPush(db, sender, CLOCK, [na]),
+			flushPush(db, sender, CLOCK, { minAgeMs: 0 }),
+			flushPush(db, sender, CLOCK, { minAgeMs: 0 }),
 		]);
 		expect(calls).toHaveLength(1);
 	});
@@ -330,9 +335,10 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 			pushState: "none",
 		});
 		const { sender, calls } = recorder();
-		await dispatchPush(db, sender, CLOCK, [n]);
+		await flushPush(db, sender, CLOCK, { minAgeMs: 0 });
 		expect((await notifOf(n)).pushState).toBe("none");
-		expect(calls).toHaveLength(0);
+		// 送ったのはsetupのpending 1件だけ(noneの行は送らない)
+		expect(calls).toHaveLength(1);
 	});
 
 	it("遅れて戻った先行の試行は、順番を取り直した後続の試行の結果を上書きしない", async () => {
@@ -346,17 +352,17 @@ describe("dispatchPush(F7b設計 §5.1・§5.2)", () => {
 			async send() {
 				if (!nested) {
 					nested = true;
-					await dispatchPush(
+					await flushPush(
 						db,
 						{ send: async () => ({ kind: "retry", status: 503 }) },
 						laterClock,
-						[na],
+						{ minAgeMs: 0 },
 					);
 				}
 				return { kind: "rejected", status: 400 };
 			},
 		};
-		await dispatchPush(db, sender, CLOCK, [na]);
+		await flushPush(db, sender, CLOCK, { minAgeMs: 0 });
 		const row = await notifOf(na);
 		expect(row.pushState).toBe("pending");
 		expect(row.pushAttemptedAt?.getTime()).toBe(later(61 * SEC).getTime());

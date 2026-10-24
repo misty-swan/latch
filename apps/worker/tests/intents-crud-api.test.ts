@@ -1636,6 +1636,34 @@ describe("DELETE・PATCH /v1/intents/{id}: 進行中の提案の取り消し(doc
 		]);
 	});
 
+	it("削除: 応答の後の送出は、要求より前に作られた別の未送信を拾わない(#39)", async () => {
+		const { accessToken, mine, peer } = await setup("del-after-old");
+		await insertLatchOf(mine, peer, "proposed");
+		const oldId = ulid();
+		await db.insert(notifications).values({
+			id: oldId,
+			userId: peer.userId,
+			type: "proposal",
+			latchId: null,
+			readAt: null,
+			createdAt: new Date(Date.now() - 5000),
+			intentId: null,
+			pushState: "pending",
+			pushAttemptedAt: null,
+		});
+		const res = await fetchAndWait(
+			"DELETE",
+			`/v1/intents/${mine.intentId}`,
+			accessToken,
+		);
+		expect(res.status).toBe(204);
+		const [row] = await db
+			.select({ s: notifications.pushState })
+			.from(notifications)
+			.where(eq(notifications.id, oldId));
+		expect(row?.s).toBe("pending");
+	});
+
 	it("削除: 応答の後の処理が例外になっても204のまま、intents.delete.after_failedのwarnを出す(#27)", async () => {
 		const { accessToken, mine, peer } = await setup("del-after-fail");
 		const latchId = await insertLatchOf(mine, peer, "proposed");
