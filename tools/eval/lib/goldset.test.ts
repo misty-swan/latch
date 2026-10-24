@@ -161,6 +161,24 @@ describe("期待値の形式", () => {
 		expect(g.items[0]?.expect.budget).toEqual({ min: 3000, max: null });
 	});
 
+	it("topic_noneを読める", () => {
+		const g = loadParserGoldset(
+			withExpect("      topic_any: [カレー]\n      topic_none: [渋谷, 新宿]"),
+		);
+		expect(g.items[0]?.expect.topic_none).toEqual(["渋谷", "新宿"]);
+	});
+
+	it("topic_noneの語がtopic_any・topicの語を含む・含まれる組と、topic_noneだけの項目は例外", () => {
+		for (const bad of [
+			"      topic_any: [渋谷系の音楽]\n      topic_none: [渋谷]",
+			"      topic_any: [渋谷]\n      topic_none: [渋谷駅]",
+			"      topic: 渋谷\n      topic_none: [渋谷]",
+			"      topic_none: [渋谷]",
+		]) {
+			expect(() => loadParserGoldset(withExpect(bad)), bad).toThrow(/e1/);
+		}
+	});
+
 	it("未知のキー・topicとtopic_anyの併用・includes_owner・不正なcategory・min>maxは例外", () => {
 		for (const bad of [
 			"      unknown: 1",

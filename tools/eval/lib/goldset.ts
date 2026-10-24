@@ -28,6 +28,8 @@ const approvedSchema = z.union([z.string().min(1), z.null()]);
 /**
  * 期待値。キーを書かない=採点しない。null=「出力にその値が無いこと」を期待する(time_start・budget・category)。
  * - topic: 出力のtopicに含まれるべき主題語。topic_any: そのうちどれかが出力のtopicに含まれればよい(topicとは併用不可)
+ * - topic_none: 出力のtopicに含まれてはならない語(地名・店名・駅名・施設名。#31)。topic・topic_anyのどちらかが必須で、
+ *   同じ項目のtopic・topic_anyの語と互いに含み合ってはならない(「渋谷系」と「渋谷」のような組は誤判定になるため)
  * - time_start: Date.parseによる時刻の同一性で比べる(文字列の一致ではない)
  * - geo_warning: warnings.some(w => w.field === "geo") の真偽
  */
@@ -36,6 +38,7 @@ const parserExpectSchema = z
 		form: z.enum(["connection", "occasion"]).optional(),
 		topic: z.string().min(1).optional(),
 		topic_any: z.array(z.string().min(1)).min(1).optional(),
+		topic_none: z.array(z.string().min(1)).min(1).optional(),
 		category: z.enum(CATEGORIES).nullable().optional(),
 		time_start: isoDateTime.nullable().optional(),
 		participants: z
@@ -62,7 +65,21 @@ const parserExpectSchema = z
 	.refine(
 		(e) => !(e.topic !== undefined && e.topic_any !== undefined),
 		"topicとtopic_anyは併用できません",
-	);
+	)
+	.refine(
+		(e) =>
+			e.topic_none === undefined ||
+			e.topic !== undefined ||
+			e.topic_any !== undefined,
+		"topic_noneにはtopicまたはtopic_anyが必要です",
+	)
+	.refine((e) => {
+		const wanted = e.topic !== undefined ? [e.topic] : (e.topic_any ?? []);
+		const n = (s: string) => s.normalize("NFKC").toLowerCase();
+		return !(e.topic_none ?? []).some((none) =>
+			wanted.some((w) => n(w).includes(n(none)) || n(none).includes(n(w))),
+		);
+	}, "topic_noneの語とtopic/topic_anyの語が互いを含んでいます");
 
 const parserItemSchema = z
 	.object({

@@ -1,5 +1,5 @@
 # Parserのゴールドセット(オーナー承認済み 2026-10-24)。形式は README.md
-version: 1
+version: 2
 approved_by_owner: "2026-10-24"
 items:
   - id: conn-001
@@ -456,6 +456,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["飲み"]
+      topic_none: ["渋谷"]
       category: "食・飲み"
       time_start: "2026-11-07T19:00:00+09:00"
       participants: { min: 2, max: 3 }
@@ -478,7 +479,8 @@ items:
     tags: [occasion]
     expect:
       form: "occasion"
-      topic_any: ["高尾山", "登山", "山"]
+      topic_any: ["登山", "山登り", "ハイキング"]
+      topic_none: ["高尾山"]
       time_start: "2026-11-08T09:00:00+09:00"
       alcohol_involved: false
       geo_warning: true
@@ -500,6 +502,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["焼き鳥"]
+      topic_none: ["新宿"]
       category: "食・飲み"
       time_start: "2026-11-06T19:30:00+09:00"
       budget: { min: 4000, max: 4000 }
@@ -511,6 +514,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["テニス"]
+      topic_none: ["神宮外苑"]
       category: "スポーツ・運動"
       time_start: "2026-11-14T13:00:00+09:00"
       alcohol_involved: false
@@ -539,7 +543,8 @@ items:
     tags: [occasion]
     expect:
       form: "occasion"
-      topic_any: ["ラン", "皇居"]
+      topic_any: ["ラン"]
+      topic_none: ["皇居"]
       category: "スポーツ・運動"
       time_start: "2026-11-09T07:00:00+09:00"
       alcohol_involved: false
@@ -592,6 +597,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["ピクニック"]
+      topic_none: ["代々木公園"]
       time_start: "2026-11-14T10:00:00+09:00"
       alcohol_involved: false
       geo_warning: true
@@ -602,6 +608,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["居酒屋", "飲み", "語"]
+      topic_none: ["中目黒"]
       category: "食・飲み"
       time_start: "2026-11-15T18:00:00+09:00"
       budget: { min: 5000, max: 5000 }
@@ -632,6 +639,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["バードウォッチング", "野鳥"]
+      topic_none: ["多摩川"]
       time_start: "2026-11-15T08:00:00+09:00"
       alcohol_involved: false
       geo_warning: true
@@ -661,6 +669,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["スイーツ", "食べ歩き"]
+      topic_none: ["吉祥寺"]
       category: "食・飲み"
       time_start: "2026-12-05T15:00:00+09:00"
       alcohol_involved: false
@@ -691,6 +700,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["クリスマスマーケット", "クリスマス"]
+      topic_none: ["横浜", "赤レンガ"]
       time_start: "2026-12-24T19:00:00+09:00"
       geo_warning: true
   - id: occ-025
@@ -763,6 +773,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["串カツ", "ビール"]
+      topic_none: ["大阪", "梅田"]
       category: "食・飲み"
       time_start: "2026-11-20T19:00:00+09:00"
       alcohol_involved: true
@@ -773,7 +784,8 @@ items:
     tags: [occasion]
     expect:
       form: "occasion"
-      topic_any: ["寺", "鎌倉"]
+      topic_any: ["寺"]
+      topic_none: ["鎌倉"]
       time_start: "2026-11-21T10:00:00+09:00"
       alcohol_involved: false
       geo_warning: true
@@ -794,6 +806,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["ボドゲ", "ボードゲーム"]
+      topic_none: ["渋谷"]
       category: "趣味・娯楽"
       time_start: "2026-11-21T18:00:00+09:00"
       alcohol_involved: false
@@ -815,6 +828,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["釣り"]
+      topic_none: ["江ノ島"]
       time_start: "2026-11-29T07:00:00+09:00"
       alcohol_involved: false
       geo_warning: true
@@ -825,6 +839,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["勉強", "資格"]
+      topic_none: ["スタバ"]
       time_start: "2026-11-21T15:00:00+09:00"
       alcohol_involved: false
       geo_warning: true
@@ -845,6 +860,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["ヨガ"]
+      topic_none: ["代々木公園"]
       time_start: "2026-11-22T10:00:00+09:00"
       budget: { min: 1000, max: 1000 }
       alcohol_involved: false
@@ -867,6 +883,7 @@ items:
     expect:
       form: "occasion"
       topic_any: ["飲み"]
+      topic_none: ["新橋"]
       category: "食・飲み"
       time_start: "2026-11-20T18:00:00+09:00"
       participants: { min: 3, max: 4 }
@@ -1042,7 +1059,8 @@ items:
     tags: [boundary, form]
     expect:
       form: "connection"
-      topic_any: ["富士山", "登山"]
+      topic_any: ["登山"]
+      topic_none: ["富士山"]
       time_start: null
       alcohol_involved: false
       geo_warning: true
@@ -1069,6 +1087,7 @@ items:
     expect:
       form: "connection"
       topic_any: ["古着"]
+      topic_none: ["下北沢"]
       alcohol_involved: false
       geo_warning: true
   - id: bnd-021
@@ -1086,6 +1105,7 @@ items:
     expect:
       form: "connection"
       topic_any: ["ごはん", "食事", "夕食", "ディナー", "夜ごはん", "飯"]
+      topic_none: ["横浜駅", "横浜"]
       alcohol_involved: false
       geo_warning: true
   - id: bnd-023
@@ -1095,6 +1115,7 @@ items:
     expect:
       form: "connection"
       topic_any: ["カフェ"]
+      topic_none: ["梅田"]
       alcohol_involved: false
       geo_warning: true
   - id: bnd-024

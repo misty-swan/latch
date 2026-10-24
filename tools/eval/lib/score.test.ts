@@ -56,6 +56,19 @@ describe("scoreParser", () => {
 		expect(s.failures).toEqual([{ id: "b", field: "form" }]);
 	});
 
+	it("topic_noneの語を含むtopicは不一致・含まなければ一致", () => {
+		const items = [
+			item("a", { topic_any: ["カレー"], topic_none: ["渋谷"] }),
+			item("b", { topic_any: ["カレー"], topic_none: ["渋谷"] }),
+		];
+		const s = scoreParser(items, [
+			ok({ topic: "渋谷でカレー" }),
+			ok({ topic: "カレーを食べに行く" }),
+		]);
+		expect(s.topic).toEqual({ correct: 1, n: 2, rate: 1 / 2 });
+		expect(s.failures).toEqual([{ id: "a", field: "topic" }]);
+	});
+
 	it("topic_anyはどれか1つが含まれれば一致・英字は大小を区別しない", () => {
 		const items = [
 			item("a", { topic_any: ["ボドゲ", "ボードゲーム"] }),

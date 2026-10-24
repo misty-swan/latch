@@ -95,7 +95,7 @@ describe("runGate", () => {
 			typesafe_answered: ["jev-1.13.0"],
 		});
 		expect(record.goldset).toEqual({
-			parserVersion: 1,
+			parserVersion: 2,
 			jevVersion: 1,
 			approvedByOwner: "2026-10-24",
 		});

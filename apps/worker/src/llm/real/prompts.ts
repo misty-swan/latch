@@ -37,7 +37,8 @@ export const PARSER_SYSTEM_PROMPT = (nowJst: string): string =>
 - 迷うときは"connection"にします(利用者が確認画面で必ず確かめて切り替えます)
 
 # topic
-- したいことの主題を短い日本語で書きます(${LIMITS.TOPIC_MAX_LENGTH}字以内)。例: 「ボードゲーム」「渋谷で軽く飲み」
+- したいことの主題を短い日本語で書きます(${LIMITS.TOPIC_MAX_LENGTH}字以内)。例: 「ボードゲーム」「軽く飲み」
+- 地名・店名・駅名・施設名はtopicに入れません(「渋谷で軽く飲み」ではなく「軽く飲み」)。場所の言及はwarningsの {"field":"geo"} で知らせます
 - 日時・人数・予算は含めません
 
 # category

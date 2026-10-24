@@ -60,7 +60,11 @@ const norm = (s: string): string => s.normalize("NFKC").toLowerCase();
 const topicMatches = (expect: ParserItem["expect"], topic: string): boolean => {
 	const words =
 		expect.topic !== undefined ? [expect.topic] : (expect.topic_any ?? []);
-	return words.some((w) => norm(topic).includes(norm(w)));
+	const t = norm(topic);
+	return (
+		words.some((w) => t.includes(norm(w))) &&
+		!(expect.topic_none ?? []).some((w) => t.includes(norm(w)))
+	);
 };
 
 /** 項目ごとの一致の判定。期待値のキーが無い項目はundefined(採点しない) */
