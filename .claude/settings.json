@@ -1,5 +1,6 @@
 {
   "enabledPlugins": {
-    "superpowers@anthropic-plugin-directory": true
+    "superpowers@anthropic-plugin-directory": true,
+    "context7@anthropic-plugin-directory": true
   }
 }
