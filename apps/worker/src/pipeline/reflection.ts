@@ -24,6 +24,7 @@ import type { ConsumeOutcome } from "./consumer";
 import { errorCodeOf } from "./errors";
 import { evaluateIntent, stage2Payload } from "./evaluate";
 import { sendToMatchQueue } from "./events";
+import type { MetricsBudget } from "./metrics-budget";
 
 const logger = createLogger();
 
@@ -89,6 +90,7 @@ export const consumeReflectionEvent = async (
 	env: Env,
 	event: MatchEventRow,
 	clock: Clock,
+	metricsBudget?: MetricsBudget,
 ): Promise<ConsumeOutcome> => {
 	const db = drizzle(env.DB);
 	const [intent] = await db
@@ -155,6 +157,7 @@ export const consumeReflectionEvent = async (
 			vector: stored.values,
 			ignoreSuppression: true,
 			origin: "vector_reflection",
+			metricsBudget,
 		});
 	} catch (error) {
 		logger.warn("pipeline.reflection.failed", {

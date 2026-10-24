@@ -9,6 +9,7 @@ import type { Env } from "../env";
 import type { JevHeldReason } from "../jev/runner";
 import { createLogger } from "../logging/logger";
 import { errorCodeOf } from "./errors";
+import type { MetricsBudget } from "./metrics-budget";
 
 const logger = createLogger();
 
@@ -89,8 +90,16 @@ export interface Stage2MetricsData {
  * 失敗)の順(9個・F4b設計 §5)。
  * 書き込みの例外(上限超過等)は評価へ波及させず、warnログだけを残す(#24)
  */
-export const writeStage2Metrics = (env: Env, data: Stage2MetricsData): void => {
+export const writeStage2Metrics = (
+	env: Env,
+	data: Stage2MetricsData,
+	budget: MetricsBudget,
+): void => {
 	if (env.PIPELINE_AX === undefined) {
+		return;
+	}
+	// 2件は両方書くか両方書かない(1回の実行の書き込みの上限・#28)
+	if (!budget.take(2)) {
 		return;
 	}
 	try {

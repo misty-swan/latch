@@ -220,6 +220,9 @@ export const BUDGET_MAX = 9_999_999 as const;
  * (MS=ミリ秒・SECONDS=秒・DAYS=日)。
  */
 export const PIPELINE = {
+	// 1回の実行(キューのバッチ1つ・毎分Cron1回)で書く計測のdata pointの上限。
+	// Workersの1回の呼び出しのAnalytics Engineの書き込みは250件までのため手前に置く(#28)
+	METRICS_WRITES_PER_INVOCATION: 240,
 	// Layer 2 Candidate Retrievalの取り出し幅(topK)。docs/06 §3
 	TOP_K_RETRIEVAL: 100,
 	// Layer 1通過後の次層への引き渡し上限(K_v)。docs/06 §3

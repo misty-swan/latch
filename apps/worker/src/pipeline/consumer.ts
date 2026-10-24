@@ -33,6 +33,7 @@ import { createVectorStore } from "../vectorstore";
 import { errorCodeOf } from "./errors";
 import { evaluateIntent, stage2Payload } from "./evaluate";
 import { emitMatchEvent, recordMatchEvent, sendToMatchQueue } from "./events";
+import { createMetricsBudget, type MetricsBudget } from "./metrics-budget";
 import { buildNormalizedText } from "./normalize";
 import { consumeReflectionEvent, type MatchEventRow } from "./reflection";
 
@@ -346,6 +347,7 @@ const runStage2 = async (
 	env: Env,
 	event: MatchEventRow,
 	clock: Clock,
+	metricsBudget: MetricsBudget,
 	vector?: number[],
 ): Promise<void> => {
 	const [current] = await drizzle(env.DB)
@@ -360,6 +362,7 @@ const runStage2 = async (
 	const result = await evaluateIntent(env, event.sourceIntentId, clock, {
 		vector,
 		origin: "embedding_completed",
+		metricsBudget,
 	});
 	await markProcessed(
 		env,
@@ -381,6 +384,7 @@ const continueStage2 = async (
 	completedEventId: string,
 	intentId: string,
 	clock: Clock,
+	metricsBudget: MetricsBudget,
 	vector: number[],
 ): Promise<void> => {
 	try {
@@ -392,7 +396,7 @@ const continueStage2 = async (
 		if (completed === undefined || completed.status !== "pending") {
 			return;
 		}
-		await runStage2(env, completed, clock, vector);
+		await runStage2(env, completed, clock, metricsBudget, vector);
 	} catch (error) {
 		logger.warn("pipeline.stage2.failed", {
 			error_code: errorCodeOf(error),
@@ -421,6 +425,7 @@ const consumeEvent = async (
 	eventId: string,
 	clock: Clock,
 	message: { vector?: number[]; attempts: number },
+	metricsBudget: MetricsBudget,
 ): Promise<ConsumeOutcome> => {
 	const { vector, attempts } = message;
 	const db = drizzle(env.DB);
@@ -439,13 +444,13 @@ const consumeEvent = async (
 	}
 	// vector_reflection(反映確認・不具合の修正工程の設計 §2.3)
 	if (event.eventType === "vector_reflection") {
-		return consumeReflectionEvent(env, event, clock);
+		return consumeReflectionEvent(env, event, clock, metricsBudget);
 	}
 	// embedding_completed(第2段・docs/06 §2〜§3): 第1段の続きの評価が失敗して送られた
 	// もの・投入だけのやり直しで送られたもの。本体はrunStage2(第1段の続きと共用)
 	if (event.eventType === "embedding_completed") {
 		try {
-			await runStage2(env, event, clock, vector);
+			await runStage2(env, event, clock, metricsBudget, vector);
 		} catch (error) {
 			// 第2段の失敗は第1段のログと分けて記録し、起点イベントをfailedへ倒す
 			// (再試行なし・06 §5。Cronの未評価回収が拾う)
@@ -568,6 +573,7 @@ const consumeEvent = async (
 				result.completedEventId,
 				current.id,
 				clock,
+				metricsBudget,
 				result.vector,
 			);
 		}
@@ -625,6 +631,8 @@ const handleMainQueueBatch = async (
 	ctx: ExecutionContext,
 	clock: Clock,
 ): Promise<void> => {
+	// このバッチの計測の書き込みの残り(バッチごとに作る・同時に動く別のバッチと共有しない・#28)
+	const metricsBudget = createMetricsBudget();
 	for (const message of batch.messages) {
 		const eventId = message.body?.event_id;
 		// 本体が不正なメッセージは評価できずackで破棄する
@@ -642,10 +650,16 @@ const handleMainQueueBatch = async (
 				body.vector.every((v) => typeof v === "number")
 					? body.vector
 					: undefined;
-			const outcome = await consumeEvent(env, eventId, clock, {
-				vector,
-				attempts: message.attempts,
-			});
+			const outcome = await consumeEvent(
+				env,
+				eventId,
+				clock,
+				{
+					vector,
+					attempts: message.attempts,
+				},
+				metricsBudget,
+			);
 			if (outcome !== undefined) {
 				message.retry({ delaySeconds: outcome.retryDelaySeconds });
 			}

@@ -43,6 +43,7 @@ import { fetchL1Data, layer1Judge, pairKey } from "./layer1";
 import { type L4Candidate, runLayer4 } from "./layer4";
 import { type L5Item, latchScore, pickProposals, recheckHard } from "./layer5";
 import { type EvaluateOrigin, writeStage2Metrics } from "./metrics";
+import { createMetricsBudget, type MetricsBudget } from "./metrics-budget";
 
 const logger = createLogger();
 
@@ -134,6 +135,8 @@ export interface EvaluateOptions {
 	ignoreSuppression?: boolean;
 	/** 評価の起点(計測の blobs に載せる・既定 cron_other) */
 	origin?: EvaluateOrigin;
+	/** 1回の実行の計測の書き込みの残り(省略時はこの呼び出しだけの新しい残り・#28) */
+	metricsBudget?: MetricsBudget;
 }
 
 /** スコア降順・同点はULID昇順(docs/06 §3の同点の規律)の比較関数 */
@@ -560,12 +563,16 @@ export const evaluateIntent = async (
 	};
 	// 計測(Analytics Engine+ログ・docs/06 §7)。Cron呼び出しはこの計測のみを受け、
 	// イベントpayloadへの反映は呼び出し側(consumer.ts)が行う
-	writeStage2Metrics(env, {
-		...result,
-		latencyMs,
-		origin: options?.origin ?? "cron_other",
-		joinKey: crypto.randomUUID(),
-	});
+	writeStage2Metrics(
+		env,
+		{
+			...result,
+			latencyMs,
+			origin: options?.origin ?? "cron_other",
+			joinKey: crypto.randomUUID(),
+		},
+		options?.metricsBudget ?? createMetricsBudget(),
+	);
 	logger.info("pipeline.stage2.completed", {
 		intent_id: intentId,
 		count: result.l3Pass,

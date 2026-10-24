@@ -17,7 +17,7 @@ import {
 	getQueueResult,
 } from "cloudflare:test";
 import { LATCH, LIMITS, type MatchQueueMessage, PIPELINE } from "@latch/shared";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, isNotNull, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -540,6 +540,42 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 		expect((await rowOf(orphan.id))?.lastEvaluatedAt).toEqual(FIXED_NOW);
 		expect((await rowOf(atGrace.id))?.lastEvaluatedAt).toEqual(FIXED_NOW);
 		expect((await rowOf(inGrace.id))?.lastEvaluatedAt).toBeNull();
+	});
+
+	it("計測の残り(#28): 1回の実行で評価が121件以上あっても、writeDataPointは240回を超えない", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const total = 130;
+		for (let i = 0; i < total; i += 1) {
+			const row = intentFixture({
+				id: ulid(),
+				userId,
+				topic: `計測の残りの試験 ${i}`,
+				embeddedAt: new Date(BASE - 6 * MIN),
+			});
+			await insertIntentRow(row);
+			await upsertVector(row);
+		}
+		const writeDataPoint = vi.fn();
+		const envWithAx = {
+			...testEnv,
+			PIPELINE_AX: { writeDataPoint },
+		} as unknown as WorkerEnv;
+
+		await runScheduledPipeline(envWithAx, directClock);
+
+		// CRON_BATCH_LIMIT内で全件が評価され(計測が足りなくても評価は止めない)、書き込みは上限の手前で止まる
+		const evaluated = await db
+			.select({ id: intents.id })
+			.from(intents)
+			.where(
+				and(eq(intents.userId, userId), isNotNull(intents.lastEvaluatedAt)),
+			);
+		expect(evaluated).toHaveLength(total);
+		expect(writeDataPoint.mock.calls.length).toBeLessThanOrEqual(
+			PIPELINE.METRICS_WRITES_PER_INVOCATION,
+		);
+		expect(writeDataPoint.mock.calls.length).toBeGreaterThan(0);
 	});
 
 	it("遅延再評価: つながりを10分経過後に1回だけ再評価する(2度目は実行しない)", async () => {

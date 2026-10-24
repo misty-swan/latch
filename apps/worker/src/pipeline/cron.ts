@@ -64,6 +64,7 @@ import type { StoredVector } from "../vectorstore/types";
 import { type IntentRow, runEmbeddingStage } from "./consumer";
 import { errorCodeOf } from "./errors";
 import { evaluateIntent } from "./evaluate";
+import { createMetricsBudget, type MetricsBudget } from "./metrics-budget";
 
 const logger = createLogger();
 
@@ -91,9 +92,10 @@ const evaluateSafely = async (
 	env: Env,
 	intentId: string,
 	clock: Clock,
+	metricsBudget: MetricsBudget,
 ): Promise<boolean> => {
 	try {
-		await evaluateIntent(env, intentId, clock);
+		await evaluateIntent(env, intentId, clock, { metricsBudget });
 		return true;
 	} catch (error) {
 		logger.warn("cron.item.failed", {
@@ -113,7 +115,11 @@ const evaluateSafely = async (
  * ようにする。last_evaluated_at<バケット開始はstarts_atごとに整数演算(剰余)で
  * 算出する。期限切れ済み(expires_at≤now)は(c)のexpired化に委ねる
  */
-const runBucketSweep = async (env: Env, clock: Clock): Promise<void> => {
+const runBucketSweep = async (
+	env: Env,
+	clock: Clock,
+	metricsBudget: MetricsBudget,
+): Promise<void> => {
 	const db = drizzle(env.DB);
 	const nowMs = clock.now().getTime();
 	const nextBucketStart = new Date(
@@ -142,7 +148,7 @@ const runBucketSweep = async (env: Env, clock: Clock): Promise<void> => {
 		)
 		.limit(PIPELINE.CRON_BATCH_LIMIT);
 	for (const row of rows) {
-		const ok = await evaluateSafely(env, row.id, clock);
+		const ok = await evaluateSafely(env, row.id, clock, metricsBudget);
 		if (ok) {
 			logger.info("cron.bucket.evaluated", { intent_id: row.id });
 		}
@@ -156,7 +162,11 @@ const runBucketSweep = async (env: Env, clock: Clock): Promise<void> => {
  * 期限切れ済みは(c)に委ねる。つながりIntentはbucket・catch-upの対象外
  * (docs/06 §2「catch-up・bucketは機会Intentのみ」)
  */
-const runCatchUpSweep = async (env: Env, clock: Clock): Promise<void> => {
+const runCatchUpSweep = async (
+	env: Env,
+	clock: Clock,
+	metricsBudget: MetricsBudget,
+): Promise<void> => {
 	const db = drizzle(env.DB);
 	const nowMs = clock.now().getTime();
 	const rows = await db
@@ -179,7 +189,7 @@ const runCatchUpSweep = async (env: Env, clock: Clock): Promise<void> => {
 		)
 		.limit(PIPELINE.CRON_BATCH_LIMIT);
 	for (const row of rows) {
-		await evaluateSafely(env, row.id, clock);
+		await evaluateSafely(env, row.id, clock, metricsBudget);
 	}
 };
 
@@ -467,7 +477,11 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
  * Embeddingの失敗が連続BACKFILL_FAILURE_ABORT(5)件に達したら当回の走査を打ち切る
  * (障害中に500件を空振りしない・docs/06 §4)。成功を挟めば連続数は0に戻る。
  */
-const runBackfillSweep = async (env: Env, clock: Clock): Promise<void> => {
+const runBackfillSweep = async (
+	env: Env,
+	clock: Clock,
+	metricsBudget: MetricsBudget,
+): Promise<void> => {
 	const db = drizzle(env.DB);
 	const nowMs = clock.now().getTime();
 	const stale = await db
@@ -508,6 +522,7 @@ const runBackfillSweep = async (env: Env, clock: Clock): Promise<void> => {
 			const evaluated = await evaluateIntent(env, row.id, clock, {
 				vector: stage.vector,
 				origin: "cron_backfill",
+				metricsBudget,
 			});
 			if (evaluated !== null) {
 				backfilled += 1;
@@ -529,7 +544,11 @@ const runBackfillSweep = async (env: Env, clock: Clock): Promise<void> => {
  * active Intentを、埋め込みから5分(BACKFILL_GRACE_MS・ちょうどを含む)経過後に
  * 評価するキュー消失の安全網
  */
-const runUnevaluatedSweep = async (env: Env, clock: Clock): Promise<void> => {
+const runUnevaluatedSweep = async (
+	env: Env,
+	clock: Clock,
+	metricsBudget: MetricsBudget,
+): Promise<void> => {
 	const db = drizzle(env.DB);
 	const nowMs = clock.now().getTime();
 	const rows = await db
@@ -545,7 +564,7 @@ const runUnevaluatedSweep = async (env: Env, clock: Clock): Promise<void> => {
 		)
 		.limit(PIPELINE.CRON_BATCH_LIMIT);
 	for (const row of rows) {
-		await evaluateSafely(env, row.id, clock);
+		await evaluateSafely(env, row.id, clock, metricsBudget);
 	}
 };
 
@@ -556,7 +575,11 @@ const runUnevaluatedSweep = async (env: Env, clock: Clock): Promise<void> => {
  * に関係なく1度だけ行う(upsert反映遅延による相互取りこぼしの安全網)。
  * 評価は30分の再評価抑制の例外として行う(#10・埋め込み直後の評価に抑制されない)
  */
-const runDelayedReevalSweep = async (env: Env, clock: Clock): Promise<void> => {
+const runDelayedReevalSweep = async (
+	env: Env,
+	clock: Clock,
+	metricsBudget: MetricsBudget,
+): Promise<void> => {
 	const db = drizzle(env.DB);
 	const nowMs = clock.now().getTime();
 	const rows = await db
@@ -584,6 +607,7 @@ const runDelayedReevalSweep = async (env: Env, clock: Clock): Promise<void> => {
 			await evaluateIntent(env, row.id, clock, {
 				ignoreSuppression: true,
 				origin: "cron_delayed",
+				metricsBudget,
 			});
 			await db
 				.update(intents)
@@ -781,7 +805,11 @@ const ALERT_TTL_SECONDS = {
  * Analytics Engineの1点を出す。送信済みの印はKV `jev:alert:<scope>:<period>` に置く。
  * Analytics Engineには識別子を入れない(scopeと件数のみ・docs/08 §6)
  */
-const runBudgetAlert = async (env: Env, clock: Clock): Promise<void> => {
+const runBudgetAlert = async (
+	env: Env,
+	clock: Clock,
+	metricsBudget: MetricsBudget,
+): Promise<void> => {
 	const db = drizzle(env.DB);
 	const now = clock.now();
 	const targets = [
@@ -817,11 +845,14 @@ const runBudgetAlert = async (env: Env, clock: Clock): Promise<void> => {
 		}
 		logger.warn("jev.budget.alert", { layer: target.scope, count });
 		// PIPELINE_AXが未バインドの環境では送信を省略する(metrics.tsと同じ防御)
-		env.PIPELINE_AX?.writeDataPoint({
-			blobs: ["jev_budget_alert", target.scope],
-			doubles: [count, target.limit],
-			indexes: ["jev_budget_alert"],
-		});
+		// 1回の実行の書き込みの残りが無ければ省く(警告ログとKVの印は残す・#28)
+		if (metricsBudget.take(1)) {
+			env.PIPELINE_AX?.writeDataPoint({
+				blobs: ["jev_budget_alert", target.scope],
+				doubles: [count, target.limit],
+				indexes: ["jev_budget_alert"],
+			});
+		}
 		await env.PIPELINE_KV.put(key, "1", {
 			expirationTtl: ALERT_TTL_SECONDS[target.scope],
 		});
@@ -897,13 +928,23 @@ export const runScheduledPipeline = async (
 ): Promise<void> => {
 	// この実行の中で作られた通知(Cronの評価で作った提案など)だけを後でその場で送るための起点
 	const startedAt = clock.now();
-	await runIsolated("bucket", () => runBucketSweep(env, clock));
-	await runIsolated("catch_up", () => runCatchUpSweep(env, clock));
+	// この実行の計測の書き込みの残り(実行ごとに作る・同時に動く別の実行と共有しない・#28)
+	const metricsBudget = createMetricsBudget();
+	await runIsolated("bucket", () => runBucketSweep(env, clock, metricsBudget));
+	await runIsolated("catch_up", () =>
+		runCatchUpSweep(env, clock, metricsBudget),
+	);
 	await runIsolated("expiry", () => runExpiryWindows(env, clock));
-	await runIsolated("backfill", () => runBackfillSweep(env, clock));
+	await runIsolated("backfill", () =>
+		runBackfillSweep(env, clock, metricsBudget),
+	);
 	await runIsolated("repair", () => repairVectorMetadata(env, clock));
-	await runIsolated("unevaluated", () => runUnevaluatedSweep(env, clock));
-	await runIsolated("delayed", () => runDelayedReevalSweep(env, clock));
+	await runIsolated("unevaluated", () =>
+		runUnevaluatedSweep(env, clock, metricsBudget),
+	);
+	await runIsolated("delayed", () =>
+		runDelayedReevalSweep(env, clock, metricsBudget),
+	);
 	await runIsolated("retention", () => runRetentionSweep(env, clock));
 	// 回答期限切れで閉じたLATCHのid。走査が途中で失敗しても、閉じた分は次集合の提案へ渡す
 	const deadlineClosedIds: string[] = [];
@@ -921,7 +962,9 @@ export const runScheduledPipeline = async (
 			createdFrom: startedAt,
 		});
 	});
-	await runIsolated("budget_alert", () => runBudgetAlert(env, clock));
+	await runIsolated("budget_alert", () =>
+		runBudgetAlert(env, clock, metricsBudget),
+	);
 	await runIsolated("pending", () => runPendingSweep(env, clock));
 	await runIsolated("completion", async () => {
 		await completeDueLatches(drizzle(env.DB), clock.now());
