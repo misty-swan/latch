@@ -68,6 +68,19 @@ describe("reserveJevCalls", () => {
 		expect(c.jev_user).toBe(1);
 	});
 
+	it("既に超過(加算前が上限より大きい)なら0件で、各カウンタは+1", async () => {
+		await seed("jev_intent", "i1", day, LIMITS.JEV_PER_INTENT_PER_DAY + 5);
+		expect(await reserveJevCalls(db, origin, NOW, 8)).toEqual({
+			allowed: 0,
+			exhausted: "jev_intent",
+		});
+		const c = await counts();
+		expect(c.jev_intent).toBe(LIMITS.JEV_PER_INTENT_PER_DAY + 6);
+		expect(c.jev_user).toBe(1);
+		expect(c.jev_global_daily).toBe(1);
+		expect(c.jev_global_monthly).toBe(1);
+	});
+
 	it("n=1で上限ちょうどまでは許し、超えると0件", async () => {
 		await seed("jev_global_daily", "-", day, LIMITS.JEV_GLOBAL_DAILY - 1);
 		expect(await reserveJevCalls(db, origin, NOW, 1)).toEqual({ allowed: 1 });
