@@ -6,7 +6,6 @@
  */
 import {
 	CATEGORIES,
-	EXPIRY_CHOICES_DAYS,
 	LIMITS,
 	PARTICIPANTS_MAX,
 	PARTICIPANTS_MIN,
@@ -65,22 +64,18 @@ export const PARSER_SYSTEM_PROMPT = (nowJst: string): string =>
 - trueの例: 飲み・飲み会・一杯・晩酌・ビール・ワイン会・日本酒・居酒屋・バー(「バーで誕生日会」も含む)・ビアガーデン・はしご酒
 - falseの例: コーヒー・カフェ・お茶・ランチ・ジュース
 
-# expires_at_options(期限の選択肢)
-- formが"connection"のとき: 現在時刻から${EXPIRY_CHOICES_DAYS.join("日後・")}日後の${EXPIRY_CHOICES_DAYS.length}件を、早い順にtime.startと同じ形で返します
-- formが"occasion"でtimeがあるとき: time.startの3時間後の1件
-- formが"occasion"でtimeがnullのとき: 空の配列
-
 # warnings
 - 確認画面で利用者に確かめてほしいことを {"field", "note"} で載せます。noteは短い日本語です
 - 場所・地域・駅名・店名の言及があるときは {"field":"geo","note":"場所は地図で設定してください"} を1件載せます(場所はこの読み解きでは決めません)
 - 人数を丸めたときは上の participants の注意を載せます
 - 当てはまるものが無ければ空の配列`;
 
-/** 時刻の形(time.start・expires_at_options)。正しさは組み立て後にzodで検証する */
+/** 時刻の形(time.start)。正しさは組み立て後にzodで検証する */
 const ISO_STRING = { type: "string" } as const;
 
 /**
- * Parserの出力スキーマ(05 §3.3のparse応答のうちParserが埋めるフィールド)。
+ * Parserの出力スキーマ(05 §3.3のparse応答のうちParserが埋めるフィールド。期限の選択肢は
+ * コードで求めるためモデルに求めない・設計書§4)。
  * 構造化出力はminimum/maximum等の数値制約を受け付けないため型と必須だけを書き、
  * 範囲・一覧の外は組み立て後のzod検証でinvalid_outputにする(設計書§4.2)
  */
@@ -119,7 +114,6 @@ export const PARSER_OUTPUT_SCHEMA = {
 			],
 		},
 		alcohol_involved: { type: "boolean" },
-		expires_at_options: { type: "array", items: ISO_STRING },
 		warnings: {
 			type: "array",
 			items: {
@@ -138,7 +132,6 @@ export const PARSER_OUTPUT_SCHEMA = {
 		"participants",
 		"budget",
 		"alcohol_involved",
-		"expires_at_options",
 		"warnings",
 	],
 	additionalProperties: false,

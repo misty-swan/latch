@@ -6,6 +6,7 @@
  */
 import {
 	CATEGORIES,
+	LIMITS,
 	PARTICIPANTS_MAX,
 	PARTICIPANTS_MIN,
 	warningSchema,
@@ -35,7 +36,8 @@ const clampParticipants = (n: number): number =>
 
 const modelOutputSchema = z.object({
 	form: z.enum(["connection", "occasion"]),
-	topic: z.string().min(1),
+	// Intent作成の検証(createIntentRequestSchema)と同じ: 前後の空白を除き1〜上限の字数
+	topic: z.string().trim().min(1).max(LIMITS.TOPIC_MAX_LENGTH),
 	category: z.enum(CATEGORIES).nullable(),
 	time: z.object({ start: jstIso, end: z.null() }).nullable(),
 	participants: z
@@ -85,7 +87,7 @@ export const realParser =
 			participants,
 			budget: v.budget,
 			alcohol_involved: v.alcohol_involved,
-			// モデルの値は使わない(設計書§4)
+			// モデルには求めず、送ってきても使わない(設計書§4)
 			expires_at_options: expiryOptions(deps.clock, v.form, v.time),
 			warnings,
 		};

@@ -1,4 +1,4 @@
-import { CATEGORIES } from "@latch/shared";
+import { CATEGORIES, LIMITS } from "@latch/shared";
 import { describe, expect, it } from "vitest";
 import { fixedClock } from "../../clock/clock";
 import { realParser } from "./parser";
@@ -78,6 +78,18 @@ describe("realParser", () => {
 		]);
 	});
 
+	it("topicは前後の空白を除き、上限の字数までなら通す(Intent作成の検証と同じ)", async () => {
+		const max = "あ".repeat(LIMITS.TOPIC_MAX_LENGTH);
+		const r = await run({ ...valid, topic: `  ${max}  ` });
+		expect(r.ok && r.output.topic).toBe(max);
+	});
+
+	it("モデルがexpires_at_optionsを返さなくても、返しても通す", async () => {
+		const { expires_at_options: _omit, ...withoutExpiry } = valid;
+		expect((await run(withoutExpiry)).ok).toBe(true);
+		expect((await run(valid)).ok).toBe(true);
+	});
+
 	it("categoryがnullなら通す", async () => {
 		expect((await run({ ...valid, category: null })).ok).toBe(true);
 	});
@@ -101,6 +113,11 @@ describe("realParser", () => {
 		["予算が負", { ...valid, budget: { min: -1, max: 5 } }],
 		["予算のminがmaxより大きい", { ...valid, budget: { min: 9, max: 5 } }],
 		["topicが空", { ...valid, topic: "" }],
+		["topicが空白だけ", { ...valid, topic: "  　 " }],
+		[
+			"topicが上限の字数を超える",
+			{ ...valid, topic: "あ".repeat(LIMITS.TOPIC_MAX_LENGTH + 1) },
+		],
 		["formが不正", { ...valid, form: "x" }],
 	])("%sはinvalid_output", async (_n, value) => {
 		expect(await run(value)).toEqual({ ok: false, kind: "invalid_output" });

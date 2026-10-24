@@ -214,13 +214,12 @@ describe("指示文とモデル名(設計書§0.4・§4.1・§5)", () => {
 		expect(prompt).toContain('"field":"geo"');
 	});
 
-	it("Parserの出力スキーマはParserOutputの全フィールドを必須にする", () => {
+	it("Parserの出力スキーマはコードで求める期限の選択肢を除くParserOutputのフィールドを必須にする", () => {
 		expect([...PARSER_OUTPUT_SCHEMA.required].sort()).toEqual(
 			[
 				"alcohol_involved",
 				"budget",
 				"category",
-				"expires_at_options",
 				"form",
 				"participants",
 				"time",
@@ -229,6 +228,15 @@ describe("指示文とモデル名(設計書§0.4・§4.1・§5)", () => {
 			].sort(),
 		);
 		expect(PARSER_OUTPUT_SCHEMA.additionalProperties).toBe(false);
+		expect(Object.keys(PARSER_OUTPUT_SCHEMA.properties)).not.toContain(
+			"expires_at_options",
+		);
+	});
+
+	it("Parserのsystem文は期限の選択肢をモデルに求めない(コードで求める)", () => {
+		expect(PARSER_SYSTEM_PROMPT("2026-10-24T09:00:00+09:00")).not.toContain(
+			"expires_at_options",
+		);
 	});
 
 	it("Jevの問い・予備のsystem文・出力スキーマは7軸をそろえる", () => {
