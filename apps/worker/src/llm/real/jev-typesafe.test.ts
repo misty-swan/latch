@@ -77,7 +77,10 @@ describe("typesafeJev", () => {
 		[429, "rate_limited"],
 		[503, "overloaded"],
 		[529, "overloaded"],
-		[500, "other"],
+		[500, "unavailable"],
+		[502, "unavailable"],
+		[400, "other"],
+		[401, "other"],
 	])("HTTP %i は %s", async (status, kind) => {
 		const r = await typesafeJev({
 			apiKey: FAKE_KEY,
@@ -86,14 +89,14 @@ describe("typesafeJev", () => {
 		expect(r).toEqual({ ok: false, kind });
 	});
 
-	it("通信の失敗はother", async () => {
+	it("通信の失敗はunavailable", async () => {
 		const r = await typesafeJev({
 			apiKey: FAKE_KEY,
 			fetchFn: (async () => {
 				throw new TypeError("net");
 			}) as unknown as typeof fetch,
 		})(input);
-		expect(r).toEqual({ ok: false, kind: "other" });
+		expect(r).toEqual({ ok: false, kind: "unavailable" });
 	});
 
 	it("6秒で打ち切ってtimeout", async () => {

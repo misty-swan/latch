@@ -69,6 +69,8 @@ export const typesafeJev =
 			});
 			if (res.status === 429) return fail("rate_limited");
 			if (res.status === 503 || res.status === 529) return fail("overloaded");
+			// 5xxの残り(500・502など)は相手側の不調として予備へ切り替える。400番台は鍵の誤り等でother
+			if (res.status >= 500) return fail("unavailable");
 			if (!res.ok) return fail("other");
 
 			let body: { model?: unknown; answers?: unknown };
@@ -81,7 +83,8 @@ export const typesafeJev =
 			const axes = extractAxes(body?.answers);
 			return axes ? { ok: true, axes } : fail("invalid_output");
 		} catch {
-			return fail(timedOut ? "timeout" : "other");
+			// 接続の失敗(時間切れでない例外)は相手に届かなかったものとして予備へ切り替える
+			return fail(timedOut ? "timeout" : "unavailable");
 		} finally {
 			clearTimeout(timer);
 		}

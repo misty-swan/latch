@@ -1,5 +1,5 @@
 /**
- * Jevの予備(Anthropic・docs/07 §5・設計書§5.2)。TypeSafeが時間切れ・混雑のときだけ使う。
+ * Jevの予備(Anthropic・docs/07 §5・設計書§5.2)。TypeSafeが時間切れ・混雑・接続の失敗・5xxのときだけ使う。
  * 7軸の確率の数値だけを構造化出力で返させ、範囲は受け取った後に検証する。
  */
 import { JEV_AXES, type JevAxes, type JevFn } from "../types";

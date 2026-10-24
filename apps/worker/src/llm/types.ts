@@ -50,6 +50,7 @@ export type LlmFailureKind =
 	| "timeout"
 	| "rate_limited"
 	| "overloaded"
+	| "unavailable"
 	| "invalid_output"
 	| "other";
 
@@ -69,9 +70,16 @@ export type JevOutcome =
 /** Jevの差し替え口。非同期・失敗型付き */
 export type JevFn = (input: JevInput) => Promise<JevOutcome>;
 
-/** fallbackモデルへ切り替える対象か。timeout/rate_limited/overloadedのみtrue(07 §5) */
+/**
+ * fallbackモデルへ切り替える対象か。timeout/rate_limited/overloaded/unavailableのみtrue。
+ * unavailableは接続の失敗と500・502(オーナー決定2026-10-24・#35)。
+ * 400番台(鍵の誤りなど)のotherと出力の誤りのinvalid_outputは切り替えても直らないので対象外
+ */
 export const isFallbackEligible = (kind: JevFailureKind): boolean =>
-	kind === "timeout" || kind === "rate_limited" || kind === "overloaded";
+	kind === "timeout" ||
+	kind === "rate_limited" ||
+	kind === "overloaded" ||
+	kind === "unavailable";
 
 /** LLMの3系統を束ねたインターフェース。clockは構築時に注入する(04 §4の時刻規律) */
 export interface Llm {

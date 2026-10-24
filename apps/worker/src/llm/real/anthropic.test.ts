@@ -182,7 +182,27 @@ describe("callAnthropicJson(設計書§4.1・07 §3/§5)", () => {
 		expect(await call(fn)).toEqual({ ok: false, kind: "invalid_output" });
 	});
 
-	it.each([400, 401, 404, 500])("その他の状態%i → other", async (status) => {
+	it.each([500, 502])("サーバー側の失敗%i → unavailable", async (status) => {
+		const { fn } = fixedFetch(() =>
+			jsonResponse(status, {
+				type: "error",
+				error: { type: "api_error", message: "x" },
+			}),
+		);
+		expect(await call(fn)).toEqual({ ok: false, kind: "unavailable" });
+	});
+
+	it("503(overloaded_errorでない) → overloaded", async () => {
+		const { fn } = fixedFetch(() =>
+			jsonResponse(503, {
+				type: "error",
+				error: { type: "api_error", message: "x" },
+			}),
+		);
+		expect(await call(fn)).toEqual({ ok: false, kind: "overloaded" });
+	});
+
+	it.each([400, 401, 404])("その他の状態%i → other", async (status) => {
 		const { fn } = fixedFetch(() =>
 			jsonResponse(status, {
 				type: "error",
@@ -192,11 +212,11 @@ describe("callAnthropicJson(設計書§4.1・07 §3/§5)", () => {
 		expect(await call(fn)).toEqual({ ok: false, kind: "other" });
 	});
 
-	it("通信の失敗(fetchの例外) → other", async () => {
+	it("通信の失敗(fetchの例外) → unavailable", async () => {
 		const fn = (async () => {
 			throw new TypeError("network");
 		}) as typeof fetch;
-		expect(await call(fn)).toEqual({ ok: false, kind: "other" });
+		expect(await call(fn)).toEqual({ ok: false, kind: "unavailable" });
 	});
 });
 

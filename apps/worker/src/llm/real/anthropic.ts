@@ -19,17 +19,20 @@ export type AnthropicJsonResult =
 	| { ok: true; value: unknown }
 	| { ok: false; kind: LlmFailureKind };
 
-/** HTTPの失敗応答を種別へ写す。429=rate_limited・529またはoverloaded_error=overloaded・他=other */
+/**
+ * HTTPの失敗応答を種別へ写す。429=rate_limited・503/529またはoverloaded_error=overloaded・
+ * 他の5xx=unavailable・他=other(400番台は切り替えても直らない)
+ */
 const classifyHttpFailure = async (res: Response): Promise<LlmFailureKind> => {
 	if (res.status === 429) return "rate_limited";
-	if (res.status === 529) return "overloaded";
+	if (res.status === 529 || res.status === 503) return "overloaded";
 	try {
 		const body = (await res.json()) as { error?: { type?: unknown } };
 		if (body?.error?.type === "overloaded_error") return "overloaded";
 	} catch {
-		// 本文が読めない失敗はotherとして扱う
+		// 本文が読めない失敗は状態だけで分類する
 	}
-	return "other";
+	return res.status >= 500 ? "unavailable" : "other";
 };
 
 /** 応答本文から最初のtextブロックの文字列を取り出す。無ければnull */
@@ -115,8 +118,8 @@ export const callAnthropicJson = async (args: {
 			return { ok: false, kind: "invalid_output" };
 		}
 	} catch {
-		// fetchの例外: 時間切れによる打ち切りはtimeout・それ以外の通信の失敗はother
-		return { ok: false, kind: timedOut ? "timeout" : "other" };
+		// fetchの例外: 時間切れによる打ち切りはtimeout・それ以外の通信の失敗はunavailable
+		return { ok: false, kind: timedOut ? "timeout" : "unavailable" };
 	} finally {
 		clearTimeout(timer);
 	}

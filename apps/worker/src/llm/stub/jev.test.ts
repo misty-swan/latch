@@ -87,11 +87,12 @@ describe("stubJev(07 §2(b)・§5: 全7軸の固定値)", () => {
 	});
 });
 
-describe("isFallbackEligible(07 §5: 切替対象はtimeout/rate_limited/overloadedのみ)", () => {
+describe("isFallbackEligible(07 §5: 切替対象はtimeout/rate_limited/overloaded/unavailableのみ)", () => {
 	const cases: [JevFailureKind, boolean][] = [
 		["timeout", true],
 		["rate_limited", true],
 		["overloaded", true],
+		["unavailable", true],
 		["invalid_output", false],
 		["other", false],
 	];

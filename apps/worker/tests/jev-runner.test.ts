@@ -29,7 +29,7 @@ const run = (primary: JevFn, fallback: JevFn, ts: JevTarget[]) =>
 	runJev({ jev: { primary, fallback }, db, kv, clock }, origin, ts);
 
 const failWith =
-	(kind: "timeout" | "invalid_output"): JevFn =>
+	(kind: "timeout" | "invalid_output" | "unavailable" | "other"): JevFn =>
 	async () => ({ ok: false, kind });
 
 /** KVのget/putを数えて本物へ委譲する記録用の薄いラッパー */
@@ -94,6 +94,31 @@ describe("runJev", () => {
 		const r = await run(failWith("invalid_output"), stubJev, targets(1));
 		expect(r.calls).toBe(1);
 		expect(r.held.failed).toBe(1);
+	});
+
+	it("primaryがunavailable: fallbackが呼ばれ救われる", async () => {
+		const fallback: JevFn = async () => ({ ok: true, axes: {} as JevAxes });
+		const r = await run(failWith("unavailable"), fallback, targets(1));
+		expect(r.calls).toBe(2);
+		expect(r.axes.size).toBe(1);
+		expect(r.held.failed).toBe(0);
+	});
+
+	it("primaryがotherならfallbackしない(鍵の誤りなど): held.failed=1・calls=1", async () => {
+		const r = await run(failWith("other"), stubJev, targets(1));
+		expect(r.calls).toBe(1);
+		expect(r.held.failed).toBe(1);
+	});
+
+	it("primaryもfallbackもunavailable: calls=2・held.failed=1", async () => {
+		const r = await run(
+			failWith("unavailable"),
+			failWith("unavailable"),
+			targets(1),
+		);
+		expect(r.calls).toBe(2);
+		expect(r.held.failed).toBe(1);
+		expect(r.axes.size).toBe(0);
 	});
 
 	it("fallback待ちが枠切れ: 8件全てtimeoutなら枠が尽きてcap", async () => {
