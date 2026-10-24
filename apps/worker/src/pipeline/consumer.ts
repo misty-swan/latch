@@ -612,7 +612,7 @@ const consumeEvent = async (
 /**
  * 開始時刻以降に作られた通知があれば、その送出をwaitUntilで始める(待たない)。
  * 判定は「createdAtが開始時刻以降の通知が1件でもあるか」の1回の照会。
- * バッチの最後の送出と重なっても、flushPushは行ごとの条件付きUPDATEで順番を取るので
+ * バッチの最後の送出と重なっても、flushPushは1文の条件付きUPDATEで順番を取るので
  * 同じ通知は1回しか送られない。失敗はログだけ(取りこぼしはバッチの最後の送出とCronが担う)
  */
 const flushFreshPush = async (
