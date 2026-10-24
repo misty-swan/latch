@@ -339,6 +339,7 @@ export const releaseHeld = async (
 			if (await releaseOne(db, latch, now)) released++;
 		} catch (error) {
 			logger.warn("cron.item.failed", {
+				layer: "release_held",
 				latch_id: latch.id,
 				error_code: errorCodeOf(error),
 			});

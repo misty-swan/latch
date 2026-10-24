@@ -70,7 +70,11 @@ export default {
 		}
 		// stagingはAccessを経由した到達だけを通す(#11)。理由はログのerror_codeへ
 		if (env.LATCH_ENV === "staging") {
+			const accessStartedAt = systemClock.now().getTime();
 			const access = await verifyAccessRequest(request, env);
+			createLogger().info("access.verify.timing", {
+				latency: systemClock.now().getTime() - accessStartedAt,
+			});
 			if (!access.ok) {
 				createLogger().warn("access.denied", {
 					error_code: `access_${access.reason}`,

@@ -489,6 +489,7 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 		expiresAt = validation.expiresAt;
 	}
 
+	const insertStartedAt = systemClock.now().getTime();
 	const [inserted] = await db
 		.insert(intents)
 		.values({
@@ -534,6 +535,11 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 		const r = errorJson("INTERNAL", "Intentの作成に失敗しました");
 		return c.json(r.body, r.status);
 	}
+	logger.info("intents.create.timing", {
+		intent_id: inserted.id,
+		layer: "d1",
+		latency: systemClock.now().getTime() - insertStartedAt,
+	});
 	logger.info("intents.created", {
 		intent_id: inserted.id,
 		status: inserted.status,
@@ -542,6 +548,7 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 	// イベント発行(docs/06 §2): active作成はintent_createdを即時投入する。
 	// draft保存では発行しない。waitUntilでsendし、応答をブロックしない(04 §7の保存p95)
 	if (inserted.status === "active") {
+		const emitStartedAt = systemClock.now().getTime();
 		c.executionCtx.waitUntil(
 			emitMatchEvent(
 				c.env,
@@ -552,7 +559,14 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 				},
 				undefined,
 				systemClock,
-			),
+			).finally(() => {
+				// 応答の後のキュー送出の所要時間(応答は待たない・#32)
+				logger.info("intents.create.timing", {
+					intent_id: inserted.id,
+					layer: "emit",
+					latency: systemClock.now().getTime() - emitStartedAt,
+				});
+			}),
 		);
 	}
 	return c.json(toIntentDto(inserted), 201);
@@ -1020,7 +1034,7 @@ const GROUP_DELETE_CHUNK = 50;
 /** 削除APIの段ごとの所要時間(vector/d1・遅い段の切り分け用) */
 const logDeleteTiming = (
 	intentId: string,
-	layer: "vector" | "d1",
+	layer: "vector" | "d1" | "open_latches" | "cancel" | "release" | "next_group",
 	startedAt: number,
 ): void => {
 	logger.info("intents.delete.timing", {
@@ -1085,11 +1099,18 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	// このIntentを含む進行中の提案を取り消す(docs/01 §8の不成立経路「参加Intentが削除された」)。
 	// matchedは成立済みのため変更しない(docs/05 §2.5)。閉じるのは候補・イベント行の削除より前
 	const deleteNow = systemClock.now();
+	const openLatchesStartedAt = systemClock.now().getTime();
+	const openLatchIds = await openLatchIdsOfIntent(db, target.id);
+	logDeleteTiming(target.id, "open_latches", openLatchesStartedAt);
 	const closedLatchIds = await cancelOpenLatches(
 		db,
-		await openLatchIdsOfIntent(db, target.id),
+		openLatchIds,
 		sub,
 		deleteNow,
+		{
+			onTiming: (layer, startedAt) =>
+				logDeleteTiming(target.id, layer, startedAt),
+		},
 	);
 	// 本人の意思を含むグループ候補のidを先に絞る。dedup_keyは「ID@version」のカンマ結合
 	// なので文字列の一致で絞れる(ULIDは英数字のみでLIKEの記号を含まない)。全件を
@@ -1144,7 +1165,9 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	}
 	// 次集合の提案はIntent行とそのグループ候補を消した後に行う(削除中のIntentを含む集合を
 	// 提案しない・F4b設計 §3.5)。消えた行は版の照合・再検証(recheckSet)で除かれる
+	const nextGroupStartedAt = systemClock.now().getTime();
 	await proposeNextGroupsAfterCancel(db, closedLatchIds, deleteNow);
+	logDeleteTiming(target.id, "next_group", nextGroupStartedAt);
 	if (deleted === undefined) {
 		// 所有確認後の並行削除。消えていれば同じ404(冪等な結果)。
 		// ベクトルは先行して削除済みだが、行も無いため孤立にはならない

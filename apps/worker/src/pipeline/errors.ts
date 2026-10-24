@@ -15,7 +15,14 @@ const classifyMessage = (message: string): string | undefined => {
 		return `VECTOR_${vector[1]}_${vector[2]}`;
 	}
 	if (message.startsWith("D1_ERROR")) {
-		return /overloaded/i.test(message) ? "D1_OVERLOADED" : "D1_ERROR";
+		// 判定順: 過負荷を最優先(従来どおり)→制約→busy/locked→timeout→reset。
+		// 見るのは固定の語だけで、メッセージの中身は返さない(#29)
+		if (/overloaded/i.test(message)) return "D1_OVERLOADED";
+		if (/constraint|UNIQUE|FOREIGN KEY/i.test(message)) return "D1_CONSTRAINT";
+		if (/busy|locked/i.test(message)) return "D1_BUSY";
+		if (/timeout|timed out/i.test(message)) return "D1_TIMEOUT";
+		if (/reset|network connection lost/i.test(message)) return "D1_RESET";
+		return "D1_ERROR";
 	}
 	if (message.startsWith("Queue send failed")) {
 		return "QUEUE_SEND_FAILED";

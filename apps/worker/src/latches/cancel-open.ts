@@ -8,6 +8,7 @@
  */
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { systemClock } from "../clock/clock";
 import { latches, latchMembers } from "../db/schema";
 import { closeLatch } from "./close";
 import { proposeNextGroupAfterClose } from "./next-group";
@@ -46,7 +47,12 @@ export const cancelOpenLatches = async (
 	latchIds: string[],
 	actorUserId: string,
 	now: Date,
+	opts?: {
+		onTiming?: (layer: "cancel" | "release", startedAt: number) => void;
+	},
 ): Promise<string[]> => {
+	// 所要時間は呼び出し側が渡す計測の関数へ通す(取り消しと保留の解放を分けて測る・#27)
+	const cancelStartedAt = systemClock.now().getTime();
 	const affectedUserIds = new Set<string>();
 	const closedLatchIds: string[] = [];
 	for (const id of latchIds) {
@@ -67,10 +73,13 @@ export const cancelOpenLatches = async (
 			.where(eq(latchMembers.latchId, id));
 		for (const m of members) affectedUserIds.add(m.userId);
 	}
+	opts?.onTiming?.("cancel", cancelStartedAt);
 	// 操作者以外の参加者は、解放された枠で保留の提案が進められるようにする
 	affectedUserIds.delete(actorUserId);
 	if (affectedUserIds.size > 0) {
+		const releaseStartedAt = systemClock.now().getTime();
 		await releaseHeld(db, now, [...affectedUserIds]);
+		opts?.onTiming?.("release", releaseStartedAt);
 	}
 	return closedLatchIds;
 };

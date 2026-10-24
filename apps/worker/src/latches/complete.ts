@@ -110,6 +110,7 @@ export const completeDueLatches = async (
 				if (await completeOne(db, id, now)) result[layer] += 1;
 			} catch (error) {
 				logger.warn("cron.item.failed", {
+					layer: "complete",
 					latch_id: id,
 					error_code: errorCodeOf(error),
 				});

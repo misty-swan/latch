@@ -24,6 +24,26 @@ describe("errorCodeOf の分類(不具合の修正工程 第2回)", () => {
 		expect(errorCodeOf(other)).toBe("D1_ERROR");
 	});
 
+	it("D1の失敗を固定の語で細かく分類する(#29)", () => {
+		const cases: [string, string][] = [
+			["D1_ERROR: UNIQUE constraint failed: users.id", "D1_CONSTRAINT"],
+			["D1_ERROR: FOREIGN KEY constraint failed", "D1_CONSTRAINT"],
+			["D1_ERROR: database is busy", "D1_BUSY"],
+			["D1_ERROR: database table is locked", "D1_BUSY"],
+			["D1_ERROR: Network connection lost", "D1_RESET"],
+			["D1_ERROR: connection reset", "D1_RESET"],
+			["D1_ERROR: operation timed out", "D1_TIMEOUT"],
+			["D1_ERROR: timeout", "D1_TIMEOUT"],
+			["D1_ERROR: D1 DB is overloaded.", "D1_OVERLOADED"],
+			["D1_ERROR: no such table", "D1_ERROR"],
+		];
+		for (const [message, code] of cases) {
+			expect(
+				errorCodeOf(new Error("Failed query", { cause: new Error(message) })),
+			).toBe(code);
+		}
+	});
+
 	it("causeは最大3段まで辿る", () => {
 		const deep = new Error("a", {
 			cause: new Error("b", {

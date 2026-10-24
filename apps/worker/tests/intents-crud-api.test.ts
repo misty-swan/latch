@@ -920,7 +920,7 @@ describe("DELETE /v1/intents/{id}(削除・docs/05 §3.1・§3.2)", () => {
 		expect(row).toBeUndefined();
 	});
 
-	it("削除で intents.delete.timing が vector・d1 の2段そろって出る", async () => {
+	it("削除で intents.delete.timing が段ごとにそろって出る", async () => {
 		const accessToken = await registerUser("delete-timing");
 		const created = await createActiveConnection(
 			accessToken,
@@ -942,7 +942,13 @@ describe("DELETE /v1/intents/{id}(削除・docs/05 §3.1・§3.2)", () => {
 					(l) =>
 						l.event === "intents.delete.timing" && l.intent_id === created.id,
 				);
-			expect(timings.map((l) => l.layer)).toEqual(["vector", "d1"]);
+			expect(timings.map((l) => l.layer)).toEqual([
+				"vector",
+				"open_latches",
+				"cancel",
+				"d1",
+				"next_group",
+			]);
 			for (const l of timings) {
 				expect(typeof l.latency).toBe("number");
 			}

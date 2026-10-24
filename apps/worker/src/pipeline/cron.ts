@@ -102,6 +102,7 @@ const evaluateSafely = async (
 		return true;
 	} catch (error) {
 		logger.warn("cron.item.failed", {
+			layer: "cron_evaluate",
 			intent_id: intentId,
 			error_code: errorCodeOf(error),
 		});
@@ -426,6 +427,7 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
 					}
 				} catch (error) {
 					logger.warn("cron.item.failed", {
+						layer: "cron_repair",
 						intent_id: row.id,
 						error_code: errorCodeOf(error),
 					});
@@ -532,6 +534,7 @@ const runBackfillSweep = async (
 			}
 		} catch (error) {
 			logger.warn("cron.item.failed", {
+				layer: "cron_backfill",
 				intent_id: row.id,
 				error_code: errorCodeOf(error),
 			});
@@ -619,6 +622,7 @@ const runDelayedReevalSweep = async (
 			reevaluated += 1;
 		} catch (error) {
 			logger.warn("cron.item.failed", {
+				layer: "cron_delayed_reeval",
 				intent_id: row.id,
 				error_code: errorCodeOf(error),
 			});
@@ -756,6 +760,7 @@ const runResponseDeadlineSweep = async (
 			expired += 1;
 		} catch (error) {
 			logger.warn("cron.item.failed", {
+				layer: "cron_answer_expire",
 				latch_id: id,
 				error_code: errorCodeOf(error),
 			});
