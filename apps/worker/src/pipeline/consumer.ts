@@ -2,18 +2,22 @@
  * match-eventsキューの消費(第1段)とDLQのdead反映(docs/06 §2・§5)。
  * 第1段: intent_created/intent_updated → Embedding計算 → VectorStoreへの
  * upsert(反映は待たない) → intents.embedding_model/embedded_at更新 →
- * 計算したベクトルを載せたembedding_completedイベントの再投入(同version・即時)。
- * 第2段は載せられたベクトルで自分を検索するため、upsertの反映待ちは不要。
- * 続けて反映確認のvector_reflection(同version・遅延付き)を投入し、反映後に
- * 1回だけ評価し直す(pipeline/reflection.ts・同時に預けた相手の取りこぼしを拾う)。
+ * 反映確認のvector_reflection(同version・遅延付き)の投入 → embedding_completedの行の
+ * 記録(同version・キューへは送らない)。反映確認は反映後に1回だけ評価し直す
+ * (pipeline/reflection.ts・同時に預けた相手の取りこぼしを拾う)。
+ * 第1段が成功したら、同じ実行の中で第2段(runStage2)を続ける(キューの受け渡しを1回
+ * 減らす・#30・不具合の修正工程(第3回)の設計 §3)。第2段は計算したベクトルで自分を
+ * 検索するため、upsertの反映待ちは不要。続きの第2段が例外なら、embedding_completedの行の
+ * idをベクトル付きでキューへ送り、今の第2段の経路(やり直し・DLQ)に任せる。その送信も
+ * 失敗したら行はpendingのまま残り、10分の残留の掃査と未評価の回収(g)が拾う。
  * 消費は例外を外へ出さない(既定はack)。第1段の失敗(意思の読み取り・埋め込み・upsert・embedded_atの
  * 更新・投入)と反映確認の送り直しの失敗だけ、受け取ったメッセージを遅延付きでretryする。
  * 第1段の失敗は起点の行をpendingのまま残し、STAGE1_RETRY_DELAYS_S(10秒・30秒・60秒)で
  * やり直す。max_retriesを超えたものはDLQでdeadになり、Cronのバックフィル(e)が回収する
  * (06 §5・不具合の修正工程(第2回)の設計 §4)。投入だけの失敗の再配信は、埋め込み・
  * upsertを繰り返さず投入だけをやり直す。
- * embedding_completedの消費(第2段)はevaluateIntent(pipeline/evaluate.ts)へ
- * 委譲し、戻り値の計測結果を起点イベントのpayloadへ記録する(06 §7)。
+ * 第2段(runStage2)はevaluateIntent(pipeline/evaluate.ts)へ委譲し、戻り値の計測結果を
+ * embedding_completedの行のpayloadへ記録する(06 §7)。
  */
 import { type MatchQueueMessage, PIPELINE } from "@latch/shared";
 import { and, eq, gte, inArray } from "drizzle-orm";
@@ -28,9 +32,9 @@ import { pushSenderOf } from "../push/sender";
 import { createVectorStore } from "../vectorstore";
 import { errorCodeOf } from "./errors";
 import { evaluateIntent, stage2Payload } from "./evaluate";
-import { emitMatchEvent } from "./events";
+import { emitMatchEvent, recordMatchEvent, sendToMatchQueue } from "./events";
 import { buildNormalizedText } from "./normalize";
-import { consumeReflectionEvent } from "./reflection";
+import { consumeReflectionEvent, type MatchEventRow } from "./reflection";
 
 const logger = createLogger();
 
@@ -48,20 +52,23 @@ export type ConsumeOutcome = { retryDelaySeconds: number } | undefined;
 export type EmbeddingStageLayer = "embed" | "upsert" | "d1" | "emit";
 
 /**
- * 第1段の本体の結果。embedded=計算したベクトル(直後の評価に渡す)・
+ * 第1段の本体の結果。embedded=計算したベクトル(直後の評価に渡す)と、キューの経路で
+ * 記録したembedding_completedの行のid(Cronの経路は行を作らないのでundefined)・
  * failed=失敗した段(呼び出し側がやり直し方を決める・設計 §4)・
  * gone=埋め込みの間に意思の行が消えたか、activeでなくなったか、内容が直されて版が
  * 上がったため何も書かずに止めた(失敗ではない。削除の後の書き戻しの防止・#20・設計 §5.2。
  * 新しい版は、その版のイベントが埋め込む)
  */
 export type EmbeddingStageResult =
-	| { status: "embedded"; vector: number[] }
+	| { status: "embedded"; vector: number[]; completedEventId?: string }
 	| { status: "failed"; layer: EmbeddingStageLayer }
 	| { status: "gone" };
 
 /**
  * 第1段の後続イベントを投入する。embedding_completed(emitCompleted=trueのとき・同version・
- * 即時。vectorがあればメッセージに載せる)→vector_reflection(同version・遅延付き)の順。
+ * 即時・vector無し)→vector_reflection(同version・遅延付き)の順。embedding_completedを
+ * 送るのは投入だけのやり直しの経路だけで、第1段の本体はvector_reflectionだけを送り、
+ * embedding_completedは行の記録だけにして同じ実行で第2段を続ける(runEmbeddingStage・#30)
  * - skipの種別は投入しない(投入だけのやり直しで、送れている分を送り直さない)
  * - キューの経路(reflectionRequired=true)は、どちらの投入の失敗も例外のまま返し、
  *   呼び出し側がemitの段の失敗としてメッセージをretryする。使い切ったらDLQでdeadになり、
@@ -76,7 +83,6 @@ const emitStage1Events = async (
 	options: {
 		emitCompleted: boolean;
 		reflectionRequired: boolean;
-		vector?: number[];
 		skip?: ReadonlySet<"embedding_completed" | "vector_reflection">;
 	},
 ): Promise<void> => {
@@ -93,7 +99,7 @@ const emitStage1Events = async (
 				intentId: intent.id,
 				version: intent.version,
 			},
-			{ vector: options.vector, discardOnSendFailure },
+			{ discardOnSendFailure },
 			clock,
 		);
 	}
@@ -174,13 +180,18 @@ const logStage1Skipped = (
 
 /**
  * 第1段の本体(docs/06 §2)。埋め込み→VectorStoreへのupsert(反映は待たない)→
- * intents.embedding_model/embedded_atの更新→embedding_completedイベント(vector付き)の投入
- * (同version・即時)→vector_reflectionの投入(同version・遅延付き)までを行い、
- * 成功(計算したベクトル付き)/失敗(失敗した段付き)を返す。例外は外へ出さない。
+ * intents.embedding_model/embedded_atの更新→vector_reflectionの投入(同version・遅延付き)→
+ * embedding_completedの行の記録(同version・キューへは送らない・#30)までを行い、
+ * 成功(計算したベクトルと記録した行のid付き)/失敗(失敗した段付き)を返す。例外は外へ出さない。
+ * 呼び出し側(consumeEvent)は成功の後に同じ実行で第2段(runStage2)を続ける。
+ * vector_reflectionを先に送るのは、その送信が失敗してretryしたときにembedding_completedの
+ * 行が残っていないようにするため(行があると投入だけのやり直しが「送れた」と見なして飛ばし、
+ * 第2段が行われないまま残る)。行の記録が失敗したら同じくretryし、投入だけのやり直しが
+ * embedding_completedをvector無しでキューへ送る。
  * 失敗の扱いは呼び出し側が決める(キューはメッセージのretry・設計 §4)。Cronのバックフィル
  * (docs/12 Task 12(e))からも再利用するためexportし、バックフィルは返ったベクトルで
  * 直後に評価する(本人のベクトルの反映を待たない・#22)。
- * options.emitCompleted=false はembedding_completedを投入しない(既定true)。
+ * options.emitCompleted=false はembedding_completedの行を作らない(既定true)。
  * Cronのバックフィルは直後にevaluateIntentを直接呼ぶため、投入すると二重評価になる
  * (docs/06 §2「Cronからは新たな起点イベントを発行しない」)。
  * vector_reflectionはemitCompletedによらず投入する(反映後の評価し直しで取りこぼしを拾う)
@@ -254,13 +265,25 @@ export const runEmbeddingStage = async (
 			return { status: "gone" };
 		}
 		layer = "emit";
-		// キューの経路(embedding_completedを投入する)だけが、投入の失敗をretryで
+		// キューの経路(embedding_completedの行を作る)だけが、投入の失敗をretryで
 		// やり直せる。Cronの経路はvector_reflectionの失敗をログだけにする
 		await emitStage1Events(env, intent, clock, {
-			emitCompleted,
+			emitCompleted: false,
 			reflectionRequired: emitCompleted,
-			vector: values,
 		});
+		// 第2段への受け渡し(同version・#30): キューへは送らず行だけを作り、呼び出し側が
+		// 同じ実行で第2段を続ける。負荷試験の集計はこの行を使う(設計 §3.2)
+		const completedEventId = emitCompleted
+			? await recordMatchEvent(
+					env,
+					{
+						eventType: "embedding_completed",
+						intentId: intent.id,
+						version: intent.version,
+					},
+					clock,
+				)
+			: undefined;
 		// count=upsertしたベクトル数(1Intent=1ベクトル・06 §7の層別観測)・
 		// layer=第1段を呼んだ経路(queue/backfill/repair)
 		logger.info("pipeline.stage1.completed", {
@@ -269,7 +292,7 @@ export const runEmbeddingStage = async (
 			layer: source,
 			latency: clock.now().getTime() - startedAt,
 		});
-		return { status: "embedded", vector: values };
+		return { status: "embedded", vector: values, completedEventId };
 	} catch (error) {
 		logger.warn("pipeline.stage1.failed", {
 			error_code: errorCodeOf(error, "EMBEDDING_FAILED"),
@@ -312,6 +335,81 @@ const markFailed = async (env: Env, eventId: string): Promise<void> => {
 };
 
 /**
+ * 第2段の本体(docs/06 §2〜§3)。古いversionのembedding_completedは評価せずstale_versionで
+ * processedにする(評価するとlast_evaluated_atが書かれ、新しいversionの評価が30分抑制に
+ * かかるため)。それ以外はevaluateIntent(Layer 2 Candidate Retrieval→Layer 1→Layer 3→
+ * 候補保存)へ委譲し、戻り値の計測結果を行のpayloadへ記録してprocessedにする(06 §7)。
+ * evaluateIntentがnull(抑制・対象外)ならskippedを載せる。評価の例外は投げ返す
+ * (キューの経路はfailedへ倒し、第1段の続きの経路はキューへ送って任せる)
+ */
+const runStage2 = async (
+	env: Env,
+	event: MatchEventRow,
+	clock: Clock,
+	vector?: number[],
+): Promise<void> => {
+	const [current] = await drizzle(env.DB)
+		.select({ version: intents.version })
+		.from(intents)
+		.where(eq(intents.id, event.sourceIntentId))
+		.limit(1);
+	if (current !== undefined && current.version !== event.version) {
+		await markProcessed(env, event.id, clock, { skipped: "stale_version" });
+		return;
+	}
+	const result = await evaluateIntent(env, event.sourceIntentId, clock, {
+		vector,
+		origin: "embedding_completed",
+	});
+	await markProcessed(
+		env,
+		event.id,
+		clock,
+		result === null ? { skipped: "suppressed" } : stage2Payload(result),
+	);
+};
+
+/**
+ * 第1段の成功の後に、同じ実行で第2段を続ける(#30・設計 §3.2)。記録したembedding_completedの
+ * 行がpendingのときだけ評価する(UNIQUE衝突で見つけた処理済みの行は評価し直さない)。
+ * 例外なら第2段の失敗をログし、行のidをベクトル付きでキューへ送って今の第2段の経路
+ * (やり直し・DLQ)に任せる。送信も失敗したらログだけにし、行はpendingのまま残して10分の
+ * 残留の掃査と未評価の回収(g)に任せる。例外は外へ出さない
+ */
+const continueStage2 = async (
+	env: Env,
+	completedEventId: string,
+	intentId: string,
+	clock: Clock,
+	vector: number[],
+): Promise<void> => {
+	try {
+		const [completed] = await drizzle(env.DB)
+			.select()
+			.from(matchEvents)
+			.where(eq(matchEvents.id, completedEventId))
+			.limit(1);
+		if (completed === undefined || completed.status !== "pending") {
+			return;
+		}
+		await runStage2(env, completed, clock, vector);
+	} catch (error) {
+		logger.warn("pipeline.stage2.failed", {
+			error_code: errorCodeOf(error),
+			intent_id: intentId,
+		});
+		try {
+			await sendToMatchQueue(env, completedEventId, { vector });
+		} catch (sendError) {
+			logger.warn("pipeline.stage2.handoff_failed", {
+				error_code: errorCodeOf(sendError, "STAGE2_HANDOFF_FAILED"),
+				intent_id: intentId,
+			});
+		}
+	}
+};
+
+/**
  * 通常キューの1メッセージを処理する(docs/06 §2の処理枝)。
  * 失敗はD1のイベント行statusで記録し、ここでは例外を握って呼び出し側へは
  * 正常復帰する(ackが原則・06 §5)。やり直すべき一時的な失敗だけを
@@ -343,28 +441,11 @@ const consumeEvent = async (
 	if (event.eventType === "vector_reflection") {
 		return consumeReflectionEvent(env, event, clock);
 	}
-	// embedding_completed(第2段・docs/06 §2〜§3): 評価実行(Layer 2検索→
-	// Layer 1→Layer 3→候補保存)をevaluateIntentへ委譲し、戻り値の計測結果を
-	// 起点イベントのpayloadへ記録する(docs/06 §7のイベント単位の計測)。
-	// evaluateIntentがnull(抑制・対象外)のときはskippedを載せてprocessedへ倒す
+	// embedding_completed(第2段・docs/06 §2〜§3): 第1段の続きの評価が失敗して送られた
+	// もの・投入だけのやり直しで送られたもの。本体はrunStage2(第1段の続きと共用)
 	if (event.eventType === "embedding_completed") {
-		// 古いversionの第2段は評価しない。評価するとlast_evaluated_atが書かれ、
-		// 新しいversionの評価が30分抑制にかかるため
-		const [current] = await db
-			.select({ version: intents.version })
-			.from(intents)
-			.where(eq(intents.id, event.sourceIntentId))
-			.limit(1);
-		if (current !== undefined && current.version !== event.version) {
-			await markProcessed(env, event.id, clock, { skipped: "stale_version" });
-			return;
-		}
-		let result: Awaited<ReturnType<typeof evaluateIntent>>;
 		try {
-			result = await evaluateIntent(env, event.sourceIntentId, clock, {
-				vector,
-				origin: "embedding_completed",
-			});
+			await runStage2(env, event, clock, vector);
 		} catch (error) {
 			// 第2段の失敗は第1段のログと分けて記録し、起点イベントをfailedへ倒す
 			// (再試行なし・06 §5。Cronの未評価回収が拾う)
@@ -373,14 +454,7 @@ const consumeEvent = async (
 				intent_id: event.sourceIntentId,
 			});
 			await markFailed(env, event.id);
-			return;
 		}
-		await markProcessed(
-			env,
-			event.id,
-			clock,
-			result === null ? { skipped: "suppressed" } : stage2Payload(result),
-		);
 		return;
 	}
 	const stage1 =
@@ -486,6 +560,17 @@ const consumeEvent = async (
 		// embedded・gone(埋め込みの間の削除・一時停止で書かずに止めた)はどちらもprocessedへ
 		// (goneは上の「本体行が消えている」と同じ扱いでやり直さない・#20)
 		await markProcessed(env, event.id, clock);
+		// 成功したら同じ実行で第2段を続ける(#30)。ここで作られた提案の通知は、
+		// このメッセージの処理の後のflushFreshPushで送り出される(#19)
+		if (result.status === "embedded" && result.completedEventId !== undefined) {
+			await continueStage2(
+				env,
+				result.completedEventId,
+				current.id,
+				clock,
+				result.vector,
+			);
+		}
 		return;
 	}
 	// 第1段の未対応種別(将来追加分)は何もせず保持する(ackのみ)

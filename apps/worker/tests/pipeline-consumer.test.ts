@@ -3,8 +3,8 @@
  * createMessageBatch+getQueueResult(cloudflare:test)でhandleQueueBatchを直接呼び、
  * D1のmatch_events/intents行とmemoryVectorStoreの実体を検証する。
  * - 第1段: intent_created/intent_updated → Embedding(stub)→ VectorStore upsert →
- *   反映確認 → intents.embedding_model/embedded_at更新 → embedding_completed投入
- *   (同version・即時)→ 起点イベントprocessed
+ *   intents.embedding_model/embedded_at更新 → vector_reflection投入 → embedding_completedの
+ *   行の記録 → 起点イベントprocessed → 同じ実行で第2段(#30)
  * - 冪等(processed再消費スキップ)・stale_version破棄・非activeスキップ・
  *   第1段の失敗(段ごとにpendingのままretry・投入だけの失敗は投入だけをやり直す・#17)・DLQのdead反映
  * 時刻はfixedClockで固定。ベクトル格納先はlocalのインメモリ実装
@@ -31,7 +31,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixedClock } from "../src/clock/clock";
-import { intents, matchEvents, users } from "../src/db/schema";
+import { intents, matchEvents, notifications, users } from "../src/db/schema";
 // ルート・handleQueueBatchが受け取るEnv(src/env.ts・生成型Envの宣言部分型)
 import type { Env as WorkerEnv } from "../src/env";
 import { stubEmbedding } from "../src/llm/stub/embedding";
@@ -172,7 +172,7 @@ const eventsOf = (
 	db.select().from(matchEvents).where(eq(matchEvents.sourceIntentId, intentId));
 
 describe("第1段の消費(intent_created・docs/06 §2)", () => {
-	it("Embedding→upsert→intents更新→embedding_completed投入(vector付き)→起点processed", async () => {
+	it("Embedding→upsert→intents更新→同じ実行で第2段を評価→起点processed(#30)", async () => {
 		const { userId, intentId, eventId } = await seedEvent();
 		const send = spySend();
 
@@ -202,31 +202,27 @@ describe("第1段の消費(intent_created・docs/06 §2)", () => {
 		expect(row.embeddingModel).toBe(EMBEDDING_MODEL_STUB);
 		expect(row.embeddedAt?.getTime()).toBe(clock.now().getTime());
 
-		// embedding_completedイベントが同versionで投入されstatus=pending
+		// 第2段は同じ実行の中で続けて行う(#30): embedding_completedの行は同versionで作られ、
+		// 評価の後に今の第2段と同じpayloadを載せてprocessedになる
 		const completed = (await eventsOf(intentId)).filter(
 			(e) => e.eventType === "embedding_completed",
 		);
 		expect(completed).toHaveLength(1);
 		expect(completed[0]?.version).toBe(1);
-		expect(completed[0]?.status).toBe("pending");
+		expect(completed[0]?.status).toBe("processed");
+		expect(completed[0]?.payload).toHaveProperty("retrieval_count");
+		expect(completed[0]?.payload).toHaveProperty("retrieval_ms");
 
-		// embedding_completedは即時投入(delaySeconds未指定=第2引数なしのsend)
-		expect(send).toHaveBeenCalledTimes(2);
-		expect(send.mock.calls[0]).toHaveLength(1);
-		expect(send.mock.calls[0]?.[0]).toEqual({
-			event_id: completed[0]?.id,
-			vector: expectedValues,
-		});
-		// 続けて反映確認(vector_reflection・同version)を遅延2秒で投入する
+		// キューへはembedding_completedを送らず、反映確認(vector_reflection・同version)
+		// だけを遅延2秒で投入する
 		const reflection = (await eventsOf(intentId)).filter(
 			(e) => e.eventType === "vector_reflection",
 		);
 		expect(reflection).toHaveLength(1);
 		expect(reflection[0]?.version).toBe(1);
 		expect(reflection[0]?.status).toBe("pending");
-		expect(send.mock.calls[1]).toEqual([
-			{ event_id: reflection[0]?.id },
-			{ delaySeconds: 2 },
+		expect(send.mock.calls).toEqual([
+			[{ event_id: reflection[0]?.id }, { delaySeconds: 2 }],
 		]);
 
 		// 起点イベントはprocessed(payloadに件数等は載せない)
@@ -239,10 +235,11 @@ describe("第1段の消費(intent_created・docs/06 §2)", () => {
 		expect(origin?.payload).toEqual({});
 	});
 
-	it("ストアの反映が遅れていても(hold中)第1段はprocessedになりvector付きで第2段へ渡す", async () => {
+	it("ストアの反映が遅れていても(hold中)第1段はprocessedになり計算したベクトルで第2段を続ける", async () => {
 		const { intentId, eventId } = await seedEvent();
 		const send = spySend();
 		holdMemoryVectorWrites();
+		const getByIds = vi.spyOn(memoryVectorStore(), "getByIds");
 
 		expectAcked(await runBatch("match-events", [eventId]));
 
@@ -255,9 +252,15 @@ describe("第1段の消費(intent_created・docs/06 §2)", () => {
 			.select()
 			.from(intents)
 			.where(eq(intents.id, intentId));
-		const expectedValues = await stubEmbedding(buildNormalizedText(row));
-		expect(send).toHaveBeenCalledTimes(2);
-		expect(send.mock.calls[0]?.[0]).toMatchObject({ vector: expectedValues });
+		// 第2段は計算したベクトルで(getByIdsを呼ばずに)反映を待たずに評価して処理済み(送るのは反映確認だけ)
+		const [completed] = (await eventsOf(intentId)).filter(
+			(e) => e.eventType === "embedding_completed",
+		);
+		expect(completed?.status).toBe("processed");
+		expect(completed?.payload).toHaveProperty("retrieval_count");
+		expect(getByIds).not.toHaveBeenCalled();
+		expect(send).toHaveBeenCalledTimes(1);
+		expect(row.embeddedAt).not.toBeNull();
 		// 反映後に読むと、upsertしたmetadataにversion: 1がある
 		releaseMemoryVectorWrites();
 		const [stored] = await memoryVectorStore().getByIds([intentId]);
@@ -395,12 +398,13 @@ describe("冪等とスキップ条件(docs/06 §2)", () => {
 		const second = await runBatch("match-events", [eventId]);
 		expectAcked(second);
 
-		// embedding_completed・vector_reflectionの投入は1回ずつ(2回目はprocessedスキップ)
+		// embedding_completedの行の記録とvector_reflectionの投入は1回ずつ(2回目はprocessedスキップ。
+		// embedding_completedは同じ実行で第2段を続けるためキューへは送らない・#30)
 		const completed = (await eventsOf(intentId)).filter(
 			(e) => e.eventType === "embedding_completed",
 		);
 		expect(completed).toHaveLength(1);
-		expect(send).toHaveBeenCalledTimes(2);
+		expect(send).toHaveBeenCalledTimes(1);
 	});
 
 	it("event.versionがintent.versionと不一致ならstale_versionでprocessed・埋め込みはしない", async () => {
@@ -637,7 +641,7 @@ describe("第1段の失敗(段ごとの扱い・#17)", () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const state = { fail: false };
 		const { aiEnv, run } = fakeAiEnv(state);
-		// 1回目の配信: embedding_completedの送信だけが失敗する
+		// 1回目の配信: 投入(先に送るvector_reflection)の送信が失敗する
 		const send = vi
 			.spyOn(testEnv.MATCH_QUEUE, "send")
 			.mockRejectedValueOnce(new Error("Queue send failed: 一時的な失敗"))
@@ -657,7 +661,8 @@ describe("第1段の失敗(段ごとの扱い・#17)", () => {
 		expect(await memoryVectorStore().getByIds([intentId])).not.toEqual([null]);
 		expect(run).toHaveBeenCalledTimes(1);
 		expect(upsertSpy).toHaveBeenCalledTimes(1);
-		// 送れなかったembedding_completedの行は残さない(残すと再配信で送ったものと見分けられない)
+		// 送れなかったvector_reflectionの行は残さず、embedding_completedの行もまだ作らない
+		// (作ると再配信で送ったものと見分けられず、第2段が行われないまま残る)
 		expect(
 			(await eventsOf(intentId)).filter(
 				(e) => e.eventType === "embedding_completed",
@@ -688,54 +693,51 @@ describe("第1段の失敗(段ごとの扱い・#17)", () => {
 		expect((await originOf(eventId))?.status).toBe("processed");
 	});
 
-	it("vector_reflectionの投入だけの失敗もretryし、再配信では送れていないvector_reflectionだけを投入する", async () => {
+	it("embedding_completedの行の記録の失敗もretryし、再配信ではembedding_completedだけをvector無しで投入する", async () => {
 		const { intentId, eventId } = await seedEvent();
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		const { aiEnv, run } = fakeAiEnv({ fail: false });
-		// 1回目の配信: embedding_completedは送れ、vector_reflectionの送信だけが失敗する
-		const send = vi
-			.spyOn(testEnv.MATCH_QUEUE, "send")
-			.mockResolvedValueOnce(sendResponse())
-			.mockRejectedValueOnce(new Error("Queue send failed: 一時的な失敗"))
-			.mockResolvedValue(sendResponse());
+		const send = spySend();
+		// 1回目の配信: match_eventsへの2回目の挿入(vector_reflectionの次のembedding_completed)だけを例外にする
+		let inserts = 0;
+		const brokenEnv = {
+			...aiEnv,
+			DB: failingDbWhere((sql) => {
+				if (!sql.startsWith('insert into "match_events"')) {
+					return false;
+				}
+				inserts += 1;
+				return inserts === 2;
+			}),
+		} as unknown as WorkerEnv;
 
-		const first = await runStage1(eventId, aiEnv, 1);
+		const first = await runStage1(eventId, brokenEnv, 1);
 
 		expect(first.retrySpy).toHaveBeenCalledWith({ delaySeconds: 10 });
 		expect((await originOf(eventId))?.status).toBe("pending");
 		const afterFirst = await eventsOf(intentId);
 		expect(
-			afterFirst.filter((e) => e.eventType === "embedding_completed"),
+			afterFirst.filter((e) => e.eventType === "vector_reflection"),
 		).toHaveLength(1);
 		expect(
-			afterFirst.filter((e) => e.eventType === "vector_reflection"),
+			afterFirst.filter((e) => e.eventType === "embedding_completed"),
 		).toEqual([]);
+		expect(send).toHaveBeenCalledTimes(1);
 
-		// 2回目の配信: vector_reflectionがまた失敗する → 30秒でretry(embedding_completedは送り直さない)
+		// 2回目の配信: 送れていないembedding_completedだけをvector無しで投入して終わる
 		send.mockClear();
-		send.mockRejectedValueOnce(new Error("Queue send failed: 一時的な失敗"));
 		const second = await runStage1(eventId, aiEnv, 2);
 
-		expect(second.retrySpy).toHaveBeenCalledWith({ delaySeconds: 30 });
-		expect(send).toHaveBeenCalledTimes(1);
-		expect(send.mock.calls[0]?.[1]).toEqual({ delaySeconds: 2 });
-		expect((await originOf(eventId))?.status).toBe("pending");
-
-		// 3回目の配信: vector_reflectionだけを投入して終わる
-		send.mockClear();
-		const third = await runStage1(eventId, aiEnv, 3);
-
-		expect(third.result.retryMessages).toEqual([]);
+		expect(second.result.retryMessages).toEqual([]);
 		const events = await eventsOf(intentId);
-		const reflection = events.filter(
-			(e) => e.eventType === "vector_reflection",
+		const completed = events.filter(
+			(e) => e.eventType === "embedding_completed",
 		);
-		expect(reflection).toHaveLength(1);
-		expect(send.mock.calls).toEqual([
-			[{ event_id: reflection[0]?.id }, { delaySeconds: 2 }],
-		]);
+		expect(completed).toHaveLength(1);
+		expect(completed[0]?.status).toBe("pending");
+		expect(send.mock.calls).toEqual([[{ event_id: completed[0]?.id }]]);
 		expect(
-			events.filter((e) => e.eventType === "embedding_completed"),
+			events.filter((e) => e.eventType === "vector_reflection"),
 		).toHaveLength(1);
 		expect(run).toHaveBeenCalledTimes(1);
 		expect((await originOf(eventId))?.status).toBe("processed");
@@ -1043,12 +1045,11 @@ describe("ログの分離と計測(docs/06 §7・docs/08 §6)", () => {
 		const { intentId, eventId } = await seedEvent();
 		spySend();
 		vi.spyOn(console, "log").mockImplementation(() => {});
-		// 第1段でベクトルを作り、発行されたembedding_completedを第2段で消費する
-		await runBatch("match-events", [eventId]);
+		// 第1段でベクトルを作り、同じ実行の中で第2段を続ける(#30)
+		expectAcked(await runBatch("match-events", [eventId]));
 		const [completed] = (await eventsOf(intentId)).filter(
 			(e) => e.eventType === "embedding_completed",
 		);
-		expectAcked(await runBatch("match-events", [completed.id]));
 
 		const [row] = await db
 			.select()
@@ -1092,5 +1093,154 @@ describe("ログの分離と計測(docs/06 §7・docs/08 §6)", () => {
 			group_held_proposals: 0,
 			group_failed: 0,
 		});
+	});
+});
+
+describe("第1段の成功の後に同じ実行で第2段を続ける(#30)", () => {
+	/** 評価のLayer 2 Candidate Retrieval(store.query)だけを例外にする(第1段のupsertは通す) */
+	const failQuery = () =>
+		vi
+			.spyOn(memoryVectorStore(), "query")
+			.mockRejectedValue(new Error("D1_ERROR: 試験用の評価の失敗"));
+
+	it("評価が例外なら、embedding_completedの行のidをベクトル付きでキューへ送り、行はpendingのまま・起点はackでprocessed", async () => {
+		const { intentId, eventId } = await seedEvent();
+		const send = spySend();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		failQuery();
+
+		const { result, retrySpy } = await runStage1(eventId);
+
+		expect(result.retryMessages).toEqual([]);
+		expect(retrySpy).not.toHaveBeenCalled();
+		expect((await originOf(eventId))?.status).toBe("processed");
+		const events = await eventsOf(intentId);
+		const completed = events.filter(
+			(e) => e.eventType === "embedding_completed",
+		);
+		const reflection = events.filter(
+			(e) => e.eventType === "vector_reflection",
+		);
+		expect(completed).toHaveLength(1);
+		expect(completed[0]?.status).toBe("pending");
+		expect(completed[0]?.payload).toEqual({});
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		const expectedValues = await stubEmbedding(buildNormalizedText(row));
+		// 反映確認(遅延2秒)の後に、今の第2段の経路へembedding_completedを即時で送る
+		expect(send.mock.calls).toEqual([
+			[{ event_id: reflection[0]?.id }, { delaySeconds: 2 }],
+			[{ event_id: completed[0]?.id, vector: expectedValues }],
+		]);
+		expect(logsOf(logSpy, "pipeline.stage2.failed")).toEqual([
+			expect.objectContaining({ intent_id: intentId }),
+		]);
+		expect(logsOf(logSpy, "pipeline.stage1.failed")).toHaveLength(0);
+
+		// 送られたembedding_completedは今の第2段の経路で処理される
+		vi.mocked(memoryVectorStore().query).mockRestore();
+		expectAcked(
+			await runBatch(
+				"match-events",
+				[completed[0]?.id ?? ""],
+				testEnv,
+				expectedValues,
+			),
+		);
+		const [after] = (await eventsOf(intentId)).filter(
+			(e) => e.eventType === "embedding_completed",
+		);
+		expect(after?.status).toBe("processed");
+		expect(after?.payload).toHaveProperty("retrieval_count");
+	});
+
+	it("評価が例外で、キューへの送信も失敗したら、行はpendingのまま残り例外は外へ出ない", async () => {
+		const { intentId, eventId } = await seedEvent();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		// 1回目(vector_reflection)は送れ、2回目(embedding_completed)の送信が失敗する
+		const send = vi
+			.spyOn(testEnv.MATCH_QUEUE, "send")
+			.mockResolvedValueOnce(sendResponse())
+			.mockRejectedValueOnce(new Error("Queue send failed: 一時的な失敗"));
+		failQuery();
+
+		const { result, retrySpy } = await runStage1(eventId);
+
+		expect(result.outcome).toBe("ok");
+		expect(result.retryMessages).toEqual([]);
+		expect(retrySpy).not.toHaveBeenCalled();
+		expect(send).toHaveBeenCalledTimes(2);
+		expect((await originOf(eventId))?.status).toBe("processed");
+		const completed = (await eventsOf(intentId)).filter(
+			(e) => e.eventType === "embedding_completed",
+		);
+		// 10分の残留の掃査と未評価の回収(g)に任せる
+		expect(completed).toHaveLength(1);
+		expect(completed[0]?.status).toBe("pending");
+		expect(logsOf(logSpy, "pipeline.stage2.failed")).toHaveLength(1);
+	});
+
+	it("続きの評価で作られた通知は、同じメッセージの処理の後(次のメッセージの処理より前)に送出される", async () => {
+		const first = await seedEvent();
+		const second = await seedEvent();
+		spySend();
+		const notificationId = ulid();
+		let stateDuringSecond: string | undefined;
+		const stateOf = async () =>
+			(
+				await db
+					.select({ s: notifications.pushState })
+					.from(notifications)
+					.where(eq(notifications.id, notificationId))
+			)[0]?.s;
+		const store = memoryVectorStore();
+		const original = store.query.bind(store);
+		vi.spyOn(store, "query").mockImplementation(async (values, options) => {
+			if (stateDuringSecond === undefined && !(await stateOf())) {
+				// 1件目の続きの評価の中で通知を1件作る(提案の通知の代わり)
+				await db.insert(notifications).values({
+					id: notificationId,
+					userId: first.userId,
+					type: "proposal",
+					latchId: null,
+					readAt: null,
+					createdAt: clock.now(),
+					intentId: null,
+					pushState: "pending",
+					pushAttemptedAt: null,
+				});
+				stateDuringSecond = "";
+			} else {
+				// 2件目の続きの評価の中で、1件目の通知の送出を最大2秒待つ
+				for (let i = 0; i < 40; i += 1) {
+					stateDuringSecond = await stateOf();
+					if (stateDuringSecond !== "pending") break;
+					await new Promise((resolve) => setTimeout(resolve, 50));
+				}
+			}
+			return original(values, options);
+		});
+
+		const batch = createMessageBatch<MatchQueueMessage>("match-events", [
+			{
+				id: "m1",
+				timestamp: clock.now(),
+				attempts: 1,
+				body: { event_id: first.eventId },
+			},
+			{
+				id: "m2",
+				timestamp: clock.now(),
+				attempts: 1,
+				body: { event_id: second.eventId },
+			},
+		]);
+		const ctx = createExecutionContext();
+		await handleQueueBatch(batch, testEnv, ctx, clock);
+		await getQueueResult(batch, ctx);
+
+		expect(stateDuringSecond).toBe("no_subscription");
 	});
 });

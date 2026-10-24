@@ -82,19 +82,14 @@ export const sendToMatchQueue = async (
 };
 
 /**
- * match_events行をINSERT(status=pending・payload={})してMATCH_QUEUEへ送る。
- * 戻り値はイベントのid。INSERTはawaitして完了を待ってからsendする。
- * UNIQUE衝突時は既存同一イベントの再発行として、既存行のidでsendだけを行う(冪等)。
- * 時刻はClock注入(docs/04 §4): ルートはsystemClock・pipelineは注入Clockを渡す。
- * ルートからはc.executionCtx.waitUntil(...)経由で呼び、応答をブロックしない
- * (docs/04 §7の保存p95)
+ * match_events行をINSERT(status=pending・payload={})する。UNIQUE衝突は既存同一イベントと
+ * 見なして既存行のidを返す(created=false)。取得できなければ衝突扱いにできず再スローする
  */
-export const emitMatchEvent = async (
+const insertMatchEvent = async (
 	env: Env,
 	params: EmitMatchEventParams,
-	opts: EmitMatchEventOptions | undefined,
 	clock: Clock,
-): Promise<string> => {
+): Promise<{ id: string; created: boolean }> => {
 	const db = drizzle(env.DB);
 	const eventId = newUlid();
 	try {
@@ -107,12 +102,11 @@ export const emitMatchEvent = async (
 			status: "pending",
 			createdAt: clock.now(),
 		});
+		return { id: eventId, created: true };
 	} catch (error) {
 		if (!isUniqueViolation(error)) {
 			throw error;
 		}
-		// 衝突=既存同一イベントが存在する。既存行のidを取得してsendだけ行う。
-		// 取得できない場合は衝突扱いにできず、握り潰さず再スローする
 		const [existing] = await db
 			.select({ id: matchEvents.id })
 			.from(matchEvents)
@@ -127,14 +121,43 @@ export const emitMatchEvent = async (
 		if (existing === undefined) {
 			throw error;
 		}
-		return await sendToMatchQueue(env, existing.id, opts);
+		return { id: existing.id, created: false };
 	}
+};
+
+/**
+ * match_events行をINSERT(status=pending・payload={})だけ行い、キューへは送らない。
+ * 戻り値はイベントのid(UNIQUE衝突なら既存行のid)。第1段の後に同じ実行で第2段を続ける
+ * 経路が、embedding_completedの行を処理中に作るのに使う(#30・不具合の修正工程(第3回)の設計 §3)
+ */
+export const recordMatchEvent = async (
+	env: Env,
+	params: EmitMatchEventParams,
+	clock: Clock,
+): Promise<string> => (await insertMatchEvent(env, params, clock)).id;
+
+/**
+ * match_events行をINSERT(status=pending・payload={})してMATCH_QUEUEへ送る。
+ * 戻り値はイベントのid。INSERTはawaitして完了を待ってからsendする。
+ * UNIQUE衝突時は既存同一イベントの再発行として、既存行のidでsendだけを行う(冪等)。
+ * 時刻はClock注入(docs/04 §4): ルートはsystemClock・pipelineは注入Clockを渡す。
+ * ルートからはc.executionCtx.waitUntil(...)経由で呼び、応答をブロックしない
+ * (docs/04 §7の保存p95)
+ */
+export const emitMatchEvent = async (
+	env: Env,
+	params: EmitMatchEventParams,
+	opts: EmitMatchEventOptions | undefined,
+	clock: Clock,
+): Promise<string> => {
+	const { id, created } = await insertMatchEvent(env, params, clock);
 	try {
-		return await sendToMatchQueue(env, eventId, opts);
+		return await sendToMatchQueue(env, id, opts);
 	} catch (error) {
-		if (opts?.discardOnSendFailure === true) {
+		// 新しく作った行だけを消す(衝突で見つけた既存行は消さない)
+		if (created && opts?.discardOnSendFailure === true) {
 			try {
-				await db.delete(matchEvents).where(eq(matchEvents.id, eventId));
+				await drizzle(env.DB).delete(matchEvents).where(eq(matchEvents.id, id));
 			} catch {
 				// 消せなければ行は残る(送信の失敗のほうを呼び出し側へ返す)
 			}

@@ -573,14 +573,11 @@ describe("同時に預けた2件(#7)", () => {
 		const createdB = await seedEvent(b, "intent_created");
 		await runEvents([createdA, createdB]);
 		const stage1 = sentBodies(send);
-		// 第1段は2件とも即時のembedding_completed(vector付き)と遅延2秒の反映確認を投入する
-		expect(stage1.immediate).toHaveLength(2);
+		// 第1段は2件とも遅延2秒の反映確認だけを投入し、第2段は同じ実行の中で続ける
+		// (embedding_completedはキューへ送らない・#30)
+		expect(stage1.immediate).toHaveLength(0);
 		expect(stage1.delayed).toHaveLength(2);
 		expect(stage1.delayed.every((d) => d.delaySeconds === 2)).toBe(true);
-		for (const body of stage1.immediate) {
-			expect(body.vector?.length).toBeGreaterThan(0);
-		}
-		await runBodies(stage1.immediate);
 		return stage1.delayed.map((d) => d.body);
 	};
 
