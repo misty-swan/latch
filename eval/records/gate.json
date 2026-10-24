@@ -1,5 +1,5 @@
 {
-  "ranAt": "2026-10-24T04:02:08.421Z",
+  "ranAt": "2026-10-24T08:21:40.682Z",
   "passed": true,
   "failures": [],
   "scores": {
@@ -15,9 +15,9 @@
         "rate": 1
       },
       "category": {
-        "correct": 50,
+        "correct": 51,
         "n": 53,
-        "rate": 0.9433962264150944
+        "rate": 0.9622641509433962
       },
       "time_start": {
         "correct": 96,
@@ -58,10 +58,6 @@
           "field": "category"
         },
         {
-          "id": "occ-035",
-          "field": "category"
-        },
-        {
           "id": "occ-045",
           "field": "time_start"
         },
@@ -82,18 +78,10 @@
     "jev": {
       "primary": {
         "median": 0.030000000000000027,
-        "n": 280,
-        "failedCalls": 7,
+        "n": 329,
+        "failedCalls": 0,
         "totalCalls": 94,
-        "failedPairs": [
-          "pair-008",
-          "pair-011",
-          "pair-018",
-          "pair-031",
-          "pair-033",
-          "pair-034",
-          "pair-047"
-        ]
+        "failedPairs": []
       },
       "fallback": {
         "median": 0.030000000000000027,
@@ -108,28 +96,28 @@
     "precisionAt060": {
       "primary": {
         "threshold": 0.6,
-        "precision": 0.8,
-        "predictedPositive": 15,
-        "truePositive": 12,
-        "n": 41,
-        "failedCalls": 6
+        "precision": 0.8235294117647058,
+        "predictedPositive": 17,
+        "truePositive": 14,
+        "n": 47,
+        "failedCalls": 0
       },
       "fallback": {
         "threshold": 0.6,
-        "precision": 0.84,
-        "predictedPositive": 25,
+        "precision": 0.7777777777777778,
+        "predictedPositive": 27,
         "truePositive": 21,
         "n": 47,
         "failedCalls": 0
       }
     },
     "latencyP95Ms": {
-      "parser": 1999.4842069999977,
-      "jevPrimary": 914.5470480000004,
-      "jevFallback": 1900.6170600000041
+      "parser": 2403.009071999999,
+      "jevPrimary": 195.26372999999876,
+      "jevFallback": 1898.463284999998
     },
     "inputTokensMean": {
-      "parser": 2623.5982905982905,
+      "parser": 2739.5982905982905,
       "jevFallback": 1496.276595744681
     }
   },
@@ -141,22 +129,22 @@
     ]
   },
   "goldset": {
-    "parserVersion": 1,
+    "parserVersion": 2,
     "jevVersion": 1,
     "approvedByOwner": "2026-10-24"
   },
   "fingerprint": {
-    "apps/worker/src/llm/real/prompts.ts": "09b3f1d2af4049b8bbf7eded46d157a6df535b0eca3102e9aea39fc2b934f7ad",
-    "apps/worker/src/llm/real/anthropic.ts": "dbf64f14e3f7e47c8531547df5121a1b7fc4ecee5cdc884112acf6959890af9c",
+    "apps/worker/src/llm/real/prompts.ts": "e94fffea753442f2b34b3afb5f5baf569640206204e6033e8705e831bd275ac6",
+    "apps/worker/src/llm/real/anthropic.ts": "1b457c5ff39777b6abae3a954318dca5fa426b3078c15569af940304f94e8013",
     "apps/worker/src/llm/real/parser.ts": "008383420feb50630d5764a86187ea4e6488dec4672ae247ce134baf695a33a3",
-    "apps/worker/src/llm/real/jev-typesafe.ts": "a87d6a88c312c9ff30f82c448091ed693727ec58c262a7537b487a9ab89a4000",
-    "apps/worker/src/llm/real/jev-anthropic.ts": "a0fcd9a383ed71ee7bcfcfcf099bd7b3bd247bbadc07f2c053a2882e16da6bf7",
+    "apps/worker/src/llm/real/jev-typesafe.ts": "e90d1a920654c8d43c659f5a4d098caf010b2492e0210476049867b7c5e313d7",
+    "apps/worker/src/llm/real/jev-anthropic.ts": "f3c268b62aa91d9d30a09a2c7fa71b687575576b28ae3b7484703ead2243b98c",
     "apps/worker/src/llm/expiry.ts": "c2bfd16b1ae254eabb51d33091e49dfaf0c4723d42892e3560d120f8a037fef7",
     "apps/worker/src/intents/expiry.ts": "4363b4779708081c821e7017f28c93c405079e32169595594f606361a75bf13a",
     "apps/worker/src/llm/mode.ts": "24ee2732bcf9c625e98e4cb8c1b2bc3c2b398078836a6e47c5941f7d55a2dfc9",
     "apps/worker/src/pipeline/normalize.ts": "bde3ee1d8009c70a33361ed7281be8ef26fc4006bc6ad34c2548e82bbf419861",
-    "eval/goldset/parser.yaml": "d74d4f19b98d0251b02c41f0a5db42857d5695d58e50de77d257e28b731f84f9",
+    "eval/goldset/parser.yaml": "0a1559e0534deb7db89c40913e79c95e524e22c0a042eb82af610825b91b9f04",
     "eval/goldset/jev-pairs.yaml": "9b6130b36e461c53f40a2f24bedbfed65fd2fa28b48d37c9088a8db2cd1aa6a0"
   },
-  "fingerprintArtifacts": "6b98548a0978ccaf65bcd1fb769d1042534c17ea953ac1df9f7655ba002ebb33"
+  "fingerprintArtifacts": "015c3d7f13c519b44118154363a0acb53ccdb45e5e939d4898048c85f0bdcdc0"
 }
