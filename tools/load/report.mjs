@@ -51,7 +51,7 @@ export function buildReport(runId, k6, rows) {
 	const breakdown = reflectionBreakdown(reflectionRows);
 	const table = renderTable([
 		k6Row("Intent保存", TARGET_MS.intentSave, m.intentSaveP95),
-		k6Row("Parser(stub)", TARGET_MS.parser, m.parseP95),
+		k6Row("Parser", TARGET_MS.parser, m.parseP95),
 		summarize("Candidate Retrieval", TARGET_MS.retrieval, retrieval.durations),
 		summarize(
 			"初期判定(相手が先に反映済み)",
@@ -86,7 +86,7 @@ export function buildReport(runId, k6, rows) {
 		"- 初期判定は、組の相手の意思の反映確認(vector_reflection)が反映を確かめてprocessedになった時刻(payload.skippedが無いかnot_evaluatedの行。not_found・stale_version・inactiveは反映を確かめていないため除く)と、自分の有効化(intent_created)の行の作成時刻を比べて振り分ける。相手の反映が自分の有効化より前(同時刻は含めない)なら「相手が先に反映済み」で、これだけに目標(p95 10秒・01 §20)の合否を付ける。それ以外((d)の組・先に保存した側・相手が未反映のとき)は「同時」で、合否を付けない参考値である。(b)は片方が先に保存して反映を確かめてからもう片方が保存するため、後から保存した側が「相手が先に反映済み」の標本になる",
 		"- 初期判定の起点は有効化のイベント行(intent_created)の作成時刻で、有効化の保存の直後に応答の後の処理(waitUntil)で書かれる。保存のコミットよりわずかに後の時刻を起点にしている",
 		"- 送信記録(push_attempted_at)は送信の順番を取った時刻である。試験用の利用者は購読を持たないためno_subscriptionで確定し、暗号化と送信の時間は含まれない",
-		"- Parser・初期判定の行はLLMをstubで動かした値である(Parser・Jev)",
+		"- Parser・初期判定の行のLLM(Parser・Jev)の動作は、計測の時点のstagingの設定(LATCH_LLM_MODE)による。このツールは設定を知らないため、実行条件は報告書に記録する",
 	].join("\n");
 }
 

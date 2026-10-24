@@ -29,7 +29,7 @@ describe("buildReport", () => {
 	it("結果のファイルもD1の行も無くても表を出す(計測なし・NaNを出さない)", () => {
 		const out = buildReport("202610220442", { a: null, c: null }, empty);
 		expect(out).toContain("| Intent保存 | 0.50秒 | — | — | — | 計測なし | — |");
-		expect(out).toContain("| Parser(stub) | 3.00秒 |");
+		expect(out).toContain("| Parser | 3.00秒 |");
 		expect(out).toContain(
 			"| Candidate Retrieval | 1.00秒 | 0 | 0 | 0 | 計測なし | — |",
 		);
@@ -105,10 +105,10 @@ describe("buildReport", () => {
 		expect(out).toContain(
 			"| Intent保存 | 0.50秒 | — | — | — | 0.18秒 | 合格 |",
 		);
-		expect(out).toContain(
-			"| Parser(stub) | 3.00秒 | — | — | — | 0.38秒 | 合格 |",
-		);
+		expect(out).toContain("| Parser | 3.00秒 | — | — | — | 0.38秒 | 合格 |");
 		expect(out).toContain("保存のコミットよりわずかに後の時刻を起点にしている");
+		expect(out).toContain("計測の時点のstagingの設定(LATCH_LLM_MODE)");
+		expect(out).not.toContain("stubで動かした");
 		expect(out).toContain("no_subscription");
 	});
 });

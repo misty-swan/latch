@@ -2,7 +2,7 @@
  * シナリオ(a) 作成の集中(F8b設計 §3.3・docs/10 §5)。
  * 読み解き(parse)→保存(POST /v1/intents・status=active)を合計100件/分で5分間繰り返す
  * (100人×5件。1人のActive Intent上限5件に収まる)。読み解き確認の[預ける]と同じ呼び方。
- * k6が測るもの: Intent保存のp95(目標0.5秒)・Parserのp95(目標3秒・stubでの値)。
+ * k6が測るもの: Intent保存のp95(目標0.5秒)・Parserのp95(目標3秒・LLMの動作は計測時の設定による)。
  *
  * 実行(手順書 docs/runbooks/staging.md 7章。k6の出力のURLを伏せる包みrun.mjsを通す):
  *   LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/run.mjs tools/load/scenarios/a-intent-burst.js \
