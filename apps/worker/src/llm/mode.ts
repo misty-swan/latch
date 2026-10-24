@@ -22,8 +22,15 @@ export const resolveLlmMode = (v: string | undefined): LlmMode => {
 	return "stub";
 };
 
-/** 3系統(Parser/Embedding/Jev)の実装を束ねる。clockは構築時に注入する(04 §4の時刻規律) */
-export const createLlm = (env: Env, clock: Clock): Llm => {
+/**
+ * 3系統(Parser/Embedding/Jev)の実装を束ねる。clockは構築時に注入する(04 §4の時刻規律)。
+ * deps.fetchFnはrealの外部呼び出しの差し替え口(試験用。省略時は大域のfetch)
+ */
+export const createLlm = (
+	env: Env,
+	clock: Clock,
+	deps: { fetchFn?: typeof fetch } = {},
+): Llm => {
 	const mode = resolveLlmMode(env.LATCH_LLM_MODE);
 	if (mode === "real") {
 		// 引数のEnvはwrangler生成の型で秘密値を持たないため、キーだけ読み替える(env.tsのEnvと同名)
@@ -46,15 +53,15 @@ export const createLlm = (env: Env, clock: Clock): Llm => {
 			};
 		const parser: (raw_text: string) => Promise<ParserOutcome> = counted(
 			"anthropic:parser",
-			realParser({ apiKey: anthropicKey, clock }),
+			realParser({ apiKey: anthropicKey, clock, fetchFn: deps.fetchFn }),
 		);
 		const primary: JevFn = counted(
 			"typesafe:jev",
-			typesafeJev({ apiKey: typesafeKey }),
+			typesafeJev({ apiKey: typesafeKey, fetchFn: deps.fetchFn }),
 		);
 		const fallback: JevFn = counted(
 			"anthropic:jev",
-			anthropicJev({ apiKey: anthropicKey }),
+			anthropicJev({ apiKey: anthropicKey, fetchFn: deps.fetchFn }),
 		);
 		return {
 			parser,
