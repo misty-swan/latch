@@ -5,7 +5,7 @@
  */
 
 import { LIMITS } from "@latch/shared";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { jstDayKey, jstMonthKey } from "../clock/clock";
 import { usageCounters } from "../db/schema";
@@ -16,22 +16,22 @@ export type JevBudgetScope =
 	| "jev_global_daily"
 	| "jev_global_monthly";
 
-export type BudgetResult =
-	| { ok: true }
-	| { ok: false; exhausted: JevBudgetScope };
-
 const GLOBAL_KEY = "-";
 
 /**
- * Jev呼び出し1回分の予算を確保する。4行をdb.batchで1往復で加算する。
- * 超過時も加算は取り消さない(試行自体を数える・設計書 §2.4)。
- * 超過が複数あれば intent → user → global_daily → global_monthly の順で最初の1つを返す。
+ * Jev呼び出しn回分の予算を確保する(設計 §3.7の3)。4行へ+nを1回のdb.batchで加え、
+ * 各カウンタの加算前の値(加算後 − n)から許せる件数を全カウンタの最小で決める。
+ * 許せない件があれば、1件ずつ確保した場合と同じ最終値(尽きた1件は試行として数える)になるよう
+ * n − allowed − 1 を同じ4行から1回のdb.batchで引く。
+ * 尽きたカウンタが複数あれば intent → user → global_daily → global_monthly の順で最初の1つを返す。
  */
-export const reserveJevCall = async (
+export const reserveJevCalls = async (
 	db: DrizzleD1Database,
 	origin: { intentId: string; userId: string },
 	now: Date,
-): Promise<BudgetResult> => {
+	n: number,
+): Promise<{ allowed: number; exhausted?: JevBudgetScope }> => {
+	if (n <= 0) return { allowed: 0 };
 	const day = jstDayKey(now);
 	const month = jstMonthKey(now);
 	const targets: {
@@ -68,19 +68,43 @@ export const reserveJevCall = async (
 	const [s0, s1, s2, s3] = targets.map((t) =>
 		db
 			.insert(usageCounters)
-			.values({ scope: t.scope, key: t.key, period: t.period, count: 1 })
+			.values({ scope: t.scope, key: t.key, period: t.period, count: n })
 			.onConflictDoUpdate({
 				target: [usageCounters.scope, usageCounters.key, usageCounters.period],
-				set: { count: sql`${usageCounters.count} + 1` },
+				set: { count: sql`${usageCounters.count} + ${n}` },
 			})
 			.returning({ count: usageCounters.count }),
 	);
 	const results = await db.batch([s0, s1, s2, s3]);
+	let allowed = n;
+	let exhausted: JevBudgetScope | undefined;
 	for (let i = 0; i < targets.length; i++) {
-		const count = results[i][0]?.count ?? 0;
-		if (count > targets[i].limit) {
-			return { ok: false, exhausted: targets[i].scope };
+		const after = results[i][0]?.count ?? n;
+		const before = after - n;
+		const room = Math.min(n, Math.max(0, targets[i].limit - before));
+		if (room < allowed) {
+			allowed = room;
+			exhausted = targets[i].scope;
 		}
 	}
-	return { ok: true };
+	if (allowed < n) {
+		const back = n - allowed - 1;
+		if (back > 0) {
+			const [u0, u1, u2, u3] = targets.map((t) =>
+				db
+					.update(usageCounters)
+					.set({ count: sql`${usageCounters.count} - ${back}` })
+					.where(
+						and(
+							eq(usageCounters.scope, t.scope),
+							eq(usageCounters.key, t.key),
+							eq(usageCounters.period, t.period),
+						),
+					),
+			);
+			await db.batch([u0, u1, u2, u3]);
+		}
+		return { allowed, exhausted };
+	}
+	return { allowed };
 };

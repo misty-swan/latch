@@ -15,7 +15,7 @@ import {
 	type JevOutcome,
 } from "../llm/types";
 import { isBreakerOpen, recordJevOutcomes } from "./breaker";
-import { reserveJevCall } from "./budget";
+import { reserveJevCalls } from "./budget";
 
 export interface JevTarget {
 	/** match_candidates.id */
@@ -110,18 +110,13 @@ export const runJev = async (
 		const wave = queue.slice(0, n);
 		const rest = queue.slice(n);
 
-		// 1件ずつ予算を確保し、最初に尽きた件以降は呼ばない
-		const reserved: QueueItem[] = [];
+		// 波の分の予算を1回で確保し、許された件数だけ先頭から呼ぶ
+		let reserved: QueueItem[] = [];
 		let budgetStopped = false;
 		await timed("jev_reserve", async () => {
-			for (const item of wave) {
-				const r = await reserveJevCall(db, origin, clock.now());
-				if (!r.ok) {
-					budgetStopped = true;
-					break;
-				}
-				reserved.push(item);
-			}
+			const r = await reserveJevCalls(db, origin, clock.now(), wave.length);
+			reserved = wave.slice(0, r.allowed);
+			budgetStopped = r.allowed < wave.length;
 		});
 
 		// 外部呼び出し(並列)。外部送信の集計の書き込み(llm/mode.tsの包み)もここに含まれる
