@@ -50,7 +50,7 @@ pnpm --filter worker provision:staging -- --write
 
 ## 3. シークレットの登録
 
-シークレットは、設定ファイルに書かずにCloudflareへ預ける秘密の値である。stagingでは次の6件を使う。
+シークレットは、設定ファイルに書かずにCloudflareへ預ける秘密の値である。stagingでは、まず次の6件をまとめて登録する(LLMのAPIキーとAccessの値は3.1・4.3で別に登録する)。
 
 | 名前 | 中身 |
 |---|---|
@@ -63,6 +63,11 @@ pnpm --filter worker secrets:staging
 ```
 
 (6件を順に登録し、「登録: 名前」と表示する。値は画面に出ない)
+
+- Workerがまだ無いときは、wranglerが空のWorkerを作ってから登録する
+- 登録済みの名前は`pnpm --filter worker exec wrangler secret list --env staging`で確かめられる(値は見えない)
+- もう一度実行するとJWT_SECRETが新しい値に変わる。そのときは、それまでのログインが切れる
+- stagingのシークレットは全部で10件になる(上の6件・3.1のLLMのAPIキー2件・4.3のAccessの`ACCESS_AUD`・`ACCESS_TEAM_DOMAIN`の2件)。`wrangler secret list`で10件の名前がそろっていることを確かめる(`LATCH_LLM_MODE=real`なのにAPIキーが無い・Accessの2件が無いと、Workerは起動を拒む)
 
 ### 3.1 LLMのAPIキー(stagingはLATCH_LLM_MODE=real)
 
@@ -82,10 +87,6 @@ pnpm --filter worker exec wrangler secret put TYPESAFE_API_KEY --env staging
 
 - 精度ゲートの合格記録は`eval/records/gate.json`にある。CIはこの記録と、プロンプトやreal実装の指紋・固定したモデル名を照合する
 - プロンプトやrealのコードを変えたときは、`pnpm eval:gate`で採点し直して記録を更新しないとCIが通らない
-
-- Workerがまだ無いときは、wranglerが空のWorkerを作ってから登録する
-- 登録済みの名前は`pnpm --filter worker exec wrangler secret list --env staging`で確かめられる(値は見えない)
-- もう一度実行するとJWT_SECRETが新しい値に変わる。そのときは、それまでのログインが切れる
 
 ## 4. APIトークンとGitHubの登録
 
@@ -135,7 +136,7 @@ stagingのWorkerは、Cloudflare Accessを通った要求だけを受け付け�
 1. Workers & Pages → `latch-worker-staging` → Settings → Domains & Routes → workers.devの「Enable Cloudflare Access」を押す
 2. Accessのアプリケーションの方針を、オーナーのメールアドレスだけに絞る
 3. サービストークンを1つ発行し(Zero Trust → Access → Service Auth)、同じアプリケーションの方針に「Service Auth」で加える。発行時に一度だけ出るシークレットを控える(後から見直せない)
-4. アプリケーションのAUD(Audience)タグとチームのドメインを控える。Workerのシークレット`ACCESS_AUD`・`ACCESS_TEAM_DOMAIN`に登録する(3の手順に追記してよい。`pnpm --filter worker secrets:staging`)
+4. アプリケーションのAUD(Audience)タグとチームのドメインを控える。Workerのシークレット`ACCESS_AUD`・`ACCESS_TEAM_DOMAIN`に、3.1と同じ形(`pnpm --filter worker exec wrangler secret put ACCESS_AUD --env staging`など)で1件ずつ登録する(`secrets:staging`の6件には含まれない)
 
 **通行証の置き場所**
 

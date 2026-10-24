@@ -33,6 +33,10 @@ pnpm --filter worker exec playwright test e2e/pipeline.spec.ts   # 単一spec
 pnpm --filter worker dev     # wrangler dev --local(全バインディングをエミュレータで実行)
 pnpm --filter web dev        # vite
 
+# 精度ゲート(本物のAIを呼ぶので課金が発生する。キーは環境変数か管理外の tools/eval/.env)
+pnpm eval:gate       # ゴールドセットでParser/Jevのrealを採点し eval/records/gate.json を書く(指示文・real実装・モデル名を変えたら採り直してコミット。CIは記録を照合する)
+pnpm eval:region     # 地域名をEmbedding入力に含める/含めないの比較(eval/records/region.json・Workers AIを呼ぶ)
+
 # D1マイグレーション(src/db/schema.ts を変更したら生成してコミット)
 pnpm --filter worker exec drizzle-kit generate
 pnpm --filter worker exec wrangler d1 migrations apply DB --local
@@ -53,7 +57,7 @@ Intent 作成/更新 → `MATCH_QUEUE` へイベント送信 → `consumer.ts` �
 
 ### 差し替え可能な抽象(テスト決定性のための設計)
 
-- **LLM/Embedding**: `src/llm/`。`LATCH_LLM_MODE`・`LATCH_EMBEDDING_MODE` が既定 `stub`(決定的・課金なし、`src/llm/stub/`)。real は Workers AI
+- **LLM/Embedding**: `src/llm/`。`LATCH_LLM_MODE`・`LATCH_EMBEDDING_MODE` が既定 `stub`(決定的・課金なし、`src/llm/stub/`)。real は Parser=Anthropic・Jev=TypeSafe(予備Anthropic)・Embedding=Workers AI(Parser/Jev は `src/llm/real/`・指示文とモデル名は `prompts.ts`)。staging は両方 real
 - **VectorStore**: `src/vectorstore/`。`LATCH_ENV=local` はインメモリ実装、staging/prod は Vectorize
 - **Clock**: `src/clock/`。時刻依存ロジックは `systemClock` を直接使わず Clock を受け取る
 - **ログ**: `src/logging/logger.ts` の許可リスト方式(個人情報を出さない)

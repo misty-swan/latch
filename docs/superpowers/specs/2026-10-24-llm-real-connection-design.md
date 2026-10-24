@@ -157,14 +157,16 @@ Claudeが下書きをコミットせずに置き、オーナーが読む(不自�
 | alcohol_involved | recall 100%・precision 90%以上 |
 | Jev順序整合 | 差の中央値0.3以下(§0.4) |
 | Jevの予備 | 予備(Anthropic)単独でも順序整合を満たす(第一候補が落ちたときに使うため) |
+| Jevの呼び出しの失敗 | 第一候補・予備のそれぞれで、呼び出しの失敗が全体の10%を超えたら不合格(順序整合の値が少ない組だけで決まらないため) |
 
 参考値(合否に使わない): Precision@0.60・Jevの応答時間のp95・Parserの応答時間のp95・1回あたりの入力トークン。
 
 ### 3.4 CIの照合
 
-workerの単体試験として置く(本物のAIは呼ばない)。
+`tools/eval`の単体試験(Nodeのvitest・`pnpm test`に含まれる)として置く(本物のAIは呼ばない)。workerの試験はminiflare上で動きリポジトリのファイルを読めないため、workerには置かない。
 
-- `wrangler.jsonc`のどれかの環境で`LATCH_LLM_MODE`が`real`なら、`eval/records/gate.json`が存在し、`passed: true`、ゴールドセットが承認済み、指紋が今のファイルと一致することを求める
+- `wrangler.jsonc`のどれかの環境で`LATCH_LLM_MODE`が`real`なら、`eval/records/gate.json`が存在し、`passed: true`、ゴールドセットが承認済み、指紋が今のファイルと一致し、固定したモデル名が今の定数と同じであることを求める
+- 指紋の対象は9ファイル(指示文とモデル名の定数・realの呼び出し部品4つ・期限の計算・正規化の関数・ゴールドセット2つ。`tools/eval/lib/fingerprint.ts`)
 - 指示文を1文字でも変えると指紋が変わり、採り直すまでCIが落ちる
 
 ## 4. Parser real

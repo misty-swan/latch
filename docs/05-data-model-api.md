@@ -1,9 +1,9 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.28
+- 文書バージョン: v0.29
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.28更新: 2026-10-23)
+- 作成日: 2026-10-17(v0.29更新: 2026-10-24)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
@@ -31,7 +31,8 @@
 - v0.26の変更点: 不具合の修正工程(第2回・issue #15・#16・#20・2026-10-23)に伴い、§2.2のmatch_eventsへ2つの索引(source_intent_id・(status, created_at))とマイグレーション0008と戻す手順を、§2.4の索引の一覧へ同じ2つを、§2.3のVectorizeへ取得(getByIds)の1回20件の上限と実装の中での分割・metadata更新の失敗をCronのmetadata整合の修復で回収することを、§2.5のIntent削除の実行順序へD1の削除を1回のバッチ(1つの取引)で行うこと・グループ候補を本人の意思を含む行に絞ってから消すこと・削除の後のベクトルの書き戻しの防止と孤立したベクトルの自己修復(06 §2)を加えた。前提文書欄の版数を更新
 - v0.27の変更点: 前提文書欄の版数同期のみの改版(02・10・12の測り直し完了の記録に伴う追従)。内容の変更はない
 - v0.28の変更点: 前提文書欄の同期のみの改版(不具合の修正工程(第2回)の最終レビューの直しに伴う04・06・07の改版の連鎖)。内容の変更はない
-- 前提文書: 01 要件定義書 v0.21 / 02 スコープ・受け入れ条件合意書 v0.18 / 04 アーキテクチャ設計書 v0.28
+- v0.29の変更点: LLM real接続の工程の完了(2026-10-24)に伴い、§2.2のusage_countersへ外部送信の集計のscope(`external_send`・keyは`<送信先>:<系統>`・JSTの日付ごと・08 §5)を、§3.3のPOST /v1/intents/parseへParserの失敗(種別を問わず422 PARSE_FAILED)と場所の言及の注意表示(warningsの`{field:"geo"}`)を、dev専用の観測API GET /v1/dev/usageを加えた。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.22 / 02 スコープ・受け入れ条件合意書 v0.19 / 04 アーキテクチャ設計書 v0.29
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -274,7 +275,7 @@ anonymized:  boolean       # 削除・退会後の匿名化済みフラグ
 created_at / updated_at
 ```
 
-**usage_counters**(レート制限・Jev予算の3層保護の実体): `scope(intent_daily|intent_hourly|jev_intent|jev_user|jev_global_daily|jev_global_monthly) / key(user_id|intent_id|'-') / period(日付or時間のバケット文字列) / count — PK(scope, key, period)`。加算は `UPDATE … SET count=count+1 … RETURNING` の原子的1文で行い、Queues consumerはバッチ単位でまとめて加算する(並行消費での取りこぼし防止)。periodが90日より古い行はCronで削除する(API単位のスロットルはWorkers Rate Limitingバインディング(key=user_id)が担い、本表には置かない)。
+**usage_counters**(レート制限・Jev予算の3層保護の実体): `scope(intent_daily|intent_hourly|jev_intent|jev_user|jev_global_daily|jev_global_monthly|external_send) / key(user_id|intent_id|'-'|<送信先>:<系統>) / period(日付or時間のバケット文字列) / count — PK(scope, key, period)`。加算は `UPDATE … SET count=count+1 … RETURNING` の原子的1文で行い、Queues consumerはバッチ単位でまとめて加算する(並行消費での取りこぼし防止)。periodが90日より古い行はCronで削除する(API単位のスロットルはWorkers Rate Limitingバインディング(key=user_id)が担い、本表には置かない)。**外部送信の集計(LLM real接続で確定)。** scope=`external_send`は外部AI事業者へ送った回数の記録(08 §5・07 §8)で、keyは`anthropic:parser`・`anthropic:jev`・`typesafe:jev`、periodはJSTの日付とし、送るたびに成否を問わず1加える(`INSERT … ON CONFLICT DO UPDATE`の1文)。送った中身は持たない。記録の失敗は呼び出しを止めない(ログに残すだけ)。予算・レート制限の判定には使わない
 
 **geofeatures**: `id / name / municipality / type(city|station) / lat / lng / grid_key(約1km=0.01度グリッドのキー・INDEX)`(ソースはISJ+駅データ。取り込みと変換の規定は04 §4)。grid_keyの書式は `${Math.floor(lat*100)}_${Math.floor(lng*100)}`(F4a実装確定)。逆引きは座標の属するセルの中心を基準点とし、そのセルと周囲を合わせた3×3セルの行からハバーシン距離の最近傍の地名を採る(同距離はid昇順・該当なしは地域名なし)。
 
@@ -423,7 +424,7 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 
 **POST /v1/auth/refresh** — 200 `{access_token, refresh_token, expires_in}`(回転式・04 §4)。期限切れは401 TOKEN_EXPIRED・未知/再利用トークンは401 UNAUTHORIZED。
 
-**POST /v1/intents/parse** — `{form, topic, category, time:{start,end}|null, geo:{center:{lat,lng},radius_m}|null, participants:{min,max,includes_owner}, budget:{min,max,currency:"JPY"}|null, expires_at_options:[...], alcohol_involved, warnings:[{field, note}](判定不能NG条件の注意表示)}`。formはクライアント側で切替可能(確定送信は別API)。geoは常にnull(parseは地域を解決しない・ユーザーが添付で確定させる)・participants.includes_ownerはtrue・budgetの通貨はJPY固定。expires_at_optionsは期限の選択肢(ISO 8601・昇順): つながりIntent=now+7日/now+30日/now+90日の3件・機会Intent=時刻確定時はstart+3時間の1件・時刻未確定は空配列
+**POST /v1/intents/parse** — `{form, topic, category, time:{start,end}|null, geo:{center:{lat,lng},radius_m}|null, participants:{min,max,includes_owner}, budget:{min,max,currency:"JPY"}|null, expires_at_options:[...], alcohol_involved, warnings:[{field, note}](判定不能NG条件の注意表示)}`。formはクライアント側で切替可能(確定送信は別API)。geoは常にnull(parseは地域を解決しない・ユーザーが添付で確定させる)・participants.includes_ownerはtrue・budgetの通貨はJPY固定。expires_at_optionsは期限の選択肢(ISO 8601・昇順): つながりIntent=now+7日/now+30日/now+90日の3件・機会Intent=時刻確定時はstart+3時間の1件・時刻未確定は空配列(期限の選択肢はstubとrealで同じ計算をコードで行い、モデルには作らせない・07 §3)。warningsには、人数を2〜4人へ丸めたときの`{field:"participants"}`と、入力文に場所の言及があるときの`{field:"geo"}`(地図で場所を添えるよう促す)が入る。Parserの失敗(時間切れ・混雑・応答の形の誤りなど・07 §3の失敗種別)は種別を問わず422 PARSE_FAILEDとする(LLM real接続で確定)
 
 **IntentDTO(Intent系API共通の応答形状)** — `{id, form, topic, category, raw_text, time:{start, end}|null, geo:{center:{lat,lng}, radius_m}|null, participants:{min, max, includes_owner}, budget:{min, max, currency:"JPY"}|null, hard_constraints:[...], soft_constraints:[...], negative_constraints:[...], visibility:"hidden_until_match", notification_level, alcohol_involved, status, version, expires_at, created_at, updated_at}`。form・topic・category・time・geo・budget・expires_atは未確定欄がnullとなる(draft保存の許容・§2.2)。時刻はISO 8601。visibilityは単値のため常に"hidden_until_match"
 
@@ -491,6 +492,8 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 - 応答・ログに購読のendpoint・鍵を出さない(08 §6)
 
 **dev専用API(F7b実装確定・テスト専用)** — GET /v1/dev/notifications。存在隠しは上記の観測APIと同一条件(prodは一律404)。認証した本人の通知行だけを全件`{notifications: [{id, type, latch_id, intent_id, push_state, push_attempted_at, read_at, created_at}]}`(id降順)で返す(#16のAPI部分の証拠・10 §4)。
+
+**dev専用API(LLM real接続で確定・テスト専用)** — GET /v1/dev/usage?date=YYYY-MM-DD。存在隠しは上記の観測APIと同一条件(prodは一律404)。登録済みの利用者で認証し、指定した日(JST)の外部送信の回数を`{date, counts: {"<送信先>:<系統>": 回数}}`で返す(usage_countersのscope=`external_send`・§2.2。行が無ければcountsは空)。dateの形式違いは400 VALIDATION_FAILED。負荷試験の費用の確認と外部送信の記録の確かめに使う(08 §5・10 §5)
 
 ### 3.4 WebSocket(リアルタイムチャット)
 

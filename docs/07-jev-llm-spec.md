@@ -1,9 +1,9 @@
 # LATCH LLM利用仕様書
 
-- 文書バージョン: v0.28
+- 文書バージョン: v0.29
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.28更新: 2026-10-23)
+- 作成日: 2026-10-17(v0.29更新: 2026-10-24)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。stub出力仕様(Jev・Embedding)の定義・Parserのp95定義(成功応答ベース)・Embedding timeoutの初期値変更(5秒・D-D-03)・Vectorize metadata indexの作成規定・同意文言の系統別具体化
 - v0.3の変更点: 前提文書欄の版数同期(F1実装に伴う04/05/10改版への追従)
 - v0.4の変更点: 前提文書欄の版数同期(F2実装に伴う05・06改版への追従)。§3のstub規則を精緻化(時刻語は0〜23時のみ採用・人数は2〜4人へ丸め、丸めた場合はwarnings表示)
@@ -31,18 +31,21 @@
 - v0.26の変更点: 不具合の修正工程(第2回・issue #17・2026-10-23オーナー合意・12 §2の決定記録(不具合の修正工程(第2回)))に伴い、§4のEmbeddingの「再試行0・失敗は06 §5のバックフィルで回収」を、呼び出しの中では再試行せず、失敗はキューのメッセージのやり直し(10秒・30秒・60秒)で直し、使い切ったものを06 §5のバックフィルで回収する形に改めた。前提文書欄の版数を更新
 - v0.27の変更点: 前提文書欄の版数同期のみの改版(02・10・12の測り直し完了の記録に伴う追従)。内容の変更はない
 - v0.28の変更点: 不具合の修正工程(第2回)の最終レビューの直しに伴い、§1の表のEmbeddingの再試行の欄を「キューのやり直し(10秒・30秒・60秒)の後にバックフィルで回収」に改めた(§4と揃える)。前提文書欄の版数を更新
-- 前提文書: 01 要件定義書 v0.21 / 04 アーキテクチャ設計書 v0.28 / 05 データモデル・API仕様書 v0.28 / 06 マッチングパイプライン設計書 v0.28
+- v0.29の変更点: LLM real接続の工程の完了(2026-10-24・01冒頭の決定記録(LLM real接続)・12 §2の決定記録(LLM real接続))に伴い、§1へモデルの版の固定(Parserと予備のJev=`claude-haiku-5-5`・Jev=TypeSafeの`jev-1.14.0`)と呼び出しの形(SDKを使わずfetchで直接呼ぶ)を、§2の「`LATCH_LLM_MODE=real`は未実装として扱う」をreal実装の確定(stagingはreal・起動ガード)へ、§3へParserの差し替え口(非同期・失敗型付き)・Anthropicの構造化出力・期限の選択肢をコードで求めること・人数の丸めをrealにも適用すること・場所の言及の注意表示を、§4へ地域名をEmbedding入力に含めない決定と比較の結果を、§5へTypeSafeとAnthropicの呼び出しの形を、§6へ合格基準の改め(locationを場所の言及の注意表示へ置き換え・順序整合の測り方・呼び出しの失敗10%・Precision@0.60は参考値)と測り方・結果を、§8へ外部送信の集計の実装を加えた。§9のD-D-01を解消した。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.22 / 04 アーキテクチャ設計書 v0.29 / 05 データモデル・API仕様書 v0.29 / 06 マッチングパイプライン設計書 v0.29
 - 本書の位置づけ: LLMを利用する3系統(Intent Parser / Embedding / Jev)の提供元・入出力・timeout・精度ゲート・コスト・同意を確定する。**04の未決D-A-01(Embeddingプロバイダ)を本書が解消する**
 
 ## 1. 提供元の確定
 
 | 系統 | 提供元(第一候補) | フォールバック | 主な根拠 |
 |---|---|---|---|
-| Intent Parser(構造化) | Anthropic Claude(Haikuクラス・構造化出力) | なし(失敗時は構造化フォームへ) | 日本語の構造化精度・JSON出力保証・安定した実績 |
+| Intent Parser(構造化) | Anthropic Claude(Haikuクラス・構造化出力・モデルID`claude-haiku-5-5`に固定) | なし(失敗時は構造化フォームへ) | 日本語の構造化精度・JSON出力保証・安定した実績 |
 | Embedding(意味検索) | **Workers AI `@cf/baai/bge-m3`**(1024次元) | なし(キューのやり直し(10秒・30秒・60秒)の後にバックフィルで回収) | **データがCloudflare内に留まる(外部送信ゼロ・01 §21に最良)**・100言語対応・$0.012/百万トークン級の安価さ(2026-10-17確認) |
-| Jev(成立判定) | TypeSafe(System One・確率のみ返すモデル) | Anthropic Claude(Haikuクラス) | 原子的確率判定・出力スキーマ保証(再試行不要) |
+| Jev(成立判定) | TypeSafe(System One・確率のみ返すモデル・`jev-1.14.0`に固定) | Anthropic Claude(Haikuクラス・`claude-haiku-5-5`に固定) | 原子的確率判定・出力スキーマ保証(再試行不要) |
 
 **Vectorizeインデックスの確定(D-A-01解消)。** dimensions=1024・metric=cosine。ダッシュボードのモデル・プリセット一覧に依らず、wranglerで次元と距離を**明示指定**して作成する(プリセット側の対応状況に左右されないため・2026-10-17確認)。あわせて**metadata index(form・status・category)**をインデックス作成時に宣言する(filterに使うキーは宣言済みである必要があるため)。
+
+**モデルの版の固定(LLM real接続で確定)。** TypeSafeは最新版を指す名前(`jev-latest`)を使わず、精度ゲート(§6)に合格した版の名前`jev-1.14.0`を固定して送る。AnthropicもモデルID`claude-haiku-5-5`を固定する。モデル名はコード内の定数(`apps/worker/src/llm/real/prompts.ts`)に置き、精度ゲートの記録(`eval/records/gate.json`)に採点時のモデル名を残す。モデルを替えるときは採点し直す(CIが記録のモデル名と今の定数の一致を確かめる・09 §4)。提供元のSDKは使わず、`fetch`で直接呼ぶ(依存を増やさず、時間切れと失敗の種別の写像を一か所に持つため)
 
 外部送信の所在: Parser(→Anthropic)とJev(→TypeSafe/Anthropic)のみ。**Embeddingは外部送信が発生しない**(Workers AIはCloudflareプラットフォーム内。学習利用なしの契約条件は08 §5)。
 
@@ -52,7 +55,9 @@
 
 **Embeddingのモード変数(F3実装確定)。** Embeddingは `LATCH_EMBEDDING_MODE=stub | real`(既定stub)で切り替える。Parser/Jevの `LATCH_LLM_MODE`(前項)とは**独立**であり、Embeddingだけ先行してreal化する時期があるための分離である。real実装はWorkers AI bge-m3(§1)・timeout 5秒(§4)。stubは後述(c)の決定的擬似ベクトル。
 
-**Parser/Jevのreal接続の時期(オーナー合意 2026-10-20)。** Parser(Anthropic)とJev(TypeSafe・Anthropic)のreal接続実装と精度ゲート(§6・09 §4)は、F9の前の独立工程で行う(12 §2の決定記録)。それまで `LATCH_LLM_MODE=real` は未実装として扱い、F4〜F8のゲートはstubで証明する(10 §3)。
+**Parser/Jevのreal接続の時期(オーナー合意 2026-10-20)。** Parser(Anthropic)とJev(TypeSafe・Anthropic)のreal接続実装と精度ゲート(§6・09 §4)は、F9の前の独立工程で行う(12 §2の決定記録)。F4〜F8のゲートはstubで証明した(10 §3)。
+
+**real実装(LLM real接続で確定・2026-10-24)。** `LATCH_LLM_MODE=real`でParserはAnthropic(§3)、Jevは第一候補TypeSafe・予備Anthropic(§5)を呼ぶ。指示文とモデル名はコード内の定数として版を持つ(`apps/worker/src/llm/real/prompts.ts`)。`LATCH_LLM_MODE=real`なのにシークレット`ANTHROPIC_API_KEY`・`TYPESAFE_API_KEY`のどちらかが無ければ、全環境で起動を拒む(`ENV_MISSING_LLM_KEY`・04 §4)。精度ゲートの合格記録の無いreal設定はCIが落とす(09 §4)。stagingは`LATCH_LLM_MODE=real`で動かす(10 §1)。localとCI・E2Eは既定のstubのまま。prodのreal化はF10で行う
 
 **stubの出力仕様。** (a) Parser stub: 規則ベース(時刻・金額・人数の抽出とform判定辞書。formはconnectionを既定とする)。(b) Jev stub: 全7軸とも確率0.9を返す固定値(閾値0.60を確実に超え、提案の発生をE2Eで保証するため。テストseedの文字列先頭に応じて0.9/0.3を切り替える拡張を許す)。**目印(F4a実装確定)**: どちらかの正規化テキストの先頭が `__jev_low__` なら全7軸0.3、`__jev_timeout__` なら失敗(timeout)を返す(両方ある場合はtimeoutを優先する)。(c) Embedding stub: 入力正規化テキストのSHA-256ハッシュから生成する決定的な擬似ベクトル(1024次元・ノルム正規化)。
 
@@ -61,12 +66,15 @@
 - **入力**: 対象ユーザーのraw_textのみ。他ユーザーのデータ・位置・プロフィールは一切送らない
 - **出力**(05 §3.3のスキーマ): form・topic・category・time・geo・participants・budget・expires_at選択肢・alcohol_involved・constraints各種・warnings
 - 曖昧表現の丸め: 「くらい」は確定値へ丸め(「5000円くらい」→5000)。「2〜4人」はmin=2/max=4。form判定は時制・時刻表現の有無で行い、判定信頼度が低い場合もformとして返し、**確認UIで必ずユーザーが確認・切替する**(01 §9)
-- timeout 10秒・再試行0・失敗時はPARSE_FAILED(再試行ボタン+構造化フォームフォールバック)。性能目標「p95 3秒」は**成功応答について**測定し、失敗率は警報線(09 §6)で監視する
+- timeout 10秒・再試行0・失敗時はPARSE_FAILED(422・再試行ボタン+構造化フォームフォールバック)。性能目標「p95 3秒」は**成功応答について**測定し、失敗率は警報線(09 §6)で監視する
 - stub: 時刻表現・金額・人数の規則ベース抽出+form判定辞書。form=connection既定(より安全な側)。時刻語は**0〜23時のみ採用**し(範囲外は時刻語としない=日付語の有無でform判定する。不正なISOを作らないため)、人数は**2〜4人へ丸める**(丸めた場合はwarningsに`{field:"participants"}`の注意表示を載せる・05 §3.3)
+- **real実装(LLM real接続で確定)**: AnthropicのMessages API(`claude-haiku-5-5`・APIの版`2026-10-21`・構造化出力(`output_config.format`にJSONスキーマ)・thinkingは使わない)を呼ぶ。送るのはraw_textと現在時刻(JST・相対日時の基準)だけとする。指示文は丸め規則・formの判定基準・カテゴリの一覧(05 §2.2)・時刻は0〜23時でJSTのオフセット付きISOとすることを指示する。応答は検証し(zod)、スキーマの外・カテゴリの一覧の外はinvalid_outputとする。期限の選択肢(expires_at_options)はモデルに作らせず、stubと同じ計算をコードで行う(`apps/worker/src/llm/expiry.ts`・05 §3.3)。人数が2〜4人の外なら、realでもコードで2〜4人へ丸めてwarningsに`{field:"participants"}`を載せる(stubと同じ規則)。場所・地域・駅名・店名の言及があるときは、warningsに`{field:"geo"}`の注意表示を載せる(Parserは地域を解決せず`geo`は常にnull・05 §3.3。確認UIで場所の添付を見落とさないため)
+- **差し替え口(LLM real接続で確定)**: Parserの接続実装は `(raw_text) => Promise<ParserOutcome>` の関数とする。ParserOutcomeは成功(出力)または失敗(種別=timeout / rate_limited / overloaded / invalid_output / other・Jevと同じ)で、**例外を投げずに返す**。stubも同じ形にそろえる(常に成功)。ルートは失敗の種別を問わず422 PARSE_FAILEDとし、種別はログの許可リストのerror_codeへ出す
 
 ## 4. Embedding
 
 - **入力**: 正規化テキスト(構造化データから生成。topic+soft_constraints+negative_constraints+participants補足。機会Intentは時間・予算を含む)。**raw_textは送らない**。**座標は正規化テキストに含めない(F3実装確定)。** 地域は地域名(F4で確定するgeofeatures逆引き・04 §4)としての表現が定まるまで含めない。座標を埋め込み入力に含めても精度の価値がなく、将来のJev外部送信(01 §21)に入力テキストが乗るためである。地域名を入力に含めるかは、Parser/Jevのreal接続と精度ゲートの工程(F9前の独立工程・12 §2)で、realのEmbeddingとゴールドセットでの比較により決める(stubのEmbeddingでは効果を測れないため。入力テキストが将来のJev外部送信に乗るため08の外部送信の判断と同じ場で扱う。オーナー裁定 2026-10-20・01冒頭の決定記録)
+- **地域名も入力に含めない(オーナー決定 2026-10-24・01冒頭の決定記録(LLM real接続)の6)。** realのEmbedding(bge-m3)とJevのゴールドセット(47組・09 §3)で、地域名を正規化テキストに含める/含めないの2通りを比べた(`pnpm eval:region`・記録は`eval/records/region.json`)。yesの組とnoの組のcosine類似度の分かれ方(AUC)は、全体で含めない0.620・含める0.585だった(同じ地域の組は0.615→0.630・違う地域の組は0.754→0.785で、どちらも標本は小さい)。含めても精度は上がらず、含めなければ地域名がJevの外部送信(TypeSafe・Anthropic)に乗らない(08 §5の送るものの表は変わらない)。距離の判定はLayer 1が担う(06 §3)。ただし、利用者が本文に書いた地名はParserのtopicに残ることがあり、その場合は正規化テキストとJevの外部送信に乗る(issue #31・次の修正工程で扱う)
 - 出力1024次元。`intents.embedding_model`にモデル識別子と日時を記録(01 §18)。モデル変更時は全active Intentの一括再エンベディング+再評価をCronジョブで行う
 - timeout 5秒(初期値・実測で確定する。D-D-03)・呼び出しの中では再試行しない(再試行0)。失敗は第1段の失敗としてキューのメッセージを10秒・30秒・60秒の遅延でやり直し、使い切ったもの(DLQでdead)は06 §5のバックフィルで回収する(不具合の修正工程(第2回)で確定)
 
@@ -77,6 +85,7 @@
 - timing_fitの解釈: 機会=日時の一致、つながり=関係の温度・開始時機の一致(01 §13)
 - 出力は**数値のみ**保存(jev_result・05 §2.2)。理由文の生成は行わない
 - timeout 6秒。429/529/timeout時はフォールバックLLM(同7軸・JSON確定出力)。フォールバック失敗は保留(06 §5)
+- **real実装(LLM real接続で確定)**: 第一候補はTypeSafeの`POST /v1/systemone`(モデル`jev-1.14.0`・§1)で、`state`を`{intent_a: 正規化テキストA, intent_b: 正規化テキストB}`とし、7軸を`noul`形式の問い(`intent_a`・`intent_b`を指す日本語の問いと、yes/noの意味を書いた基準)として1回で送る。応答の各軸の`noul`(0〜1)を受け、欠け・範囲外はinvalid_outputとする。HTTP 429はrate_limited・503/529はoverloaded・時間切れはtimeout・それ以外はotherとする。予備はAnthropic(`claude-haiku-5-5`)の構造化出力で、7軸の数値(0〜1)だけのJSONを受ける(理由文は求めない)。切り替えの判断・予算・circuit breakerは次項の共通部のまま
 - **差し替え口(F4a実装確定)**: Jevの接続実装は `(input) => Promise<JevOutcome>` の関数とする。入力は両Intentの正規化テキスト(a/bはmatch_candidatesの正規化順)、JevOutcomeは成功(7軸の数値)または失敗(種別=timeout / rate_limited / overloaded / invalid_output / other)。接続実装は**例外を投げずにJevOutcomeを返す**契約とする。第一候補と予備の2実装を持ち、予備へ切り替えるのは失敗種別がtimeout・rate_limited・overloadedの場合のみとする(invalid_output・otherは切り替えずに保留)。予算計上・circuit breaker・切替の判断は接続実装の外の共通部に置き、提供元のAPI形状の差は接続実装の中に閉じる
 
 ## 6. 精度ゲート(Offline・real適用の前提)
@@ -87,11 +96,16 @@
 |---|---|
 | form判定(つながり/機会)の完全一致 | 90%以上 |
 | topic抽出一致(係り受けを除く主題語) | 85%以上 |
-| 機会Intentのフィールド(本書の初期基準) | category 85% / time.start 90% / location 90% / participants 80% / budget 90% |
+| 機会Intentのフィールド(本書の初期基準) | category 85% / time.start 90% / 場所の言及の注意表示(warningsの`{field:"geo"}`)90% / participants 80% / budget 90% |
 | alcohol_involved | **recall 100%**(見逃し0)・precision 90%以上。境界表現(「ワイン会」「バーの誕生日会」/負例「コーヒー」)を必ず含める |
-| Jev(a→b・b→aの順序整合) | ゴールドセットで\|P(a→b) − P(b→a)\|の中央値が0.3以下(初期基準) |
+| Jev(a→b・b→aの順序整合) | ゴールドセットで\|P(a→b) − P(b→a)\|の中央値が0.3以下(初期基準)。第一候補(TypeSafe)と予備(Anthropic)のそれぞれで満たす |
+| Jevの呼び出しの失敗 | 第一候補・予備のそれぞれで、呼び出しの失敗が全体の10%以下 |
 
 ゴールドセットの初期規模は両形式各40件以上+境界20件以上とし、四半期ごとに追加する。
+
+**基準の改めと測り方(LLM real接続で確定・2026-10-24)。** (1)機会Intentの「location 90%」は、Parserが地域を解決しない(05 §3.3: parseは`geo: null`を返し、利用者が添付で確定する)ため採点の対象から外し、入力文に場所の言及があるときにwarningsへ`{field:"geo"}`を載せることの一致率(90%)に置き換えた(確認UIで場所の添付を見落とさないため)。(2)Jevの順序整合は、同じ2つの意思を(A,B)と(B,A)の順で送り、意味の同じ軸どうし(Aを先に送ったときのwould_a_accept_bと、Bを先に送ったときのwould_b_accept_aなど)の差の絶対値を全軸・全組で集め、その中央値で判定する。予備は第一候補が落ちたときに使うため、予備も単独で満たすことを求める。(3)Jevの呼び出しの失敗が10%を超えたら不合格とする(失敗した組を除いた少数の値で合否が決まらないため)。Parserの呼び出しの失敗は、その件が採点するすべての項目で不一致として数える。(4)Offline Precision@0.60(09 §4)・応答時間のp95・1回あたりの入力トークンは参考値として記録し、合否には使わない。採点は手元のコマンド(`pnpm eval:gate`)で行い、記録をリポジトリに置く。CIは本物のAIを呼ばず記録を照合する(09 §4)
+
+**結果(2026-10-24・合格・記録は`eval/records/gate.json`)。** ゴールドセットはParser 117件(つながりIntent 45・機会Intent 46・境界26)・Jev 47組(yes 22・no 25)。form 100%・topic 100%・category 96.2%・time.start 97.0%・participants 90.9%・budget 100%・場所の言及の注意表示95.7%・alcohol_involved recall 1.000/precision 1.000。Jevの順序整合の中央値はTypeSafe 0.030・Anthropic 0.050、呼び出しの失敗は0件。参考値はPrecision@0.60がTypeSafe 0.824・Anthropic 0.840、p95がParser 2.02秒・Jev(TypeSafe)0.18秒・Jev(Anthropic)2.09秒
 
 ## 7. コスト見積と計上
 
@@ -105,12 +119,13 @@
 - Jev: 「相手との成立判定のため、預けた意思から生成したテキストを外部AI事業者(TypeSafe・緊急時はAnthropic)へ送信します(入力原文は送りません・学習利用はありません)」
 - Embedding: 「意味検索の埋め込み計算はCloudflare内で行われ、外部送信はありません」
 
-送信先・データ種別・件数の集計を記録し、問い合わせ時に開示できる状態を保つ。
+送信先・データ種別・件数の集計を記録し、問い合わせ時に開示できる状態を保つ。**集計の実装(LLM real接続で確定)**: 外部へ送るたびに、usage_counters(05 §2.2)のscope=`external_send`・key=`<送信先>:<系統>`(`anthropic:parser`・`typesafe:jev`・`anthropic:jev`)・period=JSTの日付の行へ1を加える(成否を問わず送った回数。送った中身は記録しない。記録の失敗は呼び出しを止めない)。日ごとの件数はdev専用の観測API(GET /v1/dev/usage・05 §3.3)で読む(08 §5)
 
 ## 9. 未決事項(本書ローカル)
 
 | ID | 未決事項 | 暫定案 |
 |---|---|---|
-| D-D-01 | Parser/Jevのプロンプト最終文面 | 実装時にゴールドセットで調整し、リポジトリ内でバージョン管理 |
 | D-D-02 | Jev軸の重み付け・connection_fit相当の軸追加 | 運用データ蓄積後(C係数再計算と同じタイミング・01 §24) |
 | D-D-03 | Embeddingのtimeout値(初期5秒) | F3の実測で確定(コールドスタート・長文入力の傾向を見る) |
+
+**解消(2026-10-24・LLM real接続)。** D-D-01(Parser/Jevのプロンプト最終文面)は、暫定案どおり指示文をコード内の定数(`apps/worker/src/llm/real/prompts.ts`)としてリポジトリで版を持ち、ゴールドセットで調整して精度ゲートに合格した(§6)。指示文を変えると記録の指紋が変わり、採点し直すまでCIが落ちる(09 §4)
