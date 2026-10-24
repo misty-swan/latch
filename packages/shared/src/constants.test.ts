@@ -103,6 +103,8 @@ describe("LIMITS", () => {
 describe("PIPELINE", () => {
 	it("docs/06・05 §2.3・§2.6・07 §4のパイプライン定数と等しい", () => {
 		expect(PIPELINE).toEqual({
+			// 1回の実行の計測の書き込みの上限(出典は06 §7・本文の更新は後の工程)
+			METRICS_WRITES_PER_INVOCATION: 240,
 			TOP_K_RETRIEVAL: 100,
 			LAYER1_OUTPUT_MAX: 50,
 			LAYER3_OUTPUT_MAX: 20,
