@@ -41,7 +41,7 @@
 - Modify: `apps/worker/src/llm/types.ts`(`LlmFailureKind`・`isFallbackEligible`)
 - Modify: `apps/worker/src/llm/real/jev-typesafe.ts`
 - Modify: `apps/worker/src/llm/real/anthropic.ts`(Parser・予備のJevが使う共通の分類)
-- Test: `apps/worker/src/llm/real/jev-typesafe.test.ts`・`apps/worker/src/llm/real/anthropic.test.ts`・切り替えの共通部の既存の試験(`apps/worker/src/llm/mode.test.ts`・`apps/worker/src/jev/runner.ts` の試験)
+- Test: `apps/worker/src/llm/real/jev-typesafe.test.ts`・`apps/worker/src/llm/real/anthropic.test.ts`・切り替えの共通部の既存の試験(`apps/worker/src/llm/mode.test.ts`・`apps/worker/tests/jev-runner.test.ts`)
 
 **Interfaces:**
 - Produces: `LlmFailureKind = "timeout" | "rate_limited" | "overloaded" | "unavailable" | "invalid_output" | "other"`。`isFallbackEligible(kind)` は timeout・rate_limited・overloaded・unavailable で真
