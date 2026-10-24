@@ -6,17 +6,22 @@
  * 使い方: LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/run.mjs <シナリオ.js> [k6 runの引数...]
  *   例: node tools/load/run.mjs tools/load/scenarios/a-intent-burst.js -e RUN_ID=202610221530 \
  *         --summary-export tools/load/results/202610221530-a.json
- * k6の場所は環境変数K6_BIN(既定は`k6`=PATHの中)。宛先は`-e LATCH_LOAD_BASE_URL`として渡す。
- * LATCH_ACCESS_CLIENT_ID・LATCH_ACCESS_CLIENT_SECRET(Cloudflare Accessの通行証)があれば
- * 同じく`-e`で渡し、k6の出力に出たときはURLと同じく伏せる。
+ * k6の場所は環境変数K6_BIN(既定は`k6`=PATHの中)。宛先LATCH_LOAD_BASE_URLと、
+ * LATCH_ACCESS_CLIENT_ID・LATCH_ACCESS_CLIENT_SECRET(Cloudflare Accessの通行証)は`-e`の引数で渡さず、
+ * k6の環境変数として渡す(引数はプロセスの一覧に見えるため・k6は__ENVで読む。lib/k6run.mjs)。
+ * k6の出力に出たときはURLと通行証を伏せる。
  */
 
 import { spawn } from "node:child_process";
+import { k6Invocation } from "./lib/k6run.mjs";
 import { createLineRedactor } from "./lib/redact.mjs";
-import { accessHeaders } from "./lib/target.mjs";
 
-const base = (process.env.LATCH_LOAD_BASE_URL || "").replace(/\/+$/, "");
 const [scenario, ...k6Args] = process.argv.slice(2);
+const { args, childEnv, base, secrets } = k6Invocation({
+	env: process.env,
+	scenario,
+	k6Args,
+});
 if (!base) {
 	console.error("LATCH_LOAD_BASE_URLが未設定です");
 	process.exit(1);
@@ -28,30 +33,10 @@ if (!scenario) {
 	process.exit(1);
 }
 
-const access = accessHeaders(process.env);
-const accessEnvArgs =
-	Object.keys(access).length === 0
-		? []
-		: [
-				"-e",
-				`LATCH_ACCESS_CLIENT_ID=${process.env.LATCH_ACCESS_CLIENT_ID}`,
-				"-e",
-				`LATCH_ACCESS_CLIENT_SECRET=${process.env.LATCH_ACCESS_CLIENT_SECRET}`,
-			];
-const secrets = Object.values(access);
-
-const child = spawn(
-	process.env.K6_BIN || "k6",
-	[
-		"run",
-		"-e",
-		`LATCH_LOAD_BASE_URL=${base}`,
-		...accessEnvArgs,
-		...k6Args,
-		scenario,
-	],
-	{ stdio: ["inherit", "pipe", "pipe"] },
-);
+const child = spawn(process.env.K6_BIN || "k6", args, {
+	env: childEnv,
+	stdio: ["inherit", "pipe", "pipe"],
+});
 
 const out = createLineRedactor(base, (s) => process.stdout.write(s), secrets);
 const err = createLineRedactor(base, (s) => process.stderr.write(s), secrets);

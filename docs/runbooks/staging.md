@@ -265,7 +265,7 @@ k6は通信に失敗したとき(名前が引けない・接続が切れた・�
 LATCH_LOAD_BASE_URL=<stagingのURL> node tools/load/run.mjs <シナリオ.js> [k6 runの引数...]
 ```
 
-(k6を起動して`-e LATCH_LOAD_BASE_URL`を渡し、k6の出力の中の宛先のURL・ホスト名・workers.devのURLを`<url伏せ>`に置き換えて表示する。終わったときの終了コードはk6のものをそのまま返す)
+(k6を起動して宛先`LATCH_LOAD_BASE_URL`をk6の環境変数として渡し(`-e`の引数はプロセスの一覧に見えるため使わない)、k6の出力の中の宛先のURL・ホスト名・workers.devのURLを`<url伏せ>`に置き換えて表示する。終わったときの終了コードはk6のものをそのまま返す)
 
 - k6の場所は環境変数`K6_BIN`で指定する(既定は`k6`=PATHの通った場所にあるもの)
 - 報告書や記録へ貼るのは、包みを通した出力だけにする。k6を直接動かしたときの生の出力は貼らない
@@ -278,7 +278,7 @@ k6には`-e 名前=値`で渡す(`LATCH_LOAD_BASE_URL`だけは包みが渡す)�
 | 名前 | 既定 | 意味 |
 |---|---|---|
 | `LATCH_LOAD_BASE_URL` | (必須) | 宛先=`<stagingのURL>`。包み(`run.mjs`)と後始末(`cleanup.mjs`)にシェルの環境変数として渡す |
-| `LATCH_ACCESS_CLIENT_ID`・`LATCH_ACCESS_CLIENT_SECRET` | (stagingは必須) | Cloudflare Accessの通行証(4.3)。包みと後始末にシェルの環境変数として渡す。包みはk6へ`-e`で渡し、出力から伏せる |
+| `LATCH_ACCESS_CLIENT_ID`・`LATCH_ACCESS_CLIENT_SECRET` | (stagingは必須) | Cloudflare Accessの通行証(4.3)。包みと後始末にシェルの環境変数として渡す。包みはk6へ環境変数として渡し(`-e`の引数には入れない)、出力から伏せる |
 | `RUN_ID` | 実行時刻(UTCの`YYYYMMDDHHmm`) | 実行の印。試験用の利用者のsubjectは`load-<RUN_ID>-<連番>`になり、集計はこの印で絞る。12桁の数字のみ |
 | `LOAD_SCALE` | `1` | 規模の倍率。rate(1分あたりの件数)・人数・時間に掛ける(試しは`0.1`)。(b)(d)は`1.6`(48組)まで・(c)は`1.44`(72組)まで(7.6・7.7) |
 | `PROPOSAL_WAIT_SEC` | `60` | 提案の通知を待つ上限の秒数((b)〜(d)で使う)。(b)では、先に保存した側の意思の反映を待つ上限にも使う(7.6) |
