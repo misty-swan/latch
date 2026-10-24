@@ -209,7 +209,7 @@ describe("反映確認のskipped(payload.skipped)", () => {
 				{ status: "processed", reflect_ms: null, skipped: "inactive" },
 				{ status: "processed", reflect_ms: null, skipped: null },
 			]),
-		).toEqual({ skipped: 3, failed: 0, other: 1 });
+		).toEqual({ skipped: 3, failed: 0, pending: 0, other: 1 });
 	});
 	it("reflectionBreakdown: pendingは確認中として数え、otherに入れない(#34)", () => {
 		expect(
