@@ -1,0 +1,1320 @@
+# Jevのゴールドセット(オーナー承認済み 2026-10-24)。形式は README.md
+version: 1
+approved_by_owner: "2026-10-24"
+pairs:
+  - id: pair-001
+    match: "yes"
+    a:
+      form: "occasion"
+      topic: "ボードゲーム"
+      softConstraints: ["初心者歓迎"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 4
+      participantsIncludesOwner: true
+      startsAt: "2026-11-07T19:00:00+09:00"
+      endsAt: "2026-11-07T21:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "渋谷区"
+    b:
+      form: "occasion"
+      topic: "ボードゲーム会"
+      softConstraints: ["気軽に"]
+      negativeConstraints: []
+      participantsMin: 3
+      participantsMax: 4
+      participantsIncludesOwner: true
+      startsAt: "2026-11-07T18:30:00+09:00"
+      endsAt: "2026-11-07T21:30:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "渋谷区"
+  - id: pair-002
+    match: "yes"
+    a:
+      form: "occasion"
+      topic: "渋谷で軽く飲み"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-07T19:00:00+09:00"
+      endsAt: "2026-11-07T21:00:00+09:00"
+      budgetMin: 3000
+      budgetMax: 5000
+      area: "渋谷区"
+    b:
+      form: "occasion"
+      topic: "仕事終わりに一杯"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-07T19:30:00+09:00"
+      endsAt: "2026-11-07T21:30:00+09:00"
+      budgetMin: 4000
+      budgetMax: 4000
+      area: "目黒区"
+  - id: pair-003
+    match: "yes"
+    a:
+      form: "occasion"
+      topic: "高尾山ハイキング"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-08T09:00:00+09:00"
+      endsAt: "2026-11-08T14:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "八王子市"
+    b:
+      form: "occasion"
+      topic: "高尾山に登る"
+      softConstraints: ["ゆっくりペース"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-08T08:30:00+09:00"
+      endsAt: "2026-11-08T13:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "八王子市"
+  - id: pair-004
+    match: "yes"
+    a:
+      form: "occasion"
+      topic: "テニスのラリー"
+      softConstraints: ["中級者"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-14T13:00:00+09:00"
+      endsAt: "2026-11-14T15:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "港区"
+    b:
+      form: "occasion"
+      topic: "テニス"
+      softConstraints: ["経験3年以上"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-14T13:00:00+09:00"
+      endsAt: "2026-11-14T16:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "港区"
+  - id: pair-005
+    match: "yes"
+    a:
+      form: "occasion"
+      topic: "オンラインでマーダーミステリー"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 4
+      participantsMax: 4
+      participantsIncludesOwner: true
+      startsAt: "2026-11-04T20:00:00+09:00"
+      endsAt: "2026-11-04T23:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "世田谷区"
+    b:
+      form: "occasion"
+      topic: "マダミスをオンラインで"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 3
+      participantsMax: 4
+      participantsIncludesOwner: true
+      startsAt: "2026-11-04T20:00:00+09:00"
+      endsAt: "2026-11-04T23:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "札幌市中央区"
+  - id: pair-006
+    match: "yes"
+    a:
+      form: "occasion"
+      topic: "新宿で焼き鳥"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-06T19:30:00+09:00"
+      endsAt: "2026-11-06T21:30:00+09:00"
+      budgetMin: 4000
+      budgetMax: 4000
+      area: "新宿区"
+    b:
+      form: "occasion"
+      topic: "焼き鳥"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-06T19:00:00+09:00"
+      endsAt: "2026-11-06T21:00:00+09:00"
+      budgetMin: 3000
+      budgetMax: 5000
+      area: "新宿区"
+  - id: pair-007
+    match: "yes"
+    a:
+      form: "occasion"
+      topic: "ランチ"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-03T12:00:00+09:00"
+      endsAt: "2026-11-03T13:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "千代田区"
+    b:
+      form: "occasion"
+      topic: "祝日のランチ"
+      softConstraints: ["おしゃべり"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-03T12:00:00+09:00"
+      endsAt: "2026-11-03T13:30:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "千代田区"
+  - id: pair-008
+    match: "yes"
+    a:
+      form: "occasion"
+      topic: "皇居ラン"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-09T07:00:00+09:00"
+      endsAt: "2026-11-09T08:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "千代田区"
+    b:
+      form: "occasion"
+      topic: "朝ラン"
+      softConstraints: ["5km程度"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-09T06:45:00+09:00"
+      endsAt: "2026-11-09T08:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "中央区"
+  - id: pair-009
+    match: "yes"
+    a:
+      form: "occasion"
+      topic: "ビアガーデン"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-21T17:00:00+09:00"
+      endsAt: "2026-11-21T19:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "横浜市中区"
+    b:
+      form: "occasion"
+      topic: "ビールを飲みに行く"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-21T17:30:00+09:00"
+      endsAt: "2026-11-21T20:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "横浜市西区"
+  - id: pair-010
+    match: "yes"
+    a:
+      form: "occasion"
+      topic: "カラオケ"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-14T16:00:00+09:00"
+      endsAt: "2026-11-14T18:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "豊島区"
+    b:
+      form: "occasion"
+      topic: "カラオケで歌う"
+      softConstraints: ["アニソン多め"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-14T15:00:00+09:00"
+      endsAt: "2026-11-14T18:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "豊島区"
+  - id: pair-011
+    match: "yes"
+    a:
+      form: "occasion"
+      topic: "陶芸体験"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-12-19T14:00:00+09:00"
+      endsAt: "2026-12-19T16:00:00+09:00"
+      budgetMin: 6000
+      budgetMax: 6000
+      area: "世田谷区"
+    b:
+      form: "occasion"
+      topic: "陶芸教室の体験"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-12-19T13:30:00+09:00"
+      endsAt: "2026-12-19T16:00:00+09:00"
+      budgetMin: 5000
+      budgetMax: 7000
+      area: "世田谷区"
+  - id: pair-012
+    match: "yes"
+    a:
+      form: "occasion"
+      topic: "江ノ島で釣り"
+      softConstraints: ["初心者歓迎"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-29T07:00:00+09:00"
+      endsAt: "2026-11-29T11:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "藤沢市"
+    b:
+      form: "occasion"
+      topic: "海釣りに初挑戦"
+      softConstraints: ["初心者"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-29T06:30:00+09:00"
+      endsAt: "2026-11-29T10:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "藤沢市"
+  - id: pair-014
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "ボードゲーム仲間"
+      softConstraints: ["月1くらい"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "渋谷区"
+    b:
+      form: "connection"
+      topic: "ボードゲームを定期的に遊ぶ"
+      softConstraints: ["重ゲーも好き"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "目黒区"
+  - id: pair-015
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "英会話の練習相手"
+      softConstraints: ["オンライン", "間違えても気にしない"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "大阪市北区"
+    b:
+      form: "connection"
+      topic: "英語で話す練習"
+      softConstraints: ["オンライン", "初心者"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "福岡市中央区"
+  - id: pair-016
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "筋トレ仲間"
+      softConstraints: ["ジム通い"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "港区"
+    b:
+      form: "connection"
+      topic: "ジムに一緒に通う"
+      softConstraints: ["モチベ維持"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "港区"
+  - id: pair-017
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "日本酒の銘柄を開拓"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "中央区"
+    b:
+      form: "connection"
+      topic: "日本酒好きと飲み歩き"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "千代田区"
+  - id: pair-018
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "子育ての情報交換"
+      softConstraints: ["2歳の子"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "さいたま市浦和区"
+    b:
+      form: "connection"
+      topic: "同じ年頃の子がいる親と話したい"
+      softConstraints: ["1〜3歳"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "さいたま市南区"
+  - id: pair-019
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "小説を読み合う"
+      softConstraints: ["オンライン"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "京都市左京区"
+    b:
+      form: "connection"
+      topic: "創作仲間と作品の感想交換"
+      softConstraints: ["オンライン"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "名古屋市中区"
+  - id: pair-020
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "キャンプ仲間"
+      softConstraints: ["グルキャンに興味"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "相模原市"
+    b:
+      form: "connection"
+      topic: "ソロキャンプ仲間"
+      softConstraints: ["たまにグルキャンも"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "町田市"
+  - id: pair-021
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "Rustのもくもく会"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "渋谷区"
+    b:
+      form: "connection"
+      topic: "プログラミング勉強仲間"
+      softConstraints: ["Rust"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "新宿区"
+  - id: pair-022
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "サウナ"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "札幌市中央区"
+    b:
+      form: "connection"
+      topic: "サウナ好きとつながりたい"
+      softConstraints: ["おすすめ施設を教え合う"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "札幌市北区"
+  - id: pair-023
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "将棋を指す友達"
+      softConstraints: ["オンラインでも対面でも"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "横浜市港北区"
+    b:
+      form: "connection"
+      topic: "将棋の対局相手"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "横浜市神奈川区"
+  - id: pair-024
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "ボードゲーム"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-07T19:00:00+09:00"
+      endsAt: "2026-11-07T21:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "渋谷区"
+    b:
+      form: "occasion"
+      topic: "ボードゲーム"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-14T19:00:00+09:00"
+      endsAt: "2026-11-14T21:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "渋谷区"
+  - id: pair-025
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "渋谷で軽く飲み"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-07T19:00:00+09:00"
+      endsAt: "2026-11-07T21:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "渋谷区"
+    b:
+      form: "occasion"
+      topic: "静かにカフェで読書"
+      softConstraints: []
+      negativeConstraints: ["お酒"]
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-07T19:00:00+09:00"
+      endsAt: "2026-11-07T21:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "目黒区"
+  - id: pair-026
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "高尾山ハイキング"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-08T09:00:00+09:00"
+      endsAt: "2026-11-08T14:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "八王子市"
+    b:
+      form: "occasion"
+      topic: "映画を観る"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-08T09:00:00+09:00"
+      endsAt: "2026-11-08T12:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "八王子市"
+  - id: pair-027
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "ランチ"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-03T12:00:00+09:00"
+      endsAt: "2026-11-03T13:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "千代田区"
+    b:
+      form: "occasion"
+      topic: "ランチ"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-03T12:00:00+09:00"
+      endsAt: "2026-11-03T13:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "大阪市北区"
+  - id: pair-028
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "テニス"
+      softConstraints: ["経験3年以上", "試合形式でガチで"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-14T13:00:00+09:00"
+      endsAt: "2026-11-14T15:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "港区"
+    b:
+      form: "occasion"
+      topic: "テニス"
+      softConstraints: ["完全初心者", "ゆるく教えてほしい"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-14T13:00:00+09:00"
+      endsAt: "2026-11-14T15:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "港区"
+  - id: pair-029
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "飲み会"
+      softConstraints: ["わいわい盛り上がりたい"]
+      negativeConstraints: []
+      participantsMin: 4
+      participantsMax: 4
+      participantsIncludesOwner: true
+      startsAt: "2026-11-20T18:00:00+09:00"
+      endsAt: "2026-11-20T21:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "港区"
+    b:
+      form: "occasion"
+      topic: "少人数で静かに飲む"
+      softConstraints: []
+      negativeConstraints: ["大人数"]
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-20T18:30:00+09:00"
+      endsAt: "2026-11-20T21:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "港区"
+  - id: pair-030
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "焼肉"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-21T19:00:00+09:00"
+      endsAt: "2026-11-21T21:00:00+09:00"
+      budgetMin: 8000
+      budgetMax: 10000
+      area: "新宿区"
+    b:
+      form: "occasion"
+      topic: "焼肉"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-21T19:00:00+09:00"
+      endsAt: "2026-11-21T21:00:00+09:00"
+      budgetMin: 2000
+      budgetMax: 3000
+      area: "新宿区"
+  - id: pair-031
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "オンライン人狼"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-12-05T21:00:00+09:00"
+      endsAt: "2026-12-05T23:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "世田谷区"
+    b:
+      form: "occasion"
+      topic: "オンライン人狼"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-12-05T09:00:00+09:00"
+      endsAt: "2026-12-05T11:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "世田谷区"
+  - id: pair-032
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "カラオケ"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-14T16:00:00+09:00"
+      endsAt: "2026-11-14T18:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "豊島区"
+    b:
+      form: "occasion"
+      topic: "カラオケ"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-14T20:00:00+09:00"
+      endsAt: "2026-11-14T22:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "豊島区"
+  - id: pair-033
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "子連れでイチゴ狩り"
+      softConstraints: ["子連れ"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-12-13T10:00:00+09:00"
+      endsAt: "2026-12-13T13:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "千葉市緑区"
+    b:
+      form: "occasion"
+      topic: "イチゴ狩り"
+      softConstraints: ["大人だけで"]
+      negativeConstraints: ["子連れ"]
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-12-13T10:00:00+09:00"
+      endsAt: "2026-12-13T13:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "千葉市緑区"
+  - id: pair-034
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "朝ラン"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-09T07:00:00+09:00"
+      endsAt: "2026-11-09T08:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "千代田区"
+    b:
+      form: "occasion"
+      topic: "夜ラン"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-09T20:00:00+09:00"
+      endsAt: "2026-11-09T21:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "千代田区"
+  - id: pair-035
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "美術館めぐり"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-14T13:30:00+09:00"
+      endsAt: "2026-11-14T16:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "台東区"
+    b:
+      form: "occasion"
+      topic: "野球観戦"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-14T13:00:00+09:00"
+      endsAt: "2026-11-14T17:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "文京区"
+  - id: pair-037
+    match: "no"
+    a:
+      form: "connection"
+      topic: "ボードゲーム仲間"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "渋谷区"
+    b:
+      form: "connection"
+      topic: "筋トレ仲間"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "世田谷区"
+  - id: pair-038
+    match: "no"
+    a:
+      form: "connection"
+      topic: "飲み友達"
+      softConstraints: ["仕事終わりに一杯"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "中野区"
+    b:
+      form: "connection"
+      topic: "お酒を飲まない人と話したい"
+      softConstraints: []
+      negativeConstraints: ["お酒"]
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "中野区"
+  - id: pair-039
+    match: "no"
+    a:
+      form: "connection"
+      topic: "英会話の練習相手"
+      softConstraints: ["オンライン"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "大阪市北区"
+    b:
+      form: "connection"
+      topic: "韓国語の練習相手"
+      softConstraints: ["オンライン"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "大阪市北区"
+  - id: pair-040
+    match: "no"
+    a:
+      form: "connection"
+      topic: "子育ての情報交換"
+      softConstraints: ["2歳の子"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "さいたま市浦和区"
+    b:
+      form: "connection"
+      topic: "夜遊び仲間"
+      softConstraints: ["クラブ", "オールで"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "さいたま市浦和区"
+  - id: pair-041
+    match: "no"
+    a:
+      form: "connection"
+      topic: "キャンプ仲間"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "札幌市中央区"
+    b:
+      form: "connection"
+      topic: "キャンプ仲間"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "那覇市"
+  - id: pair-042
+    match: "no"
+    a:
+      form: "connection"
+      topic: "フットサルで大会を目指す"
+      softConstraints: ["競技志向", "週3練習"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "川崎市中原区"
+    b:
+      form: "connection"
+      topic: "ゆるくフットサル"
+      softConstraints: ["エンジョイ", "月1くらい"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "川崎市中原区"
+  - id: pair-043
+    match: "no"
+    a:
+      form: "connection"
+      topic: "喫煙OKのバーで語る"
+      softConstraints: ["タバコ吸います"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "渋谷区"
+    b:
+      form: "connection"
+      topic: "飲み友達"
+      softConstraints: []
+      negativeConstraints: ["タバコ"]
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "渋谷区"
+  - id: pair-044
+    match: "no"
+    a:
+      form: "connection"
+      topic: "ミステリーの読書会"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "杉並区"
+    b:
+      form: "connection"
+      topic: "釣り仲間"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "中野区"
+  - id: pair-045
+    match: "no"
+    a:
+      form: "connection"
+      topic: "ギター初心者のゆるい練習"
+      softConstraints: ["初心者", "ゆるく"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "練馬区"
+    b:
+      form: "connection"
+      topic: "プロを目指すバンドのドラム募集"
+      softConstraints: ["本気", "週2スタジオ"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "練馬区"
+  - id: pair-046
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "ボードゲーム会"
+      softConstraints: ["わいわい"]
+      negativeConstraints: []
+      participantsMin: 3
+      participantsMax: 4
+      participantsIncludesOwner: true
+      startsAt: "2026-11-07T19:00:00+09:00"
+      endsAt: "2026-11-07T21:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "渋谷区"
+    b:
+      form: "occasion"
+      topic: "夜の座禅と瞑想"
+      softConstraints: ["静かに"]
+      negativeConstraints: ["騒がしい場"]
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-07T19:00:00+09:00"
+      endsAt: "2026-11-07T21:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "世田谷区"
+  - id: pair-047
+    match: "no"
+    a:
+      form: "occasion"
+      topic: "朝のヨガ"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-22T07:00:00+09:00"
+      endsAt: "2026-11-22T08:00:00+09:00"
+      budgetMin: null
+      budgetMax: null
+      area: "横浜市中区"
+    b:
+      form: "occasion"
+      topic: "はしご酒"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: "2026-11-22T20:00:00+09:00"
+      endsAt: "2026-11-22T23:00:00+09:00"
+      budgetMin: 5000
+      budgetMax: 8000
+      area: "横浜市西区"
+  - id: pair-048
+    match: "no"
+    a:
+      form: "connection"
+      topic: "子連れで公園遊び"
+      softConstraints: ["平日昼"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "さいたま市浦和区"
+    b:
+      form: "connection"
+      topic: "仕事終わりにダーツバー"
+      softConstraints: ["夜のみ"]
+      negativeConstraints: ["子連れ"]
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "川口市"
+  - id: pair-049
+    match: "no"
+    a:
+      form: "connection"
+      topic: "英検の勉強を一緒に"
+      softConstraints: ["オンライン", "毎朝30分"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "京都市左京区"
+    b:
+      form: "connection"
+      topic: "オンラインでFPSのランク戦"
+      softConstraints: ["深夜", "ボイスチャット"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "大阪市北区"

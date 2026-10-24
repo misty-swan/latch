@@ -1,0 +1,1131 @@
+# Parserのゴールドセット(オーナー承認済み 2026-10-24)。形式は README.md
+version: 1
+approved_by_owner: "2026-10-24"
+items:
+  - id: conn-001
+    raw_text: "週末に一緒にボードゲームをしてくれる人を探しています"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["ボードゲーム", "ボドゲ"]
+      category: "趣味・娯楽"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-002
+    raw_text: "最近ランニングを始めました。たまに一緒に走ってくれる人がいたら嬉しいです"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["ランニング", "走"]
+      category: "スポーツ・運動"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-003
+    raw_text: "英会話の練習相手がほしい。お互い間違えても気にしない感じで"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["英会話", "英語"]
+      category: "学び・語学"
+      time_start: null
+      budget: null
+      alcohol_involved: false
+  - id: conn-004
+    raw_text: "Rustを勉強中なので、もくもく会みたいに一緒に勉強できる仲間を探してます"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["Rust", "もくもく", "勉強"]
+      time_start: null
+      alcohol_involved: false
+  - id: conn-005
+    raw_text: "読んだ本の感想を気軽に話せる人とつながりたいです。ミステリー多めです"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["読書", "本", "ミステリー"]
+      category: "読書・文化"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-006
+    raw_text: "子どもが2歳です。同じくらいの子がいる親どうしで情報交換したい"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["子育て", "育児", "情報交換"]
+      category: "子育て・家庭"
+      time_start: null
+      budget: null
+      alcohol_involved: false
+  - id: conn-007
+    raw_text: "キャンプ仲間募集!ソロキャン歴3年で、グルキャンにも挑戦してみたいです"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["キャンプ", "グルキャン"]
+      category: "旅行・アウトドア"
+      time_start: null
+  - id: conn-008
+    raw_text: "フィルムカメラで街歩きしながら写真を撮る仲間がほしい"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["写真", "カメラ"]
+      time_start: null
+      alcohol_involved: false
+  - id: conn-009
+    raw_text: "ギター初心者です。セッションとかしてみたいので、ゆるく練習できる人いませんか"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["ギター", "セッション"]
+      category: "音楽・芸術"
+      time_start: null
+      budget: null
+      alcohol_involved: false
+  - id: conn-010
+    raw_text: "美術館めぐりが好きな人と、展示の感想を話したいです"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["美術館", "展示"]
+      time_start: null
+      alcohol_involved: false
+  - id: conn-011
+    raw_text: "転職を考えていて、同じIT業界の人とキャリアの話ができたらうれしいです"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["キャリア", "転職"]
+      category: "仕事・キャリア"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-012
+    raw_text: "筋トレ仲間ほしいです。ジムに通ってるけどモチベが続かなくて…"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["筋トレ", "ジム"]
+      category: "スポーツ・運動"
+      time_start: null
+      budget: null
+      alcohol_involved: false
+  - id: conn-013
+    raw_text: "週1くらいでオンラインで一緒に韓国語を勉強しませんか"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["韓国語"]
+      category: "学び・語学"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-014
+    raw_text: "スプラを一緒にやれる友達がほしい!ガチじゃなくてわいわい系で"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["スプラ", "スプラトゥーン", "ゲーム"]
+      category: "趣味・娯楽"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-015
+    raw_text: "地域の清掃ボランティアに一緒に参加してくれる方を探しています"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["清掃", "ボランティア"]
+      time_start: null
+      budget: null
+      alcohol_involved: false
+  - id: conn-016
+    raw_text: "料理が趣味です。作ったものを見せ合ったり、レシピを交換できる人と仲良くなりたい"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["料理", "レシピ"]
+      time_start: null
+      alcohol_involved: false
+  - id: conn-017
+    raw_text: "サウナ好きの人とゆるくつながりたい。おすすめの施設を教え合いたいです"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["サウナ"]
+      time_start: null
+      alcohol_involved: false
+  - id: conn-018
+    raw_text: "仕事終わりに軽く飲める飲み友達がほしいです"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["飲み"]
+      category: "食・飲み"
+      time_start: null
+      budget: null
+      alcohol_involved: true
+  - id: conn-019
+    raw_text: "日本酒が好きで、いろんな銘柄を一緒に開拓できる人がいたらうれしいです"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["日本酒"]
+      category: "食・飲み"
+      time_start: null
+      alcohol_involved: true
+  - id: conn-020
+    raw_text: "ワイン好きの友達募集。詳しくなくても大丈夫です"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["ワイン"]
+      category: "食・飲み"
+      time_start: null
+      alcohol_involved: true
+  - id: conn-021
+    raw_text: "クラフトビールのお店を開拓するのが趣味です。仲間になってくれる人を探してます"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["クラフトビール", "ビール"]
+      category: "食・飲み"
+      time_start: null
+      budget: null
+      alcohol_involved: true
+  - id: conn-022
+    raw_text: "家で晩酌しながらオンラインでだらだら話せる人いませんか"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["晩酌", "オンライン", "話"]
+      time_start: null
+      alcohol_involved: true
+  - id: conn-023
+    raw_text: "カフェ巡りが好きです。おいしいコーヒーのお店を一緒に探しませんか"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["カフェ", "コーヒー"]
+      category: "食・飲み"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-024
+    raw_text: "甘いもの好きな人とスイーツの食べ歩き仲間になりたい"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["スイーツ", "食べ歩き"]
+      category: "食・飲み"
+      time_start: null
+      budget: null
+      alcohol_involved: false
+  - id: conn-025
+    raw_text: "ラーメン好きの人、一緒にいろんなお店を食べ歩きしましょう"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["ラーメン"]
+      category: "食・飲み"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-026
+    raw_text: "登山を始めたいけど一人だと不安なので、低い山から一緒に登ってくれる人"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["登山", "山"]
+      time_start: null
+      alcohol_involved: false
+  - id: conn-027
+    raw_text: "釣りに行く仲間がほしいです。海釣りメインで、道具は貸せます"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["釣り"]
+      time_start: null
+      budget: null
+      alcohol_involved: false
+  - id: conn-028
+    raw_text: "小説を書いています。お互いの作品を読み合える人とつながりたい"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["小説", "作品"]
+      category: "創作・クリエイティブ"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-029
+    raw_text: "イラスト描いてる人と作業通話したいです!"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["イラスト", "作業"]
+      category: "創作・クリエイティブ"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-030
+    raw_text: "ピアノを弾く人と連弾してみたいなと思っています"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["ピアノ", "連弾"]
+      category: "音楽・芸術"
+      time_start: null
+      budget: null
+      alcohol_involved: false
+  - id: conn-031
+    raw_text: "ヨガやストレッチを一緒に続けられる人、朝活仲間になってくれませんか"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["ヨガ", "ストレッチ", "朝活"]
+      time_start: null
+      alcohol_involved: false
+  - id: conn-032
+    raw_text: "フットサルのメンバーをゆるく探してます。経験者でも初心者でも"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["フットサル"]
+      category: "スポーツ・運動"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-033
+    raw_text: "テニス歴5年です。休日に打ち合える相手がほしいです"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["テニス"]
+      category: "スポーツ・運動"
+      time_start: null
+      budget: null
+      alcohol_involved: false
+  - id: conn-034
+    raw_text: "簿記2級の勉強を一緒にがんばれる人いませんか"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["簿記", "資格"]
+      time_start: null
+      alcohol_involved: false
+  - id: conn-035
+    raw_text: "プログラミング初心者どうしで、作ったアプリを見せ合いたい"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["プログラミング", "アプリ"]
+      category: "テック・開発"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-036
+    raw_text: "昔ながらの喫茶店めぐりが好きな方とお話ししたいです"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["喫茶"]
+      time_start: null
+      budget: null
+      alcohol_involved: false
+  - id: conn-037
+    raw_text: "将棋を指せる友達がほしい。オンラインでも対面でも"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["将棋"]
+      category: "趣味・娯楽"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-038
+    raw_text: "猫を飼っている人と猫の話をしたいです"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["猫"]
+      time_start: null
+      alcohol_involved: false
+  - id: conn-039
+    raw_text: "映画を観たあとに感想を語り合える人がほしい。邦画もアニメも好きです"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["映画"]
+      time_start: null
+      budget: null
+      alcohol_involved: false
+  - id: conn-040
+    raw_text: "推し活仲間募集中です。ライブの話で盛り上がりたい"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["推し活", "推し", "ライブ"]
+      time_start: null
+      alcohol_involved: false
+  - id: conn-041
+    raw_text: "麻雀を覚えたいので、教えてくれる人や一緒に練習できる人を探してます"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["麻雀"]
+      category: "趣味・娯楽"
+      time_start: null
+      alcohol_involved: false
+  - id: conn-042
+    raw_text: "お互いの副業の話をしながら刺激をもらえる関係になれたら"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["副業"]
+      category: "仕事・キャリア"
+      time_start: null
+      budget: null
+      alcohol_involved: false
+  - id: conn-043
+    raw_text: "家庭菜園をしている人と、育て方のコツを交換したい"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["家庭菜園", "菜園"]
+      time_start: null
+      alcohol_involved: false
+  - id: conn-044
+    raw_text: "K-POPのダンスを一緒に練習する仲間を2〜3人で"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["ダンス", "K-POP"]
+      time_start: null
+      alcohol_involved: false
+  - id: conn-045
+    raw_text: "3人くらいでボードゲーム会を定期的にやれるメンバーがほしいです"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [connection]
+    expect:
+      form: "connection"
+      topic_any: ["ボードゲーム", "ボドゲ"]
+      time_start: null
+      participants: { min: 3, max: 3 }
+      budget: null
+      alcohol_involved: false
+  - id: occ-001
+    raw_text: "今週土曜の19時から渋谷で軽く飲みませんか?2〜3人で"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["飲み"]
+      category: "食・飲み"
+      time_start: "2026-11-07T19:00:00+09:00"
+      participants: { min: 2, max: 3 }
+      alcohol_involved: true
+      geo_warning: true
+  - id: occ-002
+    raw_text: "明日のお昼12時にランチ行ける人いますか"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["ランチ"]
+      category: "食・飲み"
+      time_start: "2026-11-03T12:00:00+09:00"
+      budget: null
+      alcohol_involved: false
+  - id: occ-003
+    raw_text: "11月8日の日曜、朝9時から高尾山に登りたいです"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["高尾山", "登山", "山"]
+      time_start: "2026-11-08T09:00:00+09:00"
+      alcohol_involved: false
+      geo_warning: true
+  - id: occ-004
+    raw_text: "水曜の20時からオンラインでマーダーミステリーやりませんか。4人で"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["マーダーミステリー", "マダミス"]
+      category: "趣味・娯楽"
+      time_start: "2026-11-04T20:00:00+09:00"
+      participants: { min: 4, max: 4 }
+      alcohol_involved: false
+  - id: occ-005
+    raw_text: "金曜の夜7時半から新宿で焼き鳥、予算4000円くらいで"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["焼き鳥"]
+      category: "食・飲み"
+      time_start: "2026-11-06T19:30:00+09:00"
+      budget: { min: 4000, max: 4000 }
+      geo_warning: true
+  - id: occ-006
+    raw_text: "11月14日(土)13時から神宮外苑でテニスしましょう"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["テニス"]
+      category: "スポーツ・運動"
+      time_start: "2026-11-14T13:00:00+09:00"
+      alcohol_involved: false
+      geo_warning: true
+  - id: occ-007
+    raw_text: "明後日の18時からボルダリング行きたい!初心者です"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["ボルダリング"]
+      time_start: "2026-11-04T18:00:00+09:00"
+      alcohol_involved: false
+  - id: occ-008
+    raw_text: "今週の日曜の15時、カフェでもくもく作業しませんか"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["作業", "もくもく"]
+      time_start: "2026-11-08T15:00:00+09:00"
+      alcohol_involved: false
+  - id: occ-009
+    raw_text: "来週月曜の朝7時から皇居ラン!一緒に走る人いませんか"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["ラン", "皇居"]
+      category: "スポーツ・運動"
+      time_start: "2026-11-09T07:00:00+09:00"
+      alcohol_involved: false
+      geo_warning: true
+  - id: occ-010
+    raw_text: "11月21日 17時から ビアガーデン行きませんか 予算3000〜5000円"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["ビアガーデン", "ビール"]
+      category: "食・飲み"
+      time_start: "2026-11-21T17:00:00+09:00"
+      budget: { min: 3000, max: 5000 }
+      alcohol_involved: true
+  - id: occ-011
+    raw_text: "明日の夜7時から映画を観に行きたいです。観たあとにお茶でも"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["映画"]
+      time_start: "2026-11-14T19:00:00+09:00"
+      alcohol_involved: false
+  - id: occ-012
+    raw_text: "日曜の14時からボードゲームカフェ行きませんか、3人か4人で"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["ボードゲーム", "ボドゲ"]
+      category: "趣味・娯楽"
+      time_start: "2026-11-15T14:00:00+09:00"
+      participants: { min: 3, max: 4 }
+      alcohol_involved: false
+  - id: occ-013
+    raw_text: "今夜22時からApexやりませんか!ランク回したいです"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["Apex", "エーペックス", "エペ"]
+      category: "趣味・娯楽"
+      time_start: "2026-11-13T22:00:00+09:00"
+      alcohol_involved: false
+  - id: occ-014
+    raw_text: "明日10時から代々木公園でピクニックしましょう。お弁当持ち寄りで"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["ピクニック"]
+      time_start: "2026-11-14T10:00:00+09:00"
+      alcohol_involved: false
+      geo_warning: true
+  - id: occ-015
+    raw_text: "11/15 18:00〜 中目黒の居酒屋で語りませんか。予算5000円"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["居酒屋", "飲み", "語"]
+      category: "食・飲み"
+      time_start: "2026-11-15T18:00:00+09:00"
+      budget: { min: 5000, max: 5000 }
+      alcohol_involved: true
+      geo_warning: true
+  - id: occ-016
+    raw_text: "明日の16時から一緒にカラオケ行ってくれる人!2時間くらい"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["カラオケ"]
+      time_start: "2026-11-14T16:00:00+09:00"
+  - id: occ-017
+    raw_text: "11月20日の金曜、19時から英会話カフェに行きたいです"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["英会話"]
+      category: "学び・語学"
+      time_start: "2026-11-20T19:00:00+09:00"
+      alcohol_involved: false
+  - id: occ-018
+    raw_text: "日曜の朝8時から多摩川でバードウォッチングしませんか"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["バードウォッチング", "野鳥"]
+      time_start: "2026-11-15T08:00:00+09:00"
+      alcohol_involved: false
+      geo_warning: true
+  - id: occ-019
+    raw_text: "明日13時半からの美術展、チケットが1枚余ってます。一緒に行きませんか"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["美術", "展"]
+      time_start: "2026-11-14T13:30:00+09:00"
+      alcohol_involved: false
+  - id: occ-020
+    raw_text: "11月28日(土)20時からオンラインで読書会をします。課題本は『博士の愛した数式』です"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["読書会", "読書"]
+      category: "読書・文化"
+      time_start: "2026-11-28T20:00:00+09:00"
+      alcohol_involved: false
+  - id: occ-021
+    raw_text: "今日の15時から吉祥寺でスイーツ食べ歩きしませんか"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["スイーツ", "食べ歩き"]
+      category: "食・飲み"
+      time_start: "2026-12-05T15:00:00+09:00"
+      alcohol_involved: false
+      geo_warning: true
+  - id: occ-022
+    raw_text: "明日の11時から河原でBBQします!1人3000円です"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["BBQ", "バーベキュー"]
+      time_start: "2026-12-06T11:00:00+09:00"
+      budget: { min: 3000, max: 3000 }
+  - id: occ-023
+    raw_text: "12月12日の土曜、18時からワインを飲みながらチーズを食べる会をやります"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["ワイン", "チーズ"]
+      category: "食・飲み"
+      time_start: "2026-12-12T18:00:00+09:00"
+      alcohol_involved: true
+  - id: occ-024
+    raw_text: "12/24の19時、横浜赤レンガのクリスマスマーケットに行く人いませんか"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["クリスマスマーケット", "クリスマス"]
+      time_start: "2026-12-24T19:00:00+09:00"
+      geo_warning: true
+  - id: occ-025
+    raw_text: "明日の朝6時半から初心者向けのフットサル、2〜4人で参加しませんか"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["フットサル"]
+      category: "スポーツ・運動"
+      time_start: "2026-12-06T06:30:00+09:00"
+      participants: { min: 2, max: 4 }
+      alcohol_involved: false
+  - id: occ-026
+    raw_text: "今日の夜9時からオンラインで人狼やりましょう!"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["人狼"]
+      category: "趣味・娯楽"
+      time_start: "2026-12-05T21:00:00+09:00"
+      budget: null
+      alcohol_involved: false
+  - id: occ-027
+    raw_text: "12月19日の午後2時から陶芸体験に行きたいです。予算は6000円くらい"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["陶芸"]
+      category: "創作・クリエイティブ"
+      time_start: "2026-12-19T14:00:00+09:00"
+      budget: { min: 6000, max: 6000 }
+      alcohol_involved: false
+  - id: occ-028
+    raw_text: "明日の17時から、銭湯からのサウナでととのいませんか"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["銭湯", "サウナ"]
+      time_start: "2026-12-06T17:00:00+09:00"
+      alcohol_involved: false
+  - id: occ-029
+    raw_text: "12月13日の日曜10時から子連れで行けるイチゴ狩り、一緒に行けるご家庭いませんか"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["イチゴ狩り", "いちご狩り", "苺狩り"]
+      time_start: "2026-12-13T10:00:00+09:00"
+      alcohol_involved: false
+  - id: occ-030
+    raw_text: "今日の19時から忘年会しよ!飲み放題3500円のお店を予約できます。4人で"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["忘年会", "飲み"]
+      category: "食・飲み"
+      time_start: "2026-12-05T19:00:00+09:00"
+      participants: { min: 4, max: 4 }
+      budget: { min: 3500, max: 3500 }
+      alcohol_involved: true
+  - id: occ-031
+    raw_text: "今夜19時から大阪・梅田で串カツとビール!"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["串カツ", "ビール"]
+      category: "食・飲み"
+      time_start: "2026-11-20T19:00:00+09:00"
+      alcohol_involved: true
+      geo_warning: true
+  - id: occ-032
+    raw_text: "明日の朝10時から鎌倉でお寺めぐりしませんか"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["寺", "鎌倉"]
+      time_start: "2026-11-21T10:00:00+09:00"
+      alcohol_involved: false
+      geo_warning: true
+  - id: occ-033
+    raw_text: "23日の祝日、13時からオンラインでモブプロしませんか(TypeScriptです)"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["モブプロ", "TypeScript", "プログラミング"]
+      category: "テック・開発"
+      time_start: "2026-11-23T13:00:00+09:00"
+      alcohol_involved: false
+  - id: occ-034
+    raw_text: "明日18時から渋谷でボドゲ会。2000円以内で遊べる場所にします"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["ボドゲ", "ボードゲーム"]
+      category: "趣味・娯楽"
+      time_start: "2026-11-21T18:00:00+09:00"
+      alcohol_involved: false
+      geo_warning: true
+  - id: occ-035
+    raw_text: "今日の20時半からスマブラのオンライン対戦しよう"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["スマブラ", "対戦"]
+      category: "趣味・娯楽"
+      time_start: "2026-11-20T20:30:00+09:00"
+      alcohol_involved: false
+  - id: occ-036
+    raw_text: "11月29日(日)7時から江ノ島で朝釣り、初心者歓迎です"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["釣り"]
+      time_start: "2026-11-29T07:00:00+09:00"
+      alcohol_involved: false
+      geo_warning: true
+  - id: occ-037
+    raw_text: "明日の15時から駅前のスタバで勉強会。資格の話とかしたいです"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["勉強", "資格"]
+      time_start: "2026-11-21T15:00:00+09:00"
+      alcohol_involved: false
+      geo_warning: true
+  - id: occ-038
+    raw_text: "明日の夜8時からバーで一杯どうですか"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["バー", "一杯", "飲み"]
+      category: "食・飲み"
+      time_start: "2026-11-21T20:00:00+09:00"
+      alcohol_involved: true
+  - id: occ-039
+    raw_text: "11月22日の日曜、10時から代々木公園で朝ヨガ。参加費1000円です"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["ヨガ"]
+      time_start: "2026-11-22T10:00:00+09:00"
+      budget: { min: 1000, max: 1000 }
+      alcohol_involved: false
+      geo_warning: true
+  - id: occ-040
+    raw_text: "明後日の14時からのライブ、一緒に行ける人いませんか。2人で"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["ライブ"]
+      category: "音楽・芸術"
+      time_start: "2026-11-22T14:00:00+09:00"
+      participants: { min: 2, max: 2 }
+      alcohol_involved: false
+  - id: occ-041
+    raw_text: "今日の18時から新橋で飲み会!サラリーマン歓迎、3〜4人で"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["飲み"]
+      category: "食・飲み"
+      time_start: "2026-11-20T18:00:00+09:00"
+      participants: { min: 3, max: 4 }
+      alcohol_involved: true
+      geo_warning: true
+  - id: occ-042
+    raw_text: "12月1日の火曜19時から、オンラインで英語のディスカッション会をやります"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["英語", "ディスカッション"]
+      category: "学び・語学"
+      time_start: "2026-12-01T19:00:00+09:00"
+      alcohol_involved: false
+  - id: occ-043
+    raw_text: "明日11時からフリマに出店します。一緒に店番してくれる人!"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["フリマ", "店番"]
+      time_start: "2026-11-21T11:00:00+09:00"
+      alcohol_involved: false
+  - id: occ-044
+    raw_text: "日曜の朝9時から子ども向けの科学教室、親子で参加しませんか"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["科学"]
+      time_start: "2026-11-22T09:00:00+09:00"
+      alcohol_involved: false
+  - id: occ-045
+    raw_text: "11月28日にディズニー行きたい!一緒に行ってくれる人"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["ディズニー"]
+      time_start: null
+      alcohol_involved: false
+      geo_warning: true
+  - id: occ-046
+    raw_text: "今週の土曜日、どこかで紅葉狩りしたいです"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [occasion]
+    expect:
+      form: "occasion"
+      topic_any: ["紅葉"]
+      time_start: null
+      alcohol_involved: false
+  - id: bnd-001
+    raw_text: "ワイン会を一緒に開いてくれる人を探しています"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [boundary, alcohol]
+    expect:
+      form: "connection"
+      topic_any: ["ワイン"]
+      alcohol_involved: true
+  - id: bnd-002
+    raw_text: "今週土曜の19時からバーで友達の誕生日会をやります。一緒に祝ってくれる人"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [boundary, alcohol]
+    expect:
+      form: "occasion"
+      topic_any: ["誕生日"]
+      time_start: "2026-11-07T19:00:00+09:00"
+      alcohol_involved: true
+  - id: bnd-003
+    raw_text: "日本酒の蔵見学に行ってみたい。試飲もあるみたいです"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [boundary, alcohol]
+    expect:
+      form: "connection"
+      topic_any: ["蔵", "日本酒"]
+      alcohol_involved: true
+  - id: bnd-004
+    raw_text: "クラフトビールのイベントに一緒に行ける人"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [boundary, alcohol]
+    expect:
+      form: "connection"
+      topic_any: ["クラフトビール", "ビール"]
+      alcohol_involved: true
+  - id: bnd-005
+    raw_text: "はしご酒できる人!"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [boundary, alcohol]
+    expect:
+      form: "connection"
+      topic_any: ["はしご酒", "酒"]
+      alcohol_involved: true
+  - id: bnd-006
+    raw_text: "仕事帰りに一杯ひっかけられる仲間がほしい"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [boundary, alcohol]
+    expect:
+      form: "connection"
+      alcohol_involved: true
+  - id: bnd-007
+    raw_text: "今夜、軽く一杯どう?"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [boundary, alcohol]
+    expect:
+      form: "occasion"
+      time_start: null
+      alcohol_involved: true
+  - id: bnd-008
+    raw_text: "ビアガーデンが閉まる前に行きたい!"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [boundary, alcohol]
+    expect:
+      topic_any: ["ビアガーデン"]
+      alcohol_involved: true
+  - id: bnd-009
+    raw_text: "コーヒー好きどうしで、ハンドドリップの話ができる人"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [boundary, alcohol-neg]
+    expect:
+      form: "connection"
+      topic_any: ["コーヒー", "ハンドドリップ"]
+      alcohol_involved: false
+  - id: bnd-010
+    raw_text: "お酒は飲めないので、ノンアルで楽しめる人と夜ごはんに行きたいです"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [boundary, alcohol-neg]
+    expect:
+      form: "connection"
+      topic_any: ["ごはん", "食事", "夕食", "ディナー", "夜ごはん", "飯"]
+  - id: bnd-011
+    raw_text: "タピオカ飲みに行ける友達ほしい"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [boundary, alcohol-neg]
+    expect:
+      form: "connection"
+      topic_any: ["タピオカ"]
+      alcohol_involved: false
+  - id: bnd-012
+    raw_text: "明日の15時からお茶しませんか。紅茶のおいしいお店があって"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [boundary, alcohol-neg]
+    expect:
+      form: "occasion"
+      topic_any: ["お茶", "紅茶"]
+      time_start: "2026-11-14T15:00:00+09:00"
+      alcohol_involved: false
+  - id: bnd-013
+    raw_text: "ソフトドリンクだけの、お酒なしの交流会に参加したい"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [boundary, alcohol-neg]
+    expect:
+      topic_any: ["交流"]
+  - id: bnd-014
+    raw_text: "今週の金曜20時から、ノンアルコールビールで乾杯しましょう"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [boundary, alcohol-neg]
+    expect:
+      form: "occasion"
+      time_start: "2026-11-06T20:00:00+09:00"
+  - id: bnd-015
+    raw_text: "毎週土曜の朝にランニングする仲間を探してます"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [boundary, form]
+    expect:
+      form: "connection"
+      topic_any: ["ランニング", "ラン"]
+      time_start: null
+      alcohol_involved: false
+  - id: bnd-016
+    raw_text: "いつか一緒に富士山に登りたいです"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [boundary, form]
+    expect:
+      form: "connection"
+      topic_any: ["富士山", "登山"]
+      time_start: null
+      alcohol_involved: false
+      geo_warning: true
+  - id: bnd-017
+    raw_text: "今度の土曜か日曜にテニスしませんか"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [boundary, form]
+    expect:
+      form: "occasion"
+      topic_any: ["テニス"]
+      time_start: null
+      alcohol_involved: false
+  - id: bnd-019
+    raw_text: "来月どこかで温泉に行きたい"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [boundary, form]
+    expect:
+      topic_any: ["温泉"]
+      time_start: null
+  - id: bnd-020
+    raw_text: "下北沢あたりで古着屋めぐりができる友達がほしい"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [boundary, geo]
+    expect:
+      form: "connection"
+      topic_any: ["古着"]
+      alcohol_involved: false
+      geo_warning: true
+  - id: bnd-021
+    raw_text: "吉祥寺に住んでいます。近所でゆるく話せる人"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [boundary, geo]
+    expect:
+      form: "connection"
+      alcohol_involved: false
+      geo_warning: true
+  - id: bnd-022
+    raw_text: "横浜駅の周辺で一緒にごはんを食べられる人"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [boundary, geo]
+    expect:
+      form: "connection"
+      topic_any: ["ごはん", "食事", "夕食", "ディナー", "夜ごはん", "飯"]
+      alcohol_involved: false
+      geo_warning: true
+  - id: bnd-023
+    raw_text: "梅田でカフェ巡り"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [boundary, geo]
+    expect:
+      form: "connection"
+      topic_any: ["カフェ"]
+      alcohol_involved: false
+      geo_warning: true
+  - id: bnd-024
+    raw_text: "3人でできることなら何でも!"
+    now: "2026-11-20T12:15:00+09:00"
+    tags: [boundary, people]
+    expect:
+      form: "connection"
+      participants: { min: 3, max: 3 }
+  - id: bnd-025
+    raw_text: "10人くらいでBBQしたい"
+    now: "2026-11-02T10:00:00+09:00"
+    tags: [boundary, people]
+    expect:
+      form: "connection"
+      topic_any: ["BBQ", "バーベキュー"]
+      participants: { min: 4, max: 4 }
+  - id: bnd-026
+    raw_text: "2人きりでじっくり話せる人"
+    now: "2026-11-13T21:30:00+09:00"
+    tags: [boundary, people]
+    expect:
+      form: "connection"
+      participants: { min: 2, max: 2 }
+      alcohol_involved: false
+  - id: bnd-027
+    raw_text: "ランチ会をしたいです、予算1500円くらい"
+    now: "2026-12-05T08:00:00+09:00"
+    tags: [boundary, budget]
+    expect:
+      form: "connection"
+      topic_any: ["ランチ"]
+      budget: { min: 1500, max: 1500 }
+      alcohol_involved: false
