@@ -7,7 +7,12 @@
  * (intents-create-api.test.tsと同一パターン)。
  */
 
-import { env, SELF } from "cloudflare:test";
+import {
+	createExecutionContext,
+	env,
+	SELF,
+	waitOnExecutionContext,
+} from "cloudflare:test";
 import { type IntentDTO, OCCASION_DEFAULT_TTL_HOURS } from "@latch/shared";
 import { eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -25,6 +30,8 @@ import {
 	proposalHistory,
 	users,
 } from "../src/db/schema";
+import type { Env as WorkerEnv } from "../src/env";
+import worker from "../src/index";
 import { MS_PER_DAY } from "../src/intents/expiry";
 import { updateWithOptimisticLock } from "../src/routes/intents";
 import privateJwkText from "./fixtures/test-idp-private.jwk?raw";
@@ -117,6 +124,35 @@ const deleteReq = (path: string, accessToken: string): Promise<Response> =>
 		method: "DELETE",
 		headers: { Authorization: `Bearer ${accessToken}` },
 	});
+
+/**
+ * 入口(default export)を直接呼び、waitUntilに渡した応答の後の処理の完了まで待つ
+ * (削除・内容の変更の保留の解放と次の組の提案は応答の後に回る・#27)。
+ * envOverrideでD1を差し替えると、応答の後の処理の失敗を起こせる
+ */
+const fetchAndWait = async (
+	method: "DELETE" | "PATCH",
+	path: string,
+	accessToken: string,
+	body?: unknown,
+	envOverride: WorkerEnv = testEnv as unknown as WorkerEnv,
+): Promise<Response> => {
+	const ctx = createExecutionContext();
+	const res = await worker.fetch(
+		new Request(`https://localhost${path}`, {
+			method,
+			headers: {
+				...(body === undefined ? {} : { "content-type": "application/json" }),
+				Authorization: `Bearer ${accessToken}`,
+			},
+			body: body === undefined ? undefined : JSON.stringify(body),
+		}),
+		envOverride,
+		ctx,
+	);
+	await waitOnExecutionContext(ctx);
+	return res;
+};
 
 /** docs/05 §3.1のエラー応答の形状(details.reasonsに理由コードを載せる場合がある) */
 interface ErrorResponse {
@@ -928,7 +964,11 @@ describe("DELETE /v1/intents/{id}(削除・docs/05 §3.1・§3.2)", () => {
 		);
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
-			const res = await deleteReq(`/v1/intents/${created.id}`, accessToken);
+			const res = await fetchAndWait(
+				"DELETE",
+				`/v1/intents/${created.id}`,
+				accessToken,
+			);
 			expect(res.status).toBe(204);
 			const timings = logSpy.mock.calls
 				.map((call) => {
@@ -942,12 +982,12 @@ describe("DELETE /v1/intents/{id}(削除・docs/05 §3.1・§3.2)", () => {
 					(l) =>
 						l.event === "intents.delete.timing" && l.intent_id === created.id,
 				);
+			// 取り消した提案が無いときは応答の後の処理(release・next_group)を回さない(#27)
 			expect(timings.map((l) => l.layer)).toEqual([
 				"vector",
 				"open_latches",
 				"cancel",
 				"d1",
-				"next_group",
 			]);
 			for (const l of timings) {
 				expect(typeof l.latency).toBe("number");
@@ -1478,7 +1518,12 @@ describe("DELETE・PATCH /v1/intents/{id}: 進行中の提案の取り消し(doc
 		await insertCandidate([mine, b, d], 0.95);
 		await insertCandidate([b, c, d], 0.8);
 
-		const res = await deleteReq(`/v1/intents/${mine.intentId}`, accessToken);
+		// 次の組の提案は応答の後に回るため、実行の文脈の完了まで待つ(#27)
+		const res = await fetchAndWait(
+			"DELETE",
+			`/v1/intents/${mine.intentId}`,
+			accessToken,
+		);
 		expect(res.status).toBe(204);
 		expect((await latchOf(latchId))?.status).toBe("cancelled");
 		const rest = (await db.select().from(latches).all()).filter(
@@ -1500,6 +1545,175 @@ describe("DELETE・PATCH /v1/intents/{id}: 進行中の提案の取り消し(doc
 			.from(notifications)
 			.where(eq(notifications.userId, mine.userId));
 		expect(mineProposals.every((n) => n.type !== "proposal")).toBe(true);
+	});
+
+	/** 構造化ログ(console.logの1行1JSON)を読み出す */
+	const logLines = (spy: { mock: { calls: unknown[][] } }) =>
+		spy.mock.calls.map((call) => {
+			try {
+				return JSON.parse(String(call[0])) as Record<string, unknown>;
+			} catch {
+				return {} as Record<string, unknown>;
+			}
+		});
+
+	/**
+	 * 保留の解放の照会(heldTargets: 参加者で絞ったcandidateの読み出し)だけを失敗させるD1。
+	 * 取り消し・候補と本体の削除には効かず、応答の後の処理だけを例外にする
+	 */
+	const failingHeldDb = (): D1Database =>
+		new Proxy(testEnv.DB, {
+			get(target, prop) {
+				if (prop === "prepare") {
+					return (query: string) => {
+						if (/"latches"\."id" in \(select/i.test(query)) {
+							throw new Error("forced");
+						}
+						return target.prepare(query);
+					};
+				}
+				const value = Reflect.get(target, prop);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+
+	it("削除: 取り消しは応答の前に済み、保留の解放と次の組の提案は応答の後に回る(#27)", async () => {
+		const { accessToken, mine, peer } = await setup("del-after");
+		const latchId = await insertLatchOf(mine, peer, "proposed");
+		// 相手が別の人と持つ保留。取り消しで枠が空けば昇格する
+		const heldId = await insertLatchOf(peer, await insertPeer(), "candidate");
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		let lines: Record<string, unknown>[];
+		try {
+			const res = await fetchAndWait(
+				"DELETE",
+				`/v1/intents/${mine.intentId}`,
+				accessToken,
+			);
+			expect(res.status).toBe(204);
+			lines = logLines(logSpy);
+		} finally {
+			logSpy.mockRestore();
+		}
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		// 応答の後の処理を待てば、今と同じく相手の保留が昇格している
+		expect((await latchOf(heldId))?.status).toBe("proposed");
+		// 昇格で作った提案の通知も、応答の後の処理の中でWeb Pushの送出まで済む
+		// (入口の送出は昇格より先に走り得るため、Cronの回収まで待たせない)
+		const proposals = await db
+			.select()
+			.from(notifications)
+			.where(eq(notifications.latchId, heldId));
+		expect(proposals.length).toBeGreaterThan(0);
+		expect(proposals.every((n) => n.pushState !== "pending")).toBe(true);
+		const events = lines
+			.filter(
+				(l) =>
+					(l.event === "intents.delete.timing" ||
+						l.event === "intents.deleted") &&
+					l.intent_id === mine.intentId,
+			)
+			.map((l) => (l.event === "intents.deleted" ? "deleted" : l.layer));
+		// release・next_groupは応答(intents.deleted)の後の処理の中で出る
+		expect(events).toEqual([
+			"vector",
+			"open_latches",
+			"cancel",
+			"d1",
+			"deleted",
+			"release",
+			"next_group",
+		]);
+	});
+
+	it("削除: 応答の後の処理が例外になっても204のまま、intents.delete.after_failedのwarnを出す(#27)", async () => {
+		const { accessToken, mine, peer } = await setup("del-after-fail");
+		const latchId = await insertLatchOf(mine, peer, "proposed");
+		const heldId = await insertLatchOf(peer, await insertPeer(), "candidate");
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		let lines: Record<string, unknown>[];
+		try {
+			const res = await fetchAndWait(
+				"DELETE",
+				`/v1/intents/${mine.intentId}`,
+				accessToken,
+				undefined,
+				{
+					...(testEnv as unknown as WorkerEnv),
+					DB: failingHeldDb(),
+				},
+			);
+			expect(res.status).toBe(204);
+			lines = logLines(logSpy);
+		} finally {
+			logSpy.mockRestore();
+		}
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		// 解放はされず保留のまま(毎分Cronの(i)が拾い直す)
+		expect((await latchOf(heldId))?.status).toBe("candidate");
+		const failed = lines.filter(
+			(l) => l.event === "intents.delete.after_failed",
+		);
+		expect(failed).toHaveLength(1);
+		expect(failed[0]?.level).toBe("warn");
+		expect(failed[0]?.intent_id).toBe(mine.intentId);
+		expect(typeof failed[0]?.error_code).toBe("string");
+		// 例外の文の中身は出さない
+		expect(JSON.stringify(failed[0])).not.toContain("forced");
+	});
+
+	it("PATCH: 取り消しは応答の前に済み、保留の解放は応答の後に回る(#27)", async () => {
+		const { accessToken, mine, peer } = await setup("patch-after");
+		const latchId = await insertLatchOf(mine, peer, "proposed");
+		const heldId = await insertLatchOf(peer, await insertPeer(), "candidate");
+		const res = await fetchAndWait(
+			"PATCH",
+			`/v1/intents/${mine.intentId}`,
+			accessToken,
+			{ topic: "応答の後に解放する主題" },
+		);
+		expect(res.status).toBe(200);
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		expect((await latchOf(heldId))?.status).toBe("proposed");
+		const proposals = await db
+			.select()
+			.from(notifications)
+			.where(eq(notifications.latchId, heldId));
+		expect(proposals.length).toBeGreaterThan(0);
+		expect(proposals.every((n) => n.pushState !== "pending")).toBe(true);
+	});
+
+	it("PATCH: 応答の後の処理が例外になっても200のまま、intents.update.after_failedのwarnを出す(#27)", async () => {
+		const { accessToken, mine, peer } = await setup("patch-after-fail");
+		const latchId = await insertLatchOf(mine, peer, "proposed");
+		const heldId = await insertLatchOf(peer, await insertPeer(), "candidate");
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		let lines: Record<string, unknown>[];
+		try {
+			const res = await fetchAndWait(
+				"PATCH",
+				`/v1/intents/${mine.intentId}`,
+				accessToken,
+				{ topic: "解放に失敗する主題" },
+				{
+					...(testEnv as unknown as WorkerEnv),
+					DB: failingHeldDb(),
+				},
+			);
+			expect(res.status).toBe(200);
+			lines = logLines(logSpy);
+		} finally {
+			logSpy.mockRestore();
+		}
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		expect((await latchOf(heldId))?.status).toBe("candidate");
+		const failed = lines.filter(
+			(l) => l.event === "intents.update.after_failed",
+		);
+		expect(failed).toHaveLength(1);
+		expect(failed[0]?.level).toBe("warn");
+		expect(failed[0]?.intent_id).toBe(mine.intentId);
+		expect(typeof failed[0]?.error_code).toBe("string");
 	});
 
 	it("保留(candidate)のLATCHもcancelledになり、通知は作られない", async () => {

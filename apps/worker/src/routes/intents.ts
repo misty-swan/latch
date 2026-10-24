@@ -66,16 +66,19 @@ import {
 	validateIntentForActive,
 } from "../intents/validation";
 import {
-	cancelOpenLatches,
+	type CancelResult,
+	cancelOpenLatchesOnly,
 	openLatchIdsOfIntent,
-	proposeNextGroupsAfterCancel,
+	releaseAfterCancel,
 } from "../latches/cancel-open";
 import { createLlm } from "../llm/mode";
 import type { Llm } from "../llm/types";
 import { createLogger } from "../logging/logger";
 import { errorCodeOf } from "../pipeline/errors";
 import { emitMatchEvent } from "../pipeline/events";
+import { flushPush } from "../push/dispatch";
 import { pushFlushAfterWrite } from "../push/flush-middleware";
+import { pushSenderOf } from "../push/sender";
 import { createVectorStore } from "../vectorstore";
 import { syncVectorStatus } from "../vectorstore/sync-status";
 
@@ -971,14 +974,27 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 				result.row.expiresAt !== null &&
 				result.row.expiresAt.getTime() < row.expiresAt.getTime()))
 	) {
-		// 版は更新済みのため、旧版を含む評価済みの集合は次集合の版照合で除かれる
-		const closedLatchIds = await cancelOpenLatches(
+		// 版は更新済みのため、旧版を含む評価済みの集合は次集合の版照合で除かれる。
+		// 取り消しは応答の前に済ませ、保留の解放と次の組の提案は応答に要らないため応答の後に
+		// 回す(#27)。失敗しても毎分Cronの(i)が拾い直すため、warnだけ出して応答は変えない
+		const cancelled = await cancelOpenLatchesOnly(
 			db,
 			await openLatchIdsOfIntent(db, result.row.id),
 			sub,
 			now,
 		);
-		await proposeNextGroupsAfterCancel(db, closedLatchIds, now);
+		if (cancelled.closedLatchIds.length > 0) {
+			c.executionCtx.waitUntil(
+				afterCancel(
+					c.env,
+					db,
+					cancelled,
+					now,
+					result.row.id,
+					"intents.update.after_failed",
+				),
+			);
+		}
 	}
 	// 意味フィールドの更新では30分の再評価抑制を解除する(オーナー裁定 2026-10-20・docs/06 §3)。
 	// 抑制は同じ内容の繰り返し評価を防ぐためのもので、内容が変われば理由がなくなる。費用は
@@ -1027,6 +1043,38 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 	}
 	return c.json(toIntentDto(result.row), 200);
 });
+
+/**
+ * 取り消しの後始末(保留の解放と次の組の提案)を応答の後に行う(#27)。昇格や次の組の提案で
+ * 作った提案の通知は、入口の送出(pushFlushAfterWrite)より後にできるため、ここで続けて
+ * Web Pushを送り出す(Cronの回収まで待たせない)。例外は外へ出さず、failedEventのwarn
+ * (error_code・intent_id)だけを出す。取りこぼしは毎分Cronの(i)と送出の回収が拾い直す
+ */
+const afterCancel = async (
+	env: Env,
+	db: DrizzleD1Database,
+	cancelled: CancelResult,
+	now: Date,
+	intentId: string,
+	failedEvent: "intents.delete.after_failed" | "intents.update.after_failed",
+	onTiming?: (layer: "release" | "next_group", startedAt: number) => void,
+): Promise<void> => {
+	try {
+		await releaseAfterCancel(db, cancelled, now, { onTiming });
+	} catch (error) {
+		logger.warn(failedEvent, {
+			intent_id: intentId,
+			error_code: errorCodeOf(error),
+		});
+	}
+	try {
+		await flushPush(db, pushSenderOf(env), systemClock, { minAgeMs: 0 });
+	} catch (error) {
+		logger.warn("push.flush.failed", {
+			error_code: errorCodeOf(error, "PUSH_FLUSH_FAILED"),
+		});
+	}
+};
 
 /** group_candidatesの削除1文あたりのid数(D1の束縛上限100個の内側) */
 const GROUP_DELETE_CHUNK = 50;
@@ -1102,7 +1150,8 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	const openLatchesStartedAt = systemClock.now().getTime();
 	const openLatchIds = await openLatchIdsOfIntent(db, target.id);
 	logDeleteTiming(target.id, "open_latches", openLatchesStartedAt);
-	const closedLatchIds = await cancelOpenLatches(
+	// 閉じるだけを応答の前に行う。保留の解放と次の組の提案は応答の後に回す(#27)
+	const cancelled = await cancelOpenLatchesOnly(
 		db,
 		openLatchIds,
 		sub,
@@ -1163,11 +1212,24 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	} finally {
 		logDeleteTiming(target.id, "d1", d1StartedAt);
 	}
+	// 保留の解放と次集合の提案は、利用者への応答に要らないため応答の後(waitUntil)に回す(#27)。
 	// 次集合の提案はIntent行とそのグループ候補を消した後に行う(削除中のIntentを含む集合を
-	// 提案しない・F4b設計 §3.5)。消えた行は版の照合・再検証(recheckSet)で除かれる
-	const nextGroupStartedAt = systemClock.now().getTime();
-	await proposeNextGroupsAfterCancel(db, closedLatchIds, deleteNow);
-	logDeleteTiming(target.id, "next_group", nextGroupStartedAt);
+	// 提案しない・F4b設計 §3.5)。消えた行は版の照合・再検証(recheckSet)で除かれる。
+	// 失敗しても毎分Cronの(i)(runHeldSweep・runNextGroupSweep)が拾い直すため、warnだけ出す
+	if (cancelled.closedLatchIds.length > 0) {
+		const intentId = target.id;
+		c.executionCtx.waitUntil(
+			afterCancel(
+				c.env,
+				db,
+				cancelled,
+				deleteNow,
+				intentId,
+				"intents.delete.after_failed",
+				(layer, startedAt) => logDeleteTiming(intentId, layer, startedAt),
+			),
+		);
+	}
 	if (deleted === undefined) {
 		// 所有確認後の並行削除。消えていれば同じ404(冪等な結果)。
 		// ベクトルは先行して削除済みだが、行も無いため孤立にはならない
