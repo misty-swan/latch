@@ -1429,8 +1429,12 @@ describe("DELETE・PATCH /v1/intents/{id}: 進行中の提案の取り消し(doc
 		expect(row?.lastEvaluatedAt?.getTime()).toBe(evaluatedAt.getTime());
 	});
 
-	it("グループ提案{A,B,C}の進行中にAが削除すると、Aを含む評価済み集合は提案されず、Aを含まない集合は提案され得る(F4b設計 §3.5)", async () => {
-		const { accessToken, mine, peer: b } = await setup("del-group-next");
+	/**
+	 * グループ提案{A,B,C}(proposed)と、評価済みのグループ候補{A,B,D}(上位)・{B,C,D}を配置する
+	 * (A=削除する本人)
+	 */
+	const setupGroupNext = async (label: string) => {
+		const { accessToken, mine, peer: b } = await setup(label);
 		const c = await insertPeer();
 		const d = await insertPeer();
 		// 3人集合に収まる人数範囲へ揃える(版は変えない)
@@ -1517,6 +1521,12 @@ describe("DELETE・PATCH /v1/intents/{id}: 進行中の提案の取り消し(doc
 		// Aを含む集合を上位に置く(修正前はこちらが提案されていた)
 		await insertCandidate([mine, b, d], 0.95);
 		await insertCandidate([b, c, d], 0.8);
+		return { accessToken, mine, b, c, d, all, latchId };
+	};
+
+	it("グループ提案{A,B,C}の進行中にAが削除すると、Aを含む評価済み集合は提案されず、Aを含まない集合は提案され得る(F4b設計 §3.5)", async () => {
+		const { accessToken, mine, b, c, d, all, latchId } =
+			await setupGroupNext("del-group-next");
 
 		// 次の組の提案は応答の後に回るため、実行の文脈の完了まで待つ(#27)
 		const res = await fetchAndWait(
@@ -1714,6 +1724,48 @@ describe("DELETE・PATCH /v1/intents/{id}: 進行中の提案の取り消し(doc
 		expect(failed[0]?.level).toBe("warn");
 		expect(failed[0]?.intent_id).toBe(mine.intentId);
 		expect(typeof failed[0]?.error_code).toBe("string");
+	});
+
+	it("削除: 保留の解放が例外になっても次の組は提案され、応答は204のまま(#27)", async () => {
+		const { accessToken, mine, b, c, d, all, latchId } = await setupGroupNext(
+			"del-group-release-fail",
+		);
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		let lines: Record<string, unknown>[];
+		try {
+			const res = await fetchAndWait(
+				"DELETE",
+				`/v1/intents/${mine.intentId}`,
+				accessToken,
+				undefined,
+				{
+					...(testEnv as unknown as WorkerEnv),
+					DB: failingHeldDb(),
+				},
+			);
+			expect(res.status).toBe(204);
+			lines = logLines(logSpy);
+		} finally {
+			logSpy.mockRestore();
+		}
+		expect((await latchOf(latchId))?.status).toBe("cancelled");
+		// 解放の失敗のwarnは1つだけ
+		const failed = lines.filter(
+			(l) => l.event === "intents.delete.after_failed",
+		);
+		expect(failed).toHaveLength(1);
+		expect(failed[0]?.intent_id).toBe(mine.intentId);
+		// 次の組の提案はCronで拾い直されないため、解放の失敗でも続けて行う
+		const rest = (await db.select().from(latches).all()).filter(
+			(l) =>
+				l.id !== latchId &&
+				l.intentIds.some((id) => all.some((m) => m.intentId === id)),
+		);
+		expect(rest).toHaveLength(1);
+		expect(rest[0]?.status).toBe("proposed");
+		expect([...(rest[0]?.intentIds ?? [])].sort()).toEqual(
+			[b, c, d].map((m) => m.intentId).sort(),
+		);
 	});
 
 	it("保留(candidate)のLATCHもcancelledになり、通知は作られない", async () => {

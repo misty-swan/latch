@@ -44,8 +44,8 @@ export interface CancelResult {
  * 渡されたLATCHのうち進行中のものを cancelled で閉じるだけを行う(proposal_historyは消費しない=
  * release・提示済みなら参加者へclosed通知)。matched以降は対象の状態に含めないため変更しない。
  * 保留の解放と次集合の提案はreleaseAfterCancelで別に行う: Intentの削除・内容の変更では
- * 利用者への応答に要らないため、応答の後(waitUntil)に回す(#27)。取りこぼしは毎分Cronの
- * (i)(runHeldSweep・runNextGroupSweep)が拾い直す
+ * 利用者への応答に要らないため、応答の後(waitUntil)に回す(#27)。保留の解放はCronの(i)
+ * (runHeldSweep)が拾い直す。次の組の提案は拾い直されない(失敗はログに残る)
  */
 export const cancelOpenLatchesOnly = async (
 	db: DrizzleD1Database,
@@ -93,12 +93,20 @@ export const releaseAfterCancel = async (
 	now: Date,
 	opts?: {
 		onTiming?: (layer: "release" | "next_group", startedAt: number) => void;
+		/** 保留の解放の失敗を呼び出し側がログへ出す(次の組の提案は続けて行う) */
+		onReleaseFailed?: (error: unknown) => void;
 	},
 ): Promise<void> => {
 	if (result.releaseUserIds.length > 0) {
 		const releaseStartedAt = systemClock.now().getTime();
-		await releaseHeld(db, now, result.releaseUserIds);
-		opts?.onTiming?.("release", releaseStartedAt);
+		// 解放の失敗で次の組の提案を止めない。解放はCronの(i)(runHeldSweep)が拾い直すが、
+		// 次の組の提案は拾い直されないため、ここで飛ばすと失われる
+		try {
+			await releaseHeld(db, now, result.releaseUserIds);
+			opts?.onTiming?.("release", releaseStartedAt);
+		} catch (error) {
+			opts?.onReleaseFailed?.(error);
+		}
 	}
 	const nextGroupStartedAt = systemClock.now().getTime();
 	await proposeNextGroupsAfterCancel(db, result.closedLatchIds, now);

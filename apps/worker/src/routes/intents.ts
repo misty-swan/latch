@@ -976,7 +976,8 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 	) {
 		// 版は更新済みのため、旧版を含む評価済みの集合は次集合の版照合で除かれる。
 		// 取り消しは応答の前に済ませ、保留の解放と次の組の提案は応答に要らないため応答の後に
-		// 回す(#27)。失敗しても毎分Cronの(i)が拾い直すため、warnだけ出して応答は変えない
+		// 回す(#27)。失敗はwarnだけ出して応答は変えない。保留の解放はCronの(i)が拾い直す。
+		// 次の組の提案は拾い直されない(失敗はログに残る)
 		const cancelled = await cancelOpenLatchesOnly(
 			db,
 			await openLatchIdsOfIntent(db, result.row.id),
@@ -1047,8 +1048,9 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 /**
  * 取り消しの後始末(保留の解放と次の組の提案)を応答の後に行う(#27)。昇格や次の組の提案で
  * 作った提案の通知は、入口の送出(pushFlushAfterWrite)より後にできるため、ここで続けて
- * Web Pushを送り出す(Cronの回収まで待たせない)。例外は外へ出さず、failedEventのwarn
- * (error_code・intent_id)だけを出す。取りこぼしは毎分Cronの(i)と送出の回収が拾い直す
+ * Web Pushを送り出す(Cronの回収まで待たせない)。例外は外へ出さず、失敗1件ごとに
+ * failedEventのwarn(error_code・intent_id)を1つ出す。保留の解放が失敗しても次の組の提案は
+ * 続けて行う。保留の解放はCronの(i)が拾い直す。次の組の提案は拾い直されない(失敗はログに残る)
  */
 const afterCancel = async (
 	env: Env,
@@ -1059,13 +1061,19 @@ const afterCancel = async (
 	failedEvent: "intents.delete.after_failed" | "intents.update.after_failed",
 	onTiming?: (layer: "release" | "next_group", startedAt: number) => void,
 ): Promise<void> => {
-	try {
-		await releaseAfterCancel(db, cancelled, now, { onTiming });
-	} catch (error) {
+	const warnFailed = (error: unknown): void => {
 		logger.warn(failedEvent, {
 			intent_id: intentId,
 			error_code: errorCodeOf(error),
 		});
+	};
+	try {
+		await releaseAfterCancel(db, cancelled, now, {
+			onTiming,
+			onReleaseFailed: warnFailed,
+		});
+	} catch (error) {
+		warnFailed(error);
 	}
 	try {
 		await flushPush(db, pushSenderOf(env), systemClock, { minAgeMs: 0 });
@@ -1215,7 +1223,8 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 	// 保留の解放と次集合の提案は、利用者への応答に要らないため応答の後(waitUntil)に回す(#27)。
 	// 次集合の提案はIntent行とそのグループ候補を消した後に行う(削除中のIntentを含む集合を
 	// 提案しない・F4b設計 §3.5)。消えた行は版の照合・再検証(recheckSet)で除かれる。
-	// 失敗しても毎分Cronの(i)(runHeldSweep・runNextGroupSweep)が拾い直すため、warnだけ出す
+	// 失敗はwarnだけ出す。保留の解放はCronの(i)(runHeldSweep)が拾い直す。
+	// 次の組の提案は拾い直されない(失敗はログに残る)
 	if (cancelled.closedLatchIds.length > 0) {
 		const intentId = target.id;
 		c.executionCtx.waitUntil(
