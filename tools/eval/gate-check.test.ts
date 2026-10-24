@@ -12,7 +12,11 @@ import {
 	ANTHROPIC_MODEL,
 	TYPESAFE_MODEL,
 } from "../../apps/worker/src/llm/real/prompts";
-import { FINGERPRINT_FILES, fingerprint } from "./lib/fingerprint";
+import {
+	artifactsFingerprint,
+	FINGERPRINT_FILES,
+	fingerprint,
+} from "./lib/fingerprint";
 import { checkGate, readModelConstant } from "./lib/gate-check";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -36,8 +40,13 @@ const wrangler = (top: string, staging: string) => `{
 type Record = {
 	passed: boolean;
 	goldset: { approvedByOwner: string | null };
-	models: { anthropic: string; typesafe_requested: string };
+	models: {
+		anthropic: string;
+		typesafe_requested: string;
+		typesafe_answered: string[];
+	};
 	fingerprint: { [k: string]: string };
+	fingerprintArtifacts: string;
 };
 
 /** 一時リポジトリのprompts.tsに書くモデル名(記録と照合される今の値) */
@@ -72,8 +81,10 @@ const makeRepo = (opts: {
 			models: {
 				anthropic: "claude-haiku-5-5",
 				typesafe_requested: opts.typesafeModel ?? "jev-1.13.0",
+				typesafe_answered: [opts.typesafeModel ?? "jev-1.13.0"],
 			},
 			fingerprint: fingerprint(root),
+			fingerprintArtifacts: artifactsFingerprint(),
 		};
 		opts.record?.(record);
 		mkdirSync(join(root, "eval/records"), { recursive: true });
@@ -154,6 +165,52 @@ describe("checkGate", () => {
 		);
 		expect(errs).toHaveLength(1);
 		expect(errs[0]).toMatch(/TYPESAFE_MODEL/);
+	});
+
+	it.each([
+		["別の版が混じる", ["jev-1.13.0", "jev-1.14.0"]],
+		["別の版だけ", ["jev-1.12.0"]],
+		["応答が無い", []],
+	])(
+		"TypeSafeが応答した版が固定した版だけでなければ落ちる(%s)",
+		(_n, answered) => {
+			const errs = checkGate(
+				makeRepo({
+					top: "real",
+					record: (r) => {
+						r.models.typesafe_answered = answered;
+					},
+				}),
+			);
+			expect(errs).toHaveLength(1);
+			expect(errs[0]).toMatch(/応答/);
+		},
+	);
+
+	it("描いた値の指紋が今の値と違えば落ちる", () => {
+		const errs = checkGate(
+			makeRepo({
+				top: "real",
+				record: (r) => {
+					r.fingerprintArtifacts = "0".repeat(64);
+				},
+			}),
+		);
+		expect(errs).toHaveLength(1);
+		expect(errs[0]).toMatch(/描いた値/);
+	});
+
+	it("描いた値の指紋が記録に無ければ落ちる", () => {
+		const errs = checkGate(
+			makeRepo({
+				top: "real",
+				record: (r) => {
+					delete (r as Partial<Record>).fingerprintArtifacts;
+				},
+			}),
+		);
+		expect(errs).toHaveLength(1);
+		expect(errs[0]).toMatch(/描いた値/);
 	});
 
 	it("記録のAnthropicのモデル名が今のANTHROPIC_MODELと違えば落ちる", () => {

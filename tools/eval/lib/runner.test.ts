@@ -9,7 +9,7 @@ import {
 	TYPESAFE_MODEL,
 } from "../../../apps/worker/src/llm/real/prompts";
 import { JEV_AXES } from "../../../apps/worker/src/llm/types";
-import { fingerprint } from "./fingerprint";
+import { artifactsFingerprint, fingerprint } from "./fingerprint";
 import { formatSummary, parseRetryAfter, runGate } from "./runner";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -100,6 +100,7 @@ describe("runGate", () => {
 			approvedByOwner: "2026-10-24",
 		});
 		expect(record.fingerprint).toEqual(fingerprint(repoRoot));
+		expect(record.fingerprintArtifacts).toBe(artifactsFingerprint());
 		// 全軸0.5なので順序整合は中央値0で合格・Parserは固定の出力なので不合格
 		expect(record.scores.jev.primary.median).toBe(0);
 		expect(record.scores.jev.fallback.median).toBe(0);

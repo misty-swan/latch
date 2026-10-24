@@ -1,13 +1,14 @@
 /**
  * CIの照合(設計書 §3.4)。apps/worker/wrangler.jsonc のトップレベルと全env.*の
  * vars.LATCH_LLM_MODEにrealがあれば、eval/records/gate.json が合格・承認済みの
- * ゴールドセット・固定したTypeSafeのモデル名・今のprompts.tsと同じモデル名・今のファイルと同じ指紋であることを求める。
+ * ゴールドセット・固定したTypeSafeのモデル名(応答した版も固定した版だけ)・今のprompts.tsと同じモデル名・
+ * 今のファイルと同じ指紋・今の値から描いた値と同じ指紋であることを求める。
  * 問題を日本語の文で返す(空配列=通る)。
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ParseError, parse as parseJsonc } from "jsonc-parser";
-import { fingerprint } from "./fingerprint";
+import { artifactsFingerprint, fingerprint } from "./fingerprint";
 
 export const GATE_RECORD_PATH = "eval/records/gate.json";
 const WRANGLER_PATH = "apps/worker/wrangler.jsonc";
@@ -56,8 +57,13 @@ export const checkGate = (repoRoot: string): string[] => {
 	let record: {
 		passed?: unknown;
 		goldset?: { approvedByOwner?: unknown };
-		models?: { anthropic?: unknown; typesafe_requested?: unknown };
+		models?: {
+			anthropic?: unknown;
+			typesafe_requested?: unknown;
+			typesafe_answered?: unknown;
+		};
 		fingerprint?: Record<string, unknown>;
+		fingerprintArtifacts?: unknown;
 	};
 	try {
 		record = JSON.parse(readFileSync(recordPath, "utf8"));
@@ -87,6 +93,18 @@ export const checkGate = (repoRoot: string): string[] => {
 			`${GATE_RECORD_PATH} のTypeSafeのモデル名(${requested})が今のTYPESAFE_MODELと違います。採り直してください`,
 		);
 	}
+	// 応答した版が固定した版だけであること(別の版で採点した結果を混ぜない)
+	const pinned = readModelConstant(repoRoot, "TYPESAFE_MODEL");
+	const answered = record.models?.typesafe_answered;
+	if (
+		!Array.isArray(answered) ||
+		answered.length !== 1 ||
+		answered[0] !== pinned
+	) {
+		problems.push(
+			`${GATE_RECORD_PATH} のTypeSafeが応答した版(${Array.isArray(answered) ? answered.join(", ") || "なし" : "不明"})が、固定したTYPESAFE_MODEL(${pinned})だけではありません。採り直してください`,
+		);
+	}
 	if (
 		record.models?.anthropic !== readModelConstant(repoRoot, "ANTHROPIC_MODEL")
 	) {
@@ -101,6 +119,11 @@ export const checkGate = (repoRoot: string): string[] => {
 				`${file} が採点の後に変わっています(指紋が ${GATE_RECORD_PATH} と一致しません)。採り直してください`,
 			);
 		}
+	}
+	if (record.fingerprintArtifacts !== artifactsFingerprint()) {
+		problems.push(
+			`モデルとのやり取りを形づくる値(指示文・出力スキーマ・共有の定数など)が採点の後に変わっています(描いた値の指紋が ${GATE_RECORD_PATH} と一致しません)。採り直してください`,
+		);
 	}
 	return problems;
 };

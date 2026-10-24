@@ -21,7 +21,7 @@ import type {
 	ParserOutcome,
 } from "../../../apps/worker/src/llm/types";
 import { buildNormalizedText } from "../../../apps/worker/src/pipeline/normalize";
-import { fingerprint } from "./fingerprint";
+import { artifactsFingerprint, fingerprint } from "./fingerprint";
 import { loadJevGoldset, loadParserGoldset } from "./goldset";
 import { fixtureToRow } from "./intent-row";
 import {
@@ -69,6 +69,8 @@ export type GateRecord = {
 		approvedByOwner: string | null;
 	};
 	fingerprint: Record<string, string>;
+	/** モデルとのやり取りを形づくる値を描いた形の指紋(fingerprint.tsのartifactsFingerprint) */
+	fingerprintArtifacts: string;
 };
 
 export type GateDeps = {
@@ -144,6 +146,7 @@ export const runGate = async (deps: GateDeps): Promise<GateRecord> => {
 	);
 	// 採点の前のファイルで指紋を取る(採点中の変更を合格に混ぜない)
 	const fp = fingerprint(deps.repoRoot);
+	const fpArtifacts = artifactsFingerprint();
 	const ranAt = now().toISOString();
 
 	/**
@@ -290,6 +293,7 @@ export const runGate = async (deps: GateDeps): Promise<GateRecord> => {
 			approvedByOwner,
 		},
 		fingerprint: fp,
+		fingerprintArtifacts: fpArtifacts,
 	};
 };
 
