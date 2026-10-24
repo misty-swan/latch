@@ -1,9 +1,9 @@
 # LATCH LLM利用仕様書
 
-- 文書バージョン: v0.29
+- 文書バージョン: v0.30
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.29更新: 2026-10-24)
+- 作成日: 2026-10-17(v0.30更新: 2026-10-24)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。stub出力仕様(Jev・Embedding)の定義・Parserのp95定義(成功応答ベース)・Embedding timeoutの初期値変更(5秒・D-D-03)・Vectorize metadata indexの作成規定・同意文言の系統別具体化
 - v0.3の変更点: 前提文書欄の版数同期(F1実装に伴う04/05/10改版への追従)
 - v0.4の変更点: 前提文書欄の版数同期(F2実装に伴う05・06改版への追従)。§3のstub規則を精緻化(時刻語は0〜23時のみ採用・人数は2〜4人へ丸め、丸めた場合はwarnings表示)
@@ -32,7 +32,8 @@
 - v0.27の変更点: 前提文書欄の版数同期のみの改版(02・10・12の測り直し完了の記録に伴う追従)。内容の変更はない
 - v0.28の変更点: 不具合の修正工程(第2回)の最終レビューの直しに伴い、§1の表のEmbeddingの再試行の欄を「キューのやり直し(10秒・30秒・60秒)の後にバックフィルで回収」に改めた(§4と揃える)。前提文書欄の版数を更新
 - v0.29の変更点: LLM real接続の工程の完了(2026-10-24・01冒頭の決定記録(LLM real接続)・12 §2の決定記録(LLM real接続))に伴い、§1へモデルの版の固定(Parserと予備のJev=`claude-haiku-5-5`・Jev=TypeSafeの`jev-1.14.0`)と呼び出しの形(SDKを使わずfetchで直接呼ぶ)を、§2の「`LATCH_LLM_MODE=real`は未実装として扱う」をreal実装の確定(stagingはreal・起動ガード)へ、§3へParserの差し替え口(非同期・失敗型付き)・Anthropicの構造化出力・期限の選択肢をコードで求めること・人数の丸めをrealにも適用すること・場所の言及の注意表示を、§4へ地域名をEmbedding入力に含めない決定と比較の結果を、§5へTypeSafeとAnthropicの呼び出しの形を、§6へ合格基準の改め(locationを場所の言及の注意表示へ置き換え・順序整合の測り方・呼び出しの失敗10%・Precision@0.60は参考値)と測り方・結果を、§8へ外部送信の集計の実装を加えた。§9のD-D-01を解消した。前提文書欄の版数を更新
-- 前提文書: 01 要件定義書 v0.22 / 04 アーキテクチャ設計書 v0.29 / 05 データモデル・API仕様書 v0.29 / 06 マッチングパイプライン設計書 v0.29
+- v0.30の変更点: 不具合の修正工程(第3回・2026-10-24・01冒頭の決定記録(不具合の修正工程(第3回))・issue #31・#35)に伴い、§3へtopicに集合場所・店・駅・施設・住んでいる地域の名前を入れない規則(行き先そのものが目的のときは残す・場所の言及はwarningsで確認UIへ)を、§5へ予備への切り替えの条件に失敗の種類`unavailable`(接続の失敗・503/529以外の5xx)を加え400番台とinvalid_outputは切り替えないことを、§6へtopicの採点の`topic_none`とゴールドセット版2・採り直した結果を加えた。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.23 / 04 アーキテクチャ設計書 v0.30 / 05 データモデル・API仕様書 v0.30 / 06 マッチングパイプライン設計書 v0.30
 - 本書の位置づけ: LLMを利用する3系統(Intent Parser / Embedding / Jev)の提供元・入出力・timeout・精度ゲート・コスト・同意を確定する。**04の未決D-A-01(Embeddingプロバイダ)を本書が解消する**
 
 ## 1. 提供元の確定
@@ -65,6 +66,7 @@
 
 - **入力**: 対象ユーザーのraw_textのみ。他ユーザーのデータ・位置・プロフィールは一切送らない
 - **出力**(05 §3.3のスキーマ): form・topic・category・time・geo・participants・budget・expires_at選択肢・alcohol_involved・constraints各種・warnings
+- **topicに入れない語(不具合の修正工程(第3回)で確定・issue #31)**: topicには、集合場所・店・駅・施設・住んでいる地域の名前を入れない(「渋谷でカレーを食べに行く」ではなく「カレーを食べに行く」)。topicは正規化テキスト(§4のEmbeddingの入力)に入り、Jevの外部送信(§5)にも乗るため、利用者のいる地域をそこへ混ぜない(§4・01冒頭の決定記録(LLM real接続)の6)。ただし、行き先そのものが目的のとき(登る山・テーマパーク・観光地など)はtopicに残してよい(利用者の居場所を表さないため)。場所の言及は従来どおりwarningsの`{field:"geo"}`で確認UIへ回す。境目のあいまいな例は、採点(§6)で地名のあり・なしのどちらも正解とする。stubは変えない(試験の決定性を保つ)
 - 曖昧表現の丸め: 「くらい」は確定値へ丸め(「5000円くらい」→5000)。「2〜4人」はmin=2/max=4。form判定は時制・時刻表現の有無で行い、判定信頼度が低い場合もformとして返し、**確認UIで必ずユーザーが確認・切替する**(01 §9)
 - timeout 10秒・再試行0・失敗時はPARSE_FAILED(422・再試行ボタン+構造化フォームフォールバック)。性能目標「p95 3秒」は**成功応答について**測定し、失敗率は警報線(09 §6)で監視する
 - stub: 時刻表現・金額・人数の規則ベース抽出+form判定辞書。form=connection既定(より安全な側)。時刻語は**0〜23時のみ採用**し(範囲外は時刻語としない=日付語の有無でform判定する。不正なISOを作らないため)、人数は**2〜4人へ丸める**(丸めた場合はwarningsに`{field:"participants"}`の注意表示を載せる・05 §3.3)
@@ -84,9 +86,10 @@
 - **質問群(7軸・1リクエストで並列)**: would_a_accept_b / would_b_accept_a / purpose_fit / mood_fit / timing_fit / social_fit / latent_yes。System Oneの「確率のみを返す出力形式」(数値0〜1・理由文なし)で受け取る
 - timing_fitの解釈: 機会=日時の一致、つながり=関係の温度・開始時機の一致(01 §13)
 - 出力は**数値のみ**保存(jev_result・05 §2.2)。理由文の生成は行わない
-- timeout 6秒。429/529/timeout時はフォールバックLLM(同7軸・JSON確定出力)。フォールバック失敗は保留(06 §5)
-- **real実装(LLM real接続で確定)**: 第一候補はTypeSafeの`POST /v1/systemone`(モデル`jev-1.14.0`・§1)で、`state`を`{intent_a: 正規化テキストA, intent_b: 正規化テキストB}`とし、7軸を`noul`形式の問い(`intent_a`・`intent_b`を指す日本語の問いと、yes/noの意味を書いた基準)として1回で送る。応答の各軸の`noul`(0〜1)を受け、欠け・範囲外はinvalid_outputとする。HTTP 429はrate_limited・503/529はoverloaded・時間切れはtimeout・それ以外はotherとする。予備はAnthropic(`claude-haiku-5-5`)の構造化出力で、7軸の数値(0〜1)だけのJSONを受ける(理由文は求めない)。切り替えの判断・予算・circuit breakerは次項の共通部のまま
-- **差し替え口(F4a実装確定)**: Jevの接続実装は `(input) => Promise<JevOutcome>` の関数とする。入力は両Intentの正規化テキスト(a/bはmatch_candidatesの正規化順)、JevOutcomeは成功(7軸の数値)または失敗(種別=timeout / rate_limited / overloaded / invalid_output / other)。接続実装は**例外を投げずにJevOutcomeを返す**契約とする。第一候補と予備の2実装を持ち、予備へ切り替えるのは失敗種別がtimeout・rate_limited・overloadedの場合のみとする(invalid_output・otherは切り替えずに保留)。予算計上・circuit breaker・切替の判断は接続実装の外の共通部に置き、提供元のAPI形状の差は接続実装の中に閉じる
+- timeout 6秒。429/529/timeout・接続の失敗・5xx時はフォールバックLLM(同7軸・JSON確定出力)。フォールバック失敗は保留(06 §5)
+- **real実装(LLM real接続で確定)**: 第一候補はTypeSafeの`POST /v1/systemone`(モデル`jev-1.14.0`・§1)で、`state`を`{intent_a: 正規化テキストA, intent_b: 正規化テキストB}`とし、7軸を`noul`形式の問い(`intent_a`・`intent_b`を指す日本語の問いと、yes/noの意味を書いた基準)として1回で送る。応答の各軸の`noul`(0〜1)を受け、欠け・範囲外はinvalid_outputとする。HTTP 429はrate_limited・503/529はoverloaded・時間切れはtimeout・接続の失敗(通信の例外で時間切れでないもの)と503/529以外の5xxはunavailable・それ以外(400番台など)はotherとする。予備はAnthropic(`claude-haiku-5-5`)の構造化出力で、7軸の数値(0〜1)だけのJSONを受ける(理由文は求めない)。切り替えの判断・予算・circuit breakerは次項の共通部のまま
+- **切り替えの条件(不具合の修正工程(第3回)で確定・issue #35・01冒頭の決定記録(不具合の修正工程(第3回))の1)**: 予備へ切り替える失敗は、時間切れ(timeout)・429(rate_limited)・503/529(overloaded)・接続の失敗と503/529以外のサーバーのエラー(5xx・unavailable)とする。TypeSafeが止まったときも提案が出続けるようにするためである。400番台(429を除く。鍵の誤りなど設定の誤り)と応答の形の崩れ(invalid_output)は切り替えない(切り替えると誤りが隠れるため)。予備も失敗したときの保留(held.failed)とcircuit breakerの数え方は変えない。Parserの共通部も同じ分け方にそろえるが、Parserに予備は無く、失敗はすべて422 PARSE_FAILEDのため利用者への見え方は変わらない
+- **差し替え口(F4a実装確定)**: Jevの接続実装は `(input) => Promise<JevOutcome>` の関数とする。入力は両Intentの正規化テキスト(a/bはmatch_candidatesの正規化順)、JevOutcomeは成功(7軸の数値)または失敗(種別=timeout / rate_limited / overloaded / unavailable / invalid_output / other)。接続実装は**例外を投げずにJevOutcomeを返す**契約とする。第一候補と予備の2実装を持ち、予備へ切り替えるのは失敗種別がtimeout・rate_limited・overloaded・unavailableの場合のみとする(invalid_output・otherは切り替えずに保留)。予算計上・circuit breaker・切替の判断は接続実装の外の共通部に置き、提供元のAPI形状の差は接続実装の中に閉じる
 
 ## 6. 精度ゲート(Offline・real適用の前提)
 
@@ -95,7 +98,7 @@
 | 項目 | 合格基準 |
 |---|---|
 | form判定(つながり/機会)の完全一致 | 90%以上 |
-| topic抽出一致(係り受けを除く主題語) | 85%以上 |
+| topic抽出一致(係り受けを除く主題語。禁止語を含まないこと=`topic_none`も条件) | 85%以上 |
 | 機会Intentのフィールド(本書の初期基準) | category 85% / time.start 90% / 場所の言及の注意表示(warningsの`{field:"geo"}`)90% / participants 80% / budget 90% |
 | alcohol_involved | **recall 100%**(見逃し0)・precision 90%以上。境界表現(「ワイン会」「バーの誕生日会」/負例「コーヒー」)を必ず含める |
 | Jev(a→b・b→aの順序整合) | ゴールドセットで\|P(a→b) − P(b→a)\|の中央値が0.3以下(初期基準)。第一候補(TypeSafe)と予備(Anthropic)のそれぞれで満たす |
@@ -105,7 +108,9 @@
 
 **基準の改めと測り方(LLM real接続で確定・2026-10-24)。** (1)機会Intentの「location 90%」は、Parserが地域を解決しない(05 §3.3: parseは`geo: null`を返し、利用者が添付で確定する)ため採点の対象から外し、入力文に場所の言及があるときにwarningsへ`{field:"geo"}`を載せることの一致率(90%)に置き換えた(確認UIで場所の添付を見落とさないため)。(2)Jevの順序整合は、同じ2つの意思を(A,B)と(B,A)の順で送り、意味の同じ軸どうし(Aを先に送ったときのwould_a_accept_bと、Bを先に送ったときのwould_b_accept_aなど)の差の絶対値を全軸・全組で集め、その中央値で判定する。予備は第一候補が落ちたときに使うため、予備も単独で満たすことを求める。(3)Jevの呼び出しの失敗が10%を超えたら不合格とする(失敗した組を除いた少数の値で合否が決まらないため)。Parserの呼び出しの失敗は、その件が採点するすべての項目で不一致として数える。(4)Offline Precision@0.60(09 §4)・応答時間のp95・1回あたりの入力トークンは参考値として記録し、合否には使わない。採点は手元のコマンド(`pnpm eval:gate`)で行い、記録をリポジトリに置く。CIは本物のAIを呼ばず記録を照合する(09 §4)
 
-**結果(2026-10-24・合格・記録は`eval/records/gate.json`)。** ゴールドセットはParser 117件(つながりIntent 45・機会Intent 46・境界26)・Jev 47組(yes 22・no 25)。form 100%・topic 100%・category 96.2%・time.start 97.0%・participants 90.9%・budget 100%・場所の言及の注意表示95.7%・alcohol_involved recall 1.000/precision 1.000。Jevの順序整合の中央値はTypeSafe 0.030・Anthropic 0.050、呼び出しの失敗は0件。参考値はPrecision@0.60がTypeSafe 0.824・Anthropic 0.840、p95がParser 2.02秒・Jev(TypeSafe)0.18秒・Jev(Anthropic)2.09秒
+**topicの採点とゴールドセット版2(不具合の修正工程(第3回)で確定・issue #31)。** topicの一致は「`topic_any`(または`topic`)のどれかを含み、かつ`topic_none`(topicに含めてはいけない語=地名・店名・駅名・施設名)のどれも含まない」とする(§3の規則の採点)。合格の基準の数値は変えない。ゴールドセットは版2へ改め(`topic_none`を16件に足した)、オーナーが承認した(2026-10-24)。境目のあいまいな例は`topic_none`を置かず、地名のあり・なしのどちらも正解とする。同じ項目の`topic_any`の語と`topic_none`の語は互いを含まないこと(含むと「渋谷系の音楽」のような正しい出力を不合格にするため)を、ゴールドセットの読み込みで検査する。Parserの指示文とJevの切り替え(§5)を変えたため、精度ゲートを採り直した(下の結果)。
+
+**結果(2026-10-24・合格・記録は`eval/records/gate.json`・ゴールドセット版2で採り直した値)。** ゴールドセットはParser 117件(つながりIntent 45・機会Intent 46・境界26)・Jev 47組(yes 22・no 25)。form 100%・topic 100%・category 96.2%・time.start 97.0%・participants 100.0%・budget 100%・場所の言及の注意表示95.7%・alcohol_involved recall 1.000/precision 1.000。Jevの順序整合の中央値はTypeSafe 0.030・Anthropic 0.030、呼び出しの失敗は0件。参考値はPrecision@0.60がTypeSafe 0.824・Anthropic 0.778、p95がParser 2.40秒・Jev(TypeSafe)0.20秒・Jev(Anthropic)1.90秒
 
 ## 7. コスト見積と計上
 

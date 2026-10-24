@@ -131,6 +131,8 @@ URLもシークレットとして持つ。GitHubはシークレットの値を�
 
 stagingのWorkerは、Cloudflare Accessを通った要求だけを受け付ける。Accessは通った要求にヘッダー`Cf-Access-Jwt-Assertion`を足し、Worker側がその署名・発行元(`iss`)・宛先(`aud`)・期限を確かめて、通らないものは403で断る(設計 `docs/superpowers/specs/2026-10-24-llm-real-connection-design.md` §1)。人間はオーナーのメールアドレスでログインして通り、道具(負荷試験・疎通確認・CI)は「サービストークン」(道具用の通行証=IDとシークレットの組)で通る。
 
+WorkerはAccessの公開鍵の集合を、`PIPELINE_KV`に600秒(10分)置いて使い回す(新しいisolateごとに取りに行くと保存が遅くなるため・issue #32。Cache APIはworkers.devのドメインでは効かない)。Accessで鍵を入れ替えたときは、最大10分の間、古い鍵の集合が残り得る。
+
 **オーナーの操作**(Cloudflareの管理画面。いずれも新しい設定を作る操作なので、実行の直前に確認する)
 
 1. Workers & Pages → `latch-worker-staging` → Settings → Domains & Routes → workers.devの「Enable Cloudflare Access」を押す
