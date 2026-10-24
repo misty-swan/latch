@@ -1,7 +1,7 @@
 /**
  * CIの照合(設計書 §3.4)。apps/worker/wrangler.jsonc のトップレベルと全env.*の
  * vars.LATCH_LLM_MODEにrealがあれば、eval/records/gate.json が合格・承認済みの
- * ゴールドセット・固定したTypeSafeのモデル名・今のファイルと同じ指紋であることを求める。
+ * ゴールドセット・固定したTypeSafeのモデル名・今のprompts.tsと同じモデル名・今のファイルと同じ指紋であることを求める。
  * 問題を日本語の文で返す(空配列=通る)。
  */
 import { existsSync, readFileSync } from "node:fs";
@@ -11,6 +11,17 @@ import { fingerprint } from "./fingerprint";
 
 export const GATE_RECORD_PATH = "eval/records/gate.json";
 const WRANGLER_PATH = "apps/worker/wrangler.jsonc";
+const PROMPTS_PATH = "apps/worker/src/llm/real/prompts.ts";
+
+/** prompts.ts の `export const 名前 = "値";` を読む(一時ディレクトリの検査でも同じ経路で読むため) */
+export const readModelConstant = (
+	repoRoot: string,
+	name: string,
+): string | null => {
+	const src = readFileSync(join(repoRoot, PROMPTS_PATH), "utf8");
+	const m = new RegExp(`export const ${name}\\s*=\\s*"([^"]*)"`).exec(src);
+	return m ? (m[1] as string) : null;
+};
 
 type Vars = { vars?: { LATCH_LLM_MODE?: unknown } };
 
@@ -45,7 +56,7 @@ export const checkGate = (repoRoot: string): string[] => {
 	let record: {
 		passed?: unknown;
 		goldset?: { approvedByOwner?: unknown };
-		models?: { typesafe_requested?: unknown };
+		models?: { anthropic?: unknown; typesafe_requested?: unknown };
 		fingerprint?: Record<string, unknown>;
 	};
 	try {
@@ -70,6 +81,17 @@ export const checkGate = (repoRoot: string): string[] => {
 	if (typeof requested !== "string" || requested === "jev-latest") {
 		problems.push(
 			`${GATE_RECORD_PATH} のTypeSafeのモデル名が固定されていません(jev-latestまたは不明)`,
+		);
+	} else if (requested !== readModelConstant(repoRoot, "TYPESAFE_MODEL")) {
+		problems.push(
+			`${GATE_RECORD_PATH} のTypeSafeのモデル名(${requested})が今のTYPESAFE_MODELと違います。採り直してください`,
+		);
+	}
+	if (
+		record.models?.anthropic !== readModelConstant(repoRoot, "ANTHROPIC_MODEL")
+	) {
+		problems.push(
+			`${GATE_RECORD_PATH} のAnthropicのモデル名が今のANTHROPIC_MODELと違います。採り直してください`,
 		);
 	}
 	const now = fingerprint(repoRoot);

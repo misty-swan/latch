@@ -8,8 +8,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+	ANTHROPIC_MODEL,
+	TYPESAFE_MODEL,
+} from "../../apps/worker/src/llm/real/prompts";
 import { FINGERPRINT_FILES, fingerprint } from "./lib/fingerprint";
-import { checkGate } from "./lib/gate-check";
+import { checkGate, readModelConstant } from "./lib/gate-check";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -32,11 +36,16 @@ const wrangler = (top: string, staging: string) => `{
 type Record = {
 	passed: boolean;
 	goldset: { approvedByOwner: string | null };
-	models: { typesafe_requested: string };
+	models: { anthropic: string; typesafe_requested: string };
 	fingerprint: { [k: string]: string };
 };
 
+/** 一時リポジトリのprompts.tsに書くモデル名(記録と照合される今の値) */
+const prompts = (typesafe: string) =>
+	`export const ANTHROPIC_MODEL = "claude-haiku-5-5";\nexport const TYPESAFE_MODEL = "${typesafe}";\n`;
+
 const makeRepo = (opts: {
+	typesafeModel?: string;
 	top?: string;
 	staging?: string;
 	record?: (r: Record) => void;
@@ -47,6 +56,10 @@ const makeRepo = (opts: {
 		mkdirSync(dirname(join(root, f)), { recursive: true });
 		writeFileSync(join(root, f), `内容 ${f}\n`);
 	}
+	writeFileSync(
+		join(root, "apps/worker/src/llm/real/prompts.ts"),
+		prompts(opts.typesafeModel ?? "jev-1.13.0"),
+	);
 	mkdirSync(join(root, "apps/worker"), { recursive: true });
 	writeFileSync(
 		join(root, "apps/worker/wrangler.jsonc"),
@@ -56,7 +69,10 @@ const makeRepo = (opts: {
 		const record: Record = {
 			passed: true,
 			goldset: { approvedByOwner: "2026-10-24" },
-			models: { typesafe_requested: "jev-1.13.0" },
+			models: {
+				anthropic: "claude-haiku-5-5",
+				typesafe_requested: opts.typesafeModel ?? "jev-1.13.0",
+			},
 			fingerprint: fingerprint(root),
 		};
 		opts.record?.(record);
@@ -72,6 +88,13 @@ const makeRepo = (opts: {
 describe("checkGate", () => {
 	it("今のリポジトリで通る", () => {
 		expect(checkGate(repoRoot)).toEqual([]);
+	});
+
+	it("今のprompts.tsからモデル名の定数を読める", () => {
+		expect(readModelConstant(repoRoot, "ANTHROPIC_MODEL")).toBe(
+			ANTHROPIC_MODEL,
+		);
+		expect(readModelConstant(repoRoot, "TYPESAFE_MODEL")).toBe(TYPESAFE_MODEL);
 	});
 
 	it("どの環境もrealでなければ、記録が無くても通る", () => {
@@ -115,14 +138,44 @@ describe("checkGate", () => {
 
 	it("jev-latestで採点した記録は落ちる", () => {
 		const errs = checkGate(
+			makeRepo({ top: "real", typesafeModel: "jev-latest" }),
+		);
+		expect(errs.join("\n")).toMatch(/jev-latest/);
+	});
+
+	it("記録のTypeSafeのモデル名が今のTYPESAFE_MODELと違えば落ちる", () => {
+		const errs = checkGate(
 			makeRepo({
 				top: "real",
 				record: (r) => {
-					r.models.typesafe_requested = "jev-latest";
+					r.models.typesafe_requested = "jev-1.12.0";
 				},
 			}),
 		);
-		expect(errs.join("\n")).toMatch(/jev-latest/);
+		expect(errs).toHaveLength(1);
+		expect(errs[0]).toMatch(/TYPESAFE_MODEL/);
+	});
+
+	it("記録のAnthropicのモデル名が今のANTHROPIC_MODELと違えば落ちる", () => {
+		const errs = checkGate(
+			makeRepo({
+				top: "real",
+				record: (r) => {
+					r.models.anthropic = "claude-haiku-4-5";
+				},
+			}),
+		);
+		expect(errs).toHaveLength(1);
+		expect(errs[0]).toMatch(/ANTHROPIC_MODEL/);
+	});
+
+	it("指紋の対象のrealの呼び出し部品が変われば落ちる", () => {
+		const root = makeRepo({ top: "real" });
+		writeFileSync(
+			join(root, "apps/worker/src/llm/real/parser.ts"),
+			"内容 変更\n",
+		);
+		expect(checkGate(root).join("\n")).toMatch(/real\/parser\.ts/);
 	});
 
 	it("指紋が今のファイルと違えば、違うファイルを挙げて落ちる", () => {

@@ -14,9 +14,14 @@ const makeRepo = (): string => {
 };
 
 describe("fingerprint", () => {
-	it("対象の4ファイルそれぞれのSHA-256を返す", () => {
+	it("対象のファイルそれぞれのSHA-256を返す", () => {
 		expect(FINGERPRINT_FILES).toEqual([
 			"apps/worker/src/llm/real/prompts.ts",
+			"apps/worker/src/llm/real/anthropic.ts",
+			"apps/worker/src/llm/real/parser.ts",
+			"apps/worker/src/llm/real/jev-typesafe.ts",
+			"apps/worker/src/llm/real/jev-anthropic.ts",
+			"apps/worker/src/llm/expiry.ts",
 			"apps/worker/src/pipeline/normalize.ts",
 			"eval/goldset/parser.yaml",
 			"eval/goldset/jev-pairs.yaml",
