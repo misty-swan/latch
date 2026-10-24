@@ -3,7 +3,7 @@
  * 時刻はClockで受け取り、順番取りの時刻は行ごとにその時点で読む(docs/04 §4)。
  */
 
-import { and, asc, eq, gte, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { Clock } from "../clock/clock";
 import {
@@ -80,6 +80,24 @@ const dispatchOne = async (
 		});
 	const n = claimed[0];
 	if (n === undefined) return;
+	await judgeClaimed(db, sender, clock, id, n, claimedAt);
+};
+
+type ClaimedRow = {
+	userId: string;
+	type: string;
+	latchId: string | null;
+};
+
+/** 順番を取れた1行を判断(muted・購読なし・送信)して結果を書く */
+const judgeClaimed = async (
+	db: Db,
+	sender: PushSender,
+	clock: Clock,
+	id: string,
+	n: ClaimedRow,
+	claimedAt: Date,
+): Promise<void> => {
 	if (n.type !== "proposal" && n.type !== "matched") {
 		await settle(db, id, "failed", claimedAt);
 		return;
@@ -216,11 +234,13 @@ export async function dispatchPush(
 }
 
 /**
- * 未送信のpendingを拾ってdispatchPushへ渡す(F7b設計 §5.1 手順2・§5.6)。
+ * 未送信のpendingの対象選びと順番取りを1文の条件付きUPDATEで行い(#39・D1への問い合わせを減らす)、
+ * 取れた行だけを1件ずつ判断して結果を書く(F7b設計 §5.1 手順2・§5.6)。
  * 対象=作成からminAgeMs以上かつ10分以内・未試行または試行から60秒以上・id昇順100件。
- * createdFromがあればその時刻以降に作られた行だけを対象にする(Cronが自分の実行で作った通知を即送る)。
- * 開始から45秒を過ぎたら新しい行の順番を取らない(残りは後の送出・Cronの回収が拾う)。
- * 戻り値は順番取りを試みた件数
+ * createdFromがあればその時刻以降に作られた行だけを対象にする。
+ * 順番取りの時刻は全行で同じ(開始時刻)。開始から45秒を過ぎたら残りの行は判断せず、
+ * 順番を取ったままpendingに残す(60秒後以降の送出・Cronの回収が取り直す)。
+ * 戻り値は順番を取れた件数
  */
 export async function flushPush(
 	db: Db,
@@ -229,31 +249,54 @@ export async function flushPush(
 	opts: { minAgeMs: number; createdFrom?: Date },
 ): Promise<number> {
 	const now = clock.now();
-	const rows = await db
-		.select({ id: notifications.id })
-		.from(notifications)
-		.where(
-			and(
-				eq(notifications.pushState, "pending"),
-				lte(notifications.createdAt, new Date(now.getTime() - opts.minAgeMs)),
-				gte(notifications.createdAt, new Date(now.getTime() - MAX_AGE_MS)),
-				...(opts.createdFrom
-					? [gte(notifications.createdAt, opts.createdFrom)]
-					: []),
-				or(
-					isNull(notifications.pushAttemptedAt),
-					lte(
-						notifications.pushAttemptedAt,
-						new Date(now.getTime() - RETRY_INTERVAL_MS),
-					),
-				),
-			),
+	const nowMs = now.getTime();
+	const retryBefore = nowMs - RETRY_INTERVAL_MS;
+	const from =
+		opts.createdFrom !== undefined
+			? sql`AND created_at >= ${opts.createdFrom.getTime()}`
+			: sql``;
+	const rows = await db.all<{
+		id: string;
+		user_id: string;
+		type: string;
+		latch_id: string | null;
+	}>(sql`
+		UPDATE notifications SET push_attempted_at = ${nowMs}
+		WHERE id IN (
+			SELECT id FROM notifications
+			WHERE push_state = 'pending'
+				AND created_at <= ${nowMs - opts.minAgeMs}
+				AND created_at >= ${nowMs - MAX_AGE_MS}
+				${from}
+				AND (push_attempted_at IS NULL OR push_attempted_at <= ${retryBefore})
+			ORDER BY id ASC
+			LIMIT ${FLUSH_LIMIT}
 		)
-		.orderBy(asc(notifications.id))
-		.limit(FLUSH_LIMIT);
-	const ids = rows.map((r) => r.id);
-	if (ids.length === 0) return 0;
-	return dispatchPush(db, sender, clock, ids, {
-		deadlineMs: now.getTime() + FLUSH_BUDGET_MS,
-	});
+		AND push_state = 'pending'
+		AND (push_attempted_at IS NULL OR push_attempted_at <= ${retryBefore})
+		RETURNING id, user_id, type, latch_id
+	`);
+	rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+	const deadlineMs = nowMs + FLUSH_BUDGET_MS;
+	for (const r of rows) {
+		if (clock.now().getTime() >= deadlineMs) break;
+		try {
+			await judgeClaimed(
+				db,
+				sender,
+				clock,
+				r.id,
+				{ userId: r.user_id, type: r.type, latchId: r.latch_id },
+				now,
+			);
+		} catch (e) {
+			// 1行の失敗で他の行を止めない。pendingのまま回収に任せる
+			logger.error("push.failed", {
+				notification_id: r.id,
+				push_result: "error",
+				error_code: e instanceof Error ? e.name : "unknown",
+			});
+		}
+	}
+	return rows.length;
 }

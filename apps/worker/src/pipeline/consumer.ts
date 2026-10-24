@@ -802,6 +802,8 @@ export const handleQueueBatch = async (
 	ctx: ExecutionContext,
 	clock: Clock,
 ): Promise<void> => {
+	// この実行の開始時刻。これより前に作られた未送信は毎分Cronの回収に任せる(#39)
+	const startedAt = clock.now();
 	try {
 		if (isDlqQueue(batch.queue)) {
 			await handleDlqBatch(env, batch);
@@ -815,6 +817,7 @@ export const handleQueueBatch = async (
 				try {
 					await flushPush(drizzle(env.DB), pushSenderOf(env), clock, {
 						minAgeMs: 0,
+						createdFrom: startedAt,
 					});
 				} catch (error) {
 					logger.warn("push.flush.failed", {

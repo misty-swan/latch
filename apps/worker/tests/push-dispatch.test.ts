@@ -429,7 +429,7 @@ describe("flushPush(F7b設計 §5.6)", () => {
 		expect((await notifOf(n)).pushState).toBe("no_subscription");
 	});
 
-	it("開始から45秒を過ぎたら新しい行の順番を取らない(順番取りの時刻は行ごと)", async () => {
+	it("開始から45秒を過ぎたら残りの行を判断しない(順番取りは1文で全行が開始時刻)", async () => {
 		const ua = await insertUser();
 		await insertSub(ua);
 		const ids: string[] = [];
@@ -449,14 +449,106 @@ describe("flushPush(F7b設計 §5.6)", () => {
 			return { kind: "ok" };
 		});
 		const count = await flushPush(db, sender, clock, { minAgeMs: 0 });
-		expect(count).toBe(2);
+		// 戻り値は順番を取れた件数(判断した件数ではない)
+		expect(count).toBe(3);
 		expect(calls).toHaveLength(2);
 		const [r1, r2, r3] = await Promise.all(ids.map(notifOf));
 		expect(r1.pushState).toBe("sent");
 		expect(r1.pushAttemptedAt?.getTime()).toBe(NOW.getTime());
 		expect(r2.pushState).toBe("sent");
-		expect(r2.pushAttemptedAt?.getTime()).toBe(later(30 * SEC).getTime());
+		// 順番取りは1文なので全行が開始時刻で取られる(#39)
+		expect(r2.pushAttemptedAt?.getTime()).toBe(NOW.getTime());
+		// 判断しなかった行は順番を取ったままpendingに残る
 		expect(r3.pushState).toBe("pending");
-		expect(r3.pushAttemptedAt).toBeNull();
+		expect(r3.pushAttemptedAt?.getTime()).toBe(NOW.getTime());
+	});
+
+	it("時間の上限で残った行は、60秒後のflushPush(Cronと同じminAgeMs 30秒)が取り直す", async () => {
+		const ua = await insertUser();
+		await insertSub(ua);
+		const ids: string[] = [];
+		for (let i = 0; i < 3; i++) {
+			ids.push(
+				await insertNotif(ua, await freshLatch(ua), {
+					createdAt: ago(2 * MIN),
+				}),
+			);
+		}
+		ids.sort();
+		let t = NOW.getTime();
+		const clock: Clock = { now: () => new Date(t) };
+		const first = recorder(() => {
+			t += 30 * SEC;
+			return { kind: "ok" };
+		});
+		expect(await flushPush(db, first.sender, clock, { minAgeMs: 0 })).toBe(3);
+		expect(first.calls).toHaveLength(2);
+		// 60秒たっていない間は取り直されない
+		t = NOW.getTime() + 59 * SEC;
+		const early = recorder();
+		expect(
+			await flushPush(db, early.sender, clock, { minAgeMs: 30 * SEC }),
+		).toBe(0);
+		t = NOW.getTime() + 61 * SEC;
+		const second = recorder();
+		expect(
+			await flushPush(db, second.sender, clock, { minAgeMs: 30 * SEC }),
+		).toBe(1);
+		expect(second.calls).toHaveLength(1);
+		expect((await notifOf(ids[2] as string)).pushState).toBe("sent");
+	});
+
+	it("2つのflushPushを同時に走らせても、同じ通知は1回しか送られない", async () => {
+		const ua = await insertUser();
+		await insertSub(ua);
+		for (let i = 0; i < 5; i++) {
+			await insertNotif(ua, await freshLatch(ua), { createdAt: ago(2 * MIN) });
+		}
+		const { sender, calls } = recorder();
+		const [c1, c2] = await Promise.all([
+			flushPush(db, sender, CLOCK, { minAgeMs: 0 }),
+			flushPush(db, sender, CLOCK, { minAgeMs: 0 }),
+		]);
+		expect(c1 + c2).toBe(5);
+		expect(calls).toHaveLength(5);
+	});
+
+	it("対象が複数でも結果は従来と同じ(muted・購読なし・sent・failed・retry)", async () => {
+		const ud = await insertUser();
+		await insertSub(ud);
+		const nSent = await insertNotif(ud, await freshLatch(ud), {
+			createdAt: ago(2 * MIN),
+		});
+		const muted = await setup("muted");
+		await insertSub(muted.ua);
+		const noSub = await insertUser();
+		const nNoSub = await insertNotif(noSub, await freshLatch(noSub), {
+			createdAt: ago(2 * MIN),
+		});
+		const ub = await insertUser();
+		const subRejected = await insertSub(ub);
+		const nRej = await insertNotif(ub, await freshLatch(ub), {
+			createdAt: ago(2 * MIN),
+		});
+		const uc = await insertUser();
+		const subRetry = await insertSub(uc);
+		const nRetry = await insertNotif(uc, await freshLatch(uc), {
+			createdAt: ago(2 * MIN),
+		});
+		const { sender } = recorder((t) =>
+			t.endpoint === subRejected
+				? { kind: "rejected", status: 400 }
+				: t.endpoint === subRetry
+					? { kind: "retry", status: 503 }
+					: { kind: "ok" },
+		);
+		await flushPush(db, sender, CLOCK, { minAgeMs: 0 });
+		expect((await notifOf(nSent)).pushState).toBe("sent");
+		expect((await notifOf(muted.na)).pushState).toBe("muted");
+		expect((await notifOf(nNoSub)).pushState).toBe("no_subscription");
+		expect((await notifOf(nRej)).pushState).toBe("failed");
+		const r = await notifOf(nRetry);
+		expect(r.pushState).toBe("pending");
+		expect(r.pushAttemptedAt?.getTime()).toBe(NOW.getTime());
 	});
 });

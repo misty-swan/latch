@@ -21,6 +21,8 @@ export const pushFlushAfterWrite: MiddlewareHandler<AppEnv> = async (
 	c,
 	next,
 ) => {
+	// この要求の開始時刻。これより前に作られた未送信は毎分Cronの回収に任せる(#39)
+	const startedAt = systemClock.now();
 	await next();
 	if (!WRITE_METHODS.has(c.req.method)) return;
 	if (c.res.status < 200 || c.res.status >= 300) return;
@@ -33,6 +35,7 @@ export const pushFlushAfterWrite: MiddlewareHandler<AppEnv> = async (
 				try {
 					await flushPush(drizzle(env.DB), pushSenderOf(env), systemClock, {
 						minAgeMs: 0,
+						createdFrom: startedAt,
 					});
 				} catch (error) {
 					logger.warn("push.flush.failed", {

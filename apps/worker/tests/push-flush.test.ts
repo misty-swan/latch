@@ -235,6 +235,36 @@ describe("変更系APIの後の送出", () => {
 		expect(await pushStateOf(b.id)).toEqual(["no_subscription"]);
 	});
 
+	it("要求の開始より前に作られた未送信は拾わず、開始以降に作られた通知は送る", async () => {
+		const a = await registerUser("丙2");
+		const old = ulid();
+		await db.insert(notifications).values({
+			id: old,
+			userId: a.id,
+			type: "proposal",
+			latchId: null,
+			readAt: null,
+			createdAt: new Date(Date.now() - 5000),
+			intentId: null,
+			pushState: "pending",
+			pushAttemptedAt: null,
+		});
+		const res = await fetchAndWait("POST", "/v1/push-subscriptions", a.token, {
+			endpoint: `https://fcm.googleapis.com/fcm/send/${ulid()}`,
+			keys: {
+				p256dh:
+					"BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM",
+				auth: "tBHItJI5svbpez7KI4CCXg",
+			},
+		});
+		expect([200, 201]).toContain(res.status);
+		const [row] = await db
+			.select({ s: notifications.pushState })
+			.from(notifications)
+			.where(eq(notifications.id, old));
+		expect(row?.s).toBe("pending");
+	});
+
 	it("GETでは送出しない(pendingのまま)", async () => {
 		const a = await registerUser("丙");
 		await db.insert(notifications).values({
@@ -321,6 +351,23 @@ describe("主キューのバッチの後の送出", () => {
 			type: "proposal",
 			latchId: null,
 			readAt: null,
+			createdAt: clock.now(),
+			intentId: null,
+			pushState: "pending",
+			pushAttemptedAt: null,
+		});
+		return id;
+	};
+
+	/** 実行の開始より前に作られた未送信(入口の送出は拾わず、Cronの回収に任せる) */
+	const seedOlderPending = async (userId: string): Promise<string> => {
+		const id = ulid();
+		await db.insert(notifications).values({
+			id,
+			userId,
+			type: "proposal",
+			latchId: null,
+			readAt: null,
 			createdAt: new Date(clock.now().getTime() - 5000),
 			intentId: null,
 			pushState: "pending",
@@ -356,6 +403,13 @@ describe("主キューのバッチの後の送出", () => {
 		const nid = await seedPending(a.id);
 		await consume("match-events");
 		expect(await stateOf(nid)).toBe("no_subscription");
+	});
+
+	it("実行の開始より前に作られた未送信は拾わない", async () => {
+		const a = await registerUser("戊2");
+		const nid = await seedOlderPending(a.id);
+		await consume("match-events");
+		expect(await stateOf(nid)).toBe("pending");
 	});
 
 	it("DLQの消費後は送出しない", async () => {

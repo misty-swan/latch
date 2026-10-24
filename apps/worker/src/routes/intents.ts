@@ -1129,7 +1129,12 @@ const afterCancel = async (
 		warnFailed(error);
 	}
 	try {
-		await flushPush(db, pushSenderOf(env), systemClock, { minAgeMs: 0 });
+		await flushPush(db, pushSenderOf(env), systemClock, {
+			minAgeMs: 0,
+			// 要求の開始時刻(releaseAfterCancelが作る通知のcreated_atもこの時刻)。
+			// これより前に作られた未送信は毎分Cronの回収に任せる(#39)
+			createdFrom: now,
+		});
 	} catch (error) {
 		logger.warn("push.flush.failed", {
 			error_code: errorCodeOf(error, "PUSH_FLUSH_FAILED"),
