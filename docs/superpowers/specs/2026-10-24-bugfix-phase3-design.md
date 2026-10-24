@@ -2,7 +2,7 @@
 
 - 作成日: 2026-10-24
 - 対象: GitHubのissue #27〜#35(第2回の修正工程の後の負荷試験の流し直しと、LLM real接続の工程で見つけた不具合)。修正の後のstagingでの原因の確認と、LLM real(LATCH_LLM_MODE=real)のままでの負荷試験(02 §4 #33)の測り直し
-- 正本: docs/01 §20(性能目標)/ docs/02 §4 #33 / docs/06 §2・§5・§7 / docs/07 §4・§5・§6 / docs/12 §2 / docs/runbooks/staging.md 7章
+- 正本: docs/01 §20(性能目標)/ docs/02 §4 #33 / docs/06 §2・§5・§7 / docs/07 §3・§4・§5・§6 / docs/12 §2 / docs/runbooks/staging.md 7章
 - 前段: docs/superpowers/specs/2026-10-23-bugfix-phase2-design.md(第2回)・docs/superpowers/specs/2026-10-24-llm-real-connection-design.md(LLM real接続)・docs/reports/f8b-load-test.md §8(real接続での計測の結果)
 - 本書の位置づけ: ブレインストーミングでオーナー合意した設計の記録。実装計画(docs/superpowers/plans/)の入力とする
 
@@ -87,7 +87,7 @@
 
 ### 2.1 問題
 
-Parser(real)は「今度の日曜17時に渋谷で…カレー…」のtopicを「渋谷でカレーを食べに行く」とする。topicは正規化テキスト(07 §4)に入るため、利用者の書いた地名がEmbeddingの入力とJevの外部送信に乗る。2026-10-24の決定(地域名をEmbeddingの入力に含めない・`eval/records/region.json` でAUCは含めない0.620/含める0.585)の趣旨とずれる。
+Parser(real)は「今度の日曜17時に渋谷で…カレー…」のtopicを「渋谷でカレーを食べに行く」とする。topicは正規化テキスト(07 §4のEmbeddingの入力)に入るため、利用者の書いた地名がEmbeddingの入力とJevの外部送信に乗る。2026-10-24の決定(地域名をEmbeddingの入力に含めない・`eval/records/region.json` でAUCは含めない0.620/含める0.585)の趣旨とずれる。
 
 ### 2.2 設計
 
@@ -104,10 +104,11 @@ Parser(real)は「今度の日曜17時に渋谷で…カレー…」のtopicを�
 
 - §1と§2の変更がそろい、ゴールドセットの承認を受けてから `pnpm eval:gate` を1回流し、`eval/records/gate.json` をコミットする
 - 不合格なら、指示文を直して採り直す(採り直しのたびに約1ドル)。3回で合格しないときは止めて相談する
+- その後の工程(§5・§7の直し)で指紋の対象(`tools/eval/lib/fingerprint.ts` の `FINGERPRINT_FILES`。`apps/worker/src/llm/mode.ts` などを含む)を変えたら、負荷試験の前にもう1回採り直す
 
 ### 2.5 文書
 
-- 07 §4: topicに地名・店名・駅名を入れない方針と、場所の言及はwarningsで確認UIへ回すことを書く
+- 07 §3: topicに地名・店名・駅名を入れない方針と、場所の言及はwarningsで確認UIへ回すことを書く
 - 07 §6: topicの採点の改め(`topic_none`)を書く
 - 08 §5の「送るもの」は変えない(正規化テキストの範囲のまま)
 
@@ -213,7 +214,7 @@ Cloudflareの資源を新しく作る・消す操作と、pushは、毎回オー
 
 ## 9. 文書とissue
 
-- 改める文書: 01冒頭(#35の決定記録)・02 §4 #33・06 §2(#30)・07 §4・§5・§6(#31・#35)・12 §2(#30の合意と工程の記録)・docs/runbooks/staging.md 7章(#33・#34)・AGENTS.md の状態。docs/00 §3 の運用ルール(版数を上げて変更点行を追記・前提文書欄と00 §1の版数表をそろえる)と用語の統一に従う
+- 改める文書: 01冒頭(#35の決定記録)・02 §4 #33・06 §2(#30)・07 §3・§5・§6(#31・#35)・12 §2(#30の合意と工程の記録)・docs/runbooks/staging.md 7章(#33・#34)・AGENTS.md の状態。docs/00 §3 の運用ルール(版数を上げて変更点行を追記・前提文書欄と00 §1の版数表をそろえる)と用語の統一に従う
 - 02 #33: 01 §20の項目がすべて目標内なら完了とする。残る項目があれば、目標外の項目とissueを明記する
 - 直したissueは結果を書いて閉じる。直らなかったものは、オーナーと扱いを決めて記録する
 - この工程で見つけた新しい不具合は、まずissueに登録する
