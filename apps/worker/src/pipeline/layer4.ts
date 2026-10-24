@@ -144,11 +144,18 @@ export const runLayer4 = async (
 
 	const postStartedAt = systemClock.now().getTime();
 	const now = clock.now();
-	for (const [rowId, axes] of run.axes) {
-		await db
+	// 行ごとのUPDATEは互いに独立のため1つのバッチ(1往復)で書く(#36)
+	const writes = [...run.axes].map(([rowId, axes]) =>
+		db
 			.update(matchCandidates)
 			.set({ jevResult: axes, updatedAt: now })
-			.where(eq(matchCandidates.id, rowId));
+			.where(eq(matchCandidates.id, rowId)),
+	);
+	if (writes.length > 0) {
+		const [first, ...rest] = writes;
+		await db.batch([first, ...rest]);
+	}
+	for (const [rowId, axes] of run.axes) {
 		axesByRow.set(rowId, axes);
 	}
 	return {

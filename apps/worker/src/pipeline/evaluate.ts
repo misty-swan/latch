@@ -13,7 +13,8 @@
  */
 import { LATCH, PIPELINE } from "@latch/shared";
 import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
+import type { BatchItem } from "drizzle-orm/batch";
+import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import { type Clock, systemClock } from "../clock/clock";
 import { intents, matchCandidates } from "../db/schema";
 import type { Env } from "../env";
@@ -153,9 +154,9 @@ export interface EvaluateOptions {
  * - group: グループの準備(prepareGroups)+Jev配分の計画+集合の仕上げ(finishGroups)の合計
  * - jev_pre / jev_call / jev_post: runLayer4の内訳(L4Result.timingsMs・layer4.tsに範囲を記す)
  * - jev_breaker / jev_reserve / jev_http / jev_record: jev_callの内訳(全波の合計・jev/runner.ts)
- * - layer5: Lの保存とL5の対象・提案候補の選択
- * - propose: 提案直前の再検証(recheckHard)と1対1のproposeSet
- * - finish: last_evaluated_atの更新と計測(writeStage2Metrics)
+ * - layer5: Lの保存の文の組み立てとL5の対象・提案候補の選択(計算のみ・#36の直しの後)
+ * - propose: 提案があるときのLの保存と提案直前の再検証(recheckHard・同時)と1対1のproposeSet
+ * - finish: last_evaluated_atの更新(提案が無いときはLの保存と同じバッチ)と計測(writeStage2Metrics)
  */
 const createStageTimer = (intentId: string) => {
 	const nowMs = () => systemClock.now().getTime();
@@ -183,6 +184,18 @@ const createStageTimer = (intentId: string) => {
 			return elapsed;
 		},
 	};
+};
+
+/** 文の列を1つのバッチ(1往復)で送る。空なら何もしない */
+const runBatch = async (
+	db: DrizzleD1Database,
+	statements: BatchItem<"sqlite">[],
+): Promise<void> => {
+	const [first, ...rest] = statements;
+	if (first === undefined) {
+		return;
+	}
+	await db.batch([first, ...rest]);
 };
 
 /** スコア降順・同点はULID昇順(docs/06 §3の同点の規律)の比較関数 */
@@ -388,17 +401,20 @@ export const evaluateIntent = async (
 			updatedAt: now,
 		} satisfies typeof matchCandidates.$inferInsert;
 	});
-	// upsertと実際の行id(衝突時は既存行のid)の読み直しはcandidates.tsが担う
-	const savedRows = await upsertCandidateRows(db, rows, now);
+	// upsertと実際の行id(衝突時は既存行のid)の読み直しはcandidates.tsが担う。
 	// 提案履歴により今は提案できない相手(既存行あり かつ 再提案不可・抑制期間中)は
 	// Layer 4へ渡さない(Jevの枠と予算を使わない・docs/06 §5)。Layer 1の恒久排除とは
-	// 別に数える。proposeSet側の判定も残す(並行時の正)
-	const historyBlocked = await blockedForProposal(
-		db,
-		intent,
-		l3Scored.map((item) => item.candidate),
-		now,
-	);
+	// 別に数える。proposeSet側の判定も残す(並行時の正)。
+	// 履歴の読み込みは候補行と無関係のため、upsertと同時に投げる(#36)
+	const [savedRows, historyBlocked] = await Promise.all([
+		upsertCandidateRows(db, rows, now),
+		blockedForProposal(
+			db,
+			intent,
+			l3Scored.map((item) => item.candidate),
+			now,
+		),
+	]);
 	// 1対1の対象(F4b設計 §2.1・§2.4の1): 履歴で除外されず、人数2が双方の区間に
 	// 入る候補をLayer 3降順のまま。人数条件の不合格はJevの枠を使わない
 	const oneOnOne = new Map<string, { rowId: string; other: IntentRow }>();
@@ -509,16 +525,21 @@ export const evaluateIntent = async (
 	};
 
 	// Layer 5 Scoring(docs/06 §6・F4a設計 §3.1): Jev結果のある全行のLを保存する
-	// (閾値未満も保存・他人どうしの行を含む・Hは候補化時点でLayer 1通過のため1)
+	// (閾値未満も保存・他人どうしの行を含む・Hは候補化時点でLayer 1通過のため1)。
+	// 書き込みは文を組むだけにして、提案があるときは提案直前の再検証と同時に、提案が無い
+	// ときはlast_evaluated_atの更新と同じバッチで送る(D1の直列の待ちを減らす・#36)
+	const scoreWrites: BatchItem<"sqlite">[] = [];
 	for (const c of l4Candidates) {
 		const axes = l4.axesByRow.get(c.rowId);
 		if (axes === undefined) {
 			continue;
 		}
-		await db
-			.update(matchCandidates)
-			.set({ latchScore: latchScore(axes, 1), updatedAt: now })
-			.where(eq(matchCandidates.id, c.rowId));
+		scoreWrites.push(
+			db
+				.update(matchCandidates)
+				.set({ latchScore: latchScore(axes, 1), updatedAt: now })
+				.where(eq(matchCandidates.id, c.rowId)),
+		);
 	}
 	// 1対1の提案対象は起点を含む1対1の対象の行だけ
 	const l5Items: L5Item[] = [];
@@ -547,16 +568,33 @@ export const evaluateIntent = async (
 	// L降順に提案化する(docs/06 §6・F4a設計 §3.1〜§3.2)
 	let proposed = 0;
 	let held = 0;
+	// 提案が無いときは、Lの保存をlast_evaluated_atの更新と同じバッチへ回す(間に挟まるのは
+	// 例外を外へ出さないグループの仕上げだけで、Lの値を読む処理は無い)
+	let deferredScoreWrites: BatchItem<"sqlite">[] = scoreWrites;
 	if (picks.length > 0) {
-		const passedIds = await recheckHard(
-			db,
-			intent.id,
-			picks.flatMap((pick) => {
-				const other = otherByRow.get(pick.rowId);
-				return other === undefined ? [] : [other.id];
-			}),
-			now,
-		);
+		deferredScoreWrites = [];
+		// Lの保存(書き込み)と再検証(読み込み)は互いに依存しないため同時に投げ、
+		// 両方の終わりを待ってから提案化へ進む(Lの保存は従来どおり提案化より前に終わる)。
+		// 失敗したときは従来の順(保存→再検証)で先に失敗した方の例外を投げる
+		const [writing, rechecking] = await Promise.allSettled([
+			runBatch(db, scoreWrites),
+			recheckHard(
+				db,
+				intent.id,
+				picks.flatMap((pick) => {
+					const other = otherByRow.get(pick.rowId);
+					return other === undefined ? [] : [other.id];
+				}),
+				now,
+			),
+		]);
+		if (writing.status === "rejected") {
+			throw writing.reason;
+		}
+		if (rechecking.status === "rejected") {
+			throw rechecking.reason;
+		}
+		const passedIds = rechecking.value;
 		for (const pick of picks) {
 			const other = otherByRow.get(pick.rowId);
 			if (other === undefined || !passedIds.has(other.id)) {
@@ -600,11 +638,15 @@ export const evaluateIntent = async (
 	groupMs += timer.take();
 	timer.emit("group", groupMs);
 
-	// 30分再評価抑制の起点を更新する(docs/05 §2.6)
-	await db
-		.update(intents)
-		.set({ lastEvaluatedAt: now })
-		.where(eq(intents.id, intentId));
+	// 30分再評価抑制の起点を更新する(docs/05 §2.6)。提案が無いときのLの保存は
+	// この更新の前に並べて同じバッチ(1往復)で送る(#36)
+	await runBatch(db, [
+		...deferredScoreWrites,
+		db
+			.update(intents)
+			.set({ lastEvaluatedAt: now })
+			.where(eq(intents.id, intentId)),
+	]);
 
 	const latencyMs = clock.now().getTime() - startedAtMs;
 	const result: Stage2Result = {

@@ -5,6 +5,7 @@
  * 再評価のスコアを上書きする(行は増やさない・status・jev_resultは保持)
  */
 import { and, inArray, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { matchCandidates } from "../db/schema";
 import type { JevAxes } from "../llm/types";
@@ -28,6 +29,16 @@ const candidateKey = (r: {
 }): string =>
 	`${r.intentAId}:${r.intentBId}:${r.intentAVersion}:${r.intentBVersion}`;
 
+/** 読み直した行(バッチの結果の型) */
+interface SavedRow {
+	id: string;
+	intentAId: string;
+	intentBId: string;
+	intentAVersion: number;
+	intentBVersion: number;
+	jevResult: unknown;
+}
+
 /**
  * 行をupsertし、UNIQUEキーで読み直した実際の行id(衝突時は既存行のid)と
  * jev_resultを返す。戻り値のキーはintentPairKey(intentAId, intentBId)
@@ -37,54 +48,69 @@ export const upsertCandidateRows = async (
 	rows: (typeof matchCandidates.$inferInsert)[],
 	now: Date,
 ): Promise<Map<string, { id: string; jevResult: JevAxes | null }>> => {
+	const out = new Map<string, { id: string; jevResult: JevAxes | null }>();
+	if (rows.length === 0) {
+		return out;
+	}
+	const upserts: BatchItem<"sqlite">[] = [];
 	for (let i = 0; i < rows.length; i += UPSERT_CHUNK_SIZE) {
-		await db
-			.insert(matchCandidates)
-			.values(rows.slice(i, i + UPSERT_CHUNK_SIZE))
-			.onConflictDoUpdate({
-				target: [
-					matchCandidates.intentAId,
-					matchCandidates.intentBId,
-					matchCandidates.intentAVersion,
-					matchCandidates.intentBVersion,
-				],
-				set: {
-					retrievalScore: sql`excluded.retrieval_score`,
-					cheapJudgeScore: sql`excluded.cheap_judge_score`,
-					// statusは上書きしない(新規INSERTの行だけがcandidateになり、
-					// 提案済み・クローズ済みの既存行は状態を保つ)
-					updatedAt: now,
-				},
-			});
+		upserts.push(
+			db
+				.insert(matchCandidates)
+				.values(rows.slice(i, i + UPSERT_CHUNK_SIZE))
+				.onConflictDoUpdate({
+					target: [
+						matchCandidates.intentAId,
+						matchCandidates.intentBId,
+						matchCandidates.intentAVersion,
+						matchCandidates.intentBVersion,
+					],
+					set: {
+						retrievalScore: sql`excluded.retrieval_score`,
+						cheapJudgeScore: sql`excluded.cheap_judge_score`,
+						// statusは上書きしない(新規INSERTの行だけがcandidateになり、
+						// 提案済み・クローズ済みの既存行は状態を保つ)
+						updatedAt: now,
+					},
+				}),
+		);
 	}
 
 	// upsertは衝突時に既存行のidを保持するため、UNIQUEキーで読み直して実際の行idを得る。
 	// in句は版を含まないため、版違いの行は完全キーの照合で除く
-	const wanted = new Set(rows.map(candidateKey));
-	const out = new Map<string, { id: string; jevResult: JevAxes | null }>();
+	const reads: BatchItem<"sqlite">[] = [];
 	for (let i = 0; i < rows.length; i += READ_CHUNK_SIZE) {
 		const chunk = rows.slice(i, i + READ_CHUNK_SIZE);
-		const saved = await db
-			.select({
-				id: matchCandidates.id,
-				intentAId: matchCandidates.intentAId,
-				intentBId: matchCandidates.intentBId,
-				intentAVersion: matchCandidates.intentAVersion,
-				intentBVersion: matchCandidates.intentBVersion,
-				jevResult: matchCandidates.jevResult,
-			})
-			.from(matchCandidates)
-			.where(
-				and(
-					inArray(matchCandidates.intentAId, [
-						...new Set(chunk.map((r) => r.intentAId)),
-					]),
-					inArray(matchCandidates.intentBId, [
-						...new Set(chunk.map((r) => r.intentBId)),
-					]),
+		reads.push(
+			db
+				.select({
+					id: matchCandidates.id,
+					intentAId: matchCandidates.intentAId,
+					intentBId: matchCandidates.intentBId,
+					intentAVersion: matchCandidates.intentAVersion,
+					intentBVersion: matchCandidates.intentBVersion,
+					jevResult: matchCandidates.jevResult,
+				})
+				.from(matchCandidates)
+				.where(
+					and(
+						inArray(matchCandidates.intentAId, [
+							...new Set(chunk.map((r) => r.intentAId)),
+						]),
+						inArray(matchCandidates.intentBId, [
+							...new Set(chunk.map((r) => r.intentBId)),
+						]),
+					),
 				),
-			);
-		for (const r of saved) {
+		);
+	}
+	// upsertと読み直しを1つのバッチ(1往復・1トランザクション)で送る。読み直しはバッチ内で
+	// upsertの後に並ぶため、upsert後の行を読む(D1の直列の待ちを1段にする・#36)
+	const [first, ...rest] = [...upserts, ...reads];
+	const results = await db.batch([first, ...rest]);
+	const wanted = new Set(rows.map(candidateKey));
+	for (const result of results.slice(upserts.length)) {
+		for (const r of result as SavedRow[]) {
 			if (!wanted.has(candidateKey(r))) {
 				continue;
 			}

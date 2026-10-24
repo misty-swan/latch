@@ -92,8 +92,11 @@ export const prepareGroups = async (
 
 	// Pool内の全ペアのHard判定(F4b設計 §2.2): Layer 1と同じ判定(他人どうしの
 	// ブロック・恒久排除を含む)と、提案履歴により今は提案できないペアの除外
-	const l1 = await fetchMembersL1Data(db, members);
-	const historyBlocked = await historyBlockedPairs(db, members, now);
+	// 2つの読み込みは互いに依存しないため同時に投げる(#36)
+	const [l1, historyBlocked] = await Promise.all([
+		fetchMembersL1Data(db, members),
+		historyBlockedPairs(db, members, now),
+	]);
 	const pairOk = (a: IntentRow, b: IntentRow): boolean => {
 		if (historyBlocked.has(intentPairKey(a.id, b.id))) {
 			return false;

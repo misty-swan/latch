@@ -62,6 +62,7 @@ import {
 	resetMemoryVectorStore,
 } from "../src/vectorstore/memory";
 import type { StoredVector } from "../src/vectorstore/types";
+import { countD1RoundTrips } from "./d1-round-trips";
 import privateJwkText from "./fixtures/test-idp-private.jwk?raw";
 
 const testEnv = env as unknown as WorkerEnv;
@@ -1502,6 +1503,37 @@ describe("Layer 4・Layer 5・提案化の連結(F4a設計 §2.6・§3.1)", () =
 		} finally {
 			logSpy.mockRestore();
 		}
+	});
+
+	it("提案ができる1対1の評価は、D1の直列の待ちを12段以下にする(#36)", async () => {
+		const { userA, origin } = await seedConnectionPair();
+		const counter = countD1RoundTrips(testEnv.DB);
+		const result = await evaluateIntent(
+			{ ...testEnv, DB: counter.db },
+			origin.id,
+			directClock,
+		);
+		expect(result?.proposed).toBe(1);
+		// 段ごと: prepare 1・layer1 2・candidates 1・jev_pre 1・jev_reserve 1・jev_post 1・
+		// 再検証とLの保存 2(同時)・proposeSet 2・finish 1 = 12。直す前は23段
+		expect(counter.waves()).toBeLessThanOrEqual(12);
+		expect(await latchesOfUser(userA)).toHaveLength(1);
+	});
+
+	it("提案の無い評価(Jevの点が閾値未満)は、Lの保存とlast_evaluated_atの更新を1段で書く(#36)", async () => {
+		const { origin } = await seedConnectionPair(`${JEV_LOW_MARKER} 学習仲間`);
+		const counter = countD1RoundTrips(testEnv.DB);
+		const result = await evaluateIntent(
+			{ ...testEnv, DB: counter.db },
+			origin.id,
+			directClock,
+		);
+		expect(result?.l5OverThreshold).toBe(0);
+		// 直す前は13段(Lの保存とlast_evaluated_atの更新が別の往復・layer1 4段・candidates 3段)
+		expect(counter.waves()).toBeLessThanOrEqual(8);
+		const [row] = await candidatesInvolving(origin.id);
+		expect(row?.latchScore).toBeCloseTo(STUB_JEV_LOW);
+		expect((await intentRowOf(origin.id))?.lastEvaluatedAt).toEqual(FIXED_NOW);
 	});
 
 	it("提案済みペアを反対側のIntentから再評価しても候補行はproposedのまま", async () => {

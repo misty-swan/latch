@@ -10,13 +10,14 @@
  * match_candidates.latch_scoreへの保存は呼び出し側が行う
  */
 import { LATCH } from "@latch/shared";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { intents } from "../db/schema";
 import type { JevAxes } from "../llm/types";
 import { sizeFits } from "./group";
 import {
-	fetchL1Data,
+	fetchIntentRows,
+	fetchL1DataForRows,
 	fetchMembersL1Data,
 	layer1Judge,
 	pairKey,
@@ -57,7 +58,10 @@ export const pickProposals = (items: L5Item[]): L5Item[] => {
 
 /**
  * Hard Constraintの再検証(docs/06 §6)。起点Intentを読み直し、active以外
- * (または不在)なら空集合。それ以外はLayer 1を再実行して合格したotherIdの集合を返す
+ * (または不在)なら空集合。それ以外はLayer 1を再実行して合格したotherIdの集合を返す。
+ * 起点の行は候補の行と同じ1文で読み、残り3表(users・blocks・proposal_history)は
+ * 同時に投げる(D1の直列の待ち2段・#36)。起点がactiveでないときも候補の行は読むが、
+ * 読むだけで結果は変わらない
  */
 export const recheckHard = async (
 	db: DrizzleD1Database,
@@ -65,15 +69,18 @@ export const recheckHard = async (
 	otherIds: string[],
 	now: Date,
 ): Promise<Set<string>> => {
-	const [origin] = await db
-		.select()
-		.from(intents)
-		.where(eq(intents.id, originId))
-		.limit(1);
+	const rows = await fetchIntentRows(db, [originId, ...otherIds]);
+	const origin = rows.find((row) => row.id === originId);
 	if (origin === undefined || origin.status !== "active") {
 		return new Set();
 	}
-	const l1 = await fetchL1Data(db, origin.userId, otherIds);
+	// 候補として渡されたidの行だけを判定データへ渡す(起点の行は候補に含めない)
+	const wanted = new Set(otherIds);
+	const l1 = await fetchL1DataForRows(
+		db,
+		origin.userId,
+		rows.filter((row) => wanted.has(row.id)),
+	);
 	const passed = new Set<string>();
 	for (const id of otherIds) {
 		const candidate = l1.intents[id] ?? null;

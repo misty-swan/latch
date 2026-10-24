@@ -11,6 +11,7 @@ import { blocks, intents, proposalHistory, users } from "../src/db/schema";
 import type { Env as WorkerEnv } from "../src/env";
 import { pairKey } from "../src/pipeline/layer1";
 import { recheckHard } from "../src/pipeline/layer5";
+import { countD1RoundTrips } from "./d1-round-trips";
 
 const db = drizzle((env as unknown as WorkerEnv).DB);
 const NOW = new Date("2026-06-01T00:00:00Z");
@@ -85,6 +86,14 @@ describe("recheckHard", () => {
 	it("全条件を満たす候補は合格する", async () => {
 		const { oi, ci } = await setup();
 		expect([...(await recheckHard(db, oi, [ci], NOW))]).toEqual([ci]);
+	});
+
+	it("D1の直列の待ちは2段(起点と候補の行を1文で読み、残りを同時に投げる・#36)", async () => {
+		const { oi, ci } = await setup();
+		const counter = countD1RoundTrips((env as unknown as WorkerEnv).DB);
+		const out = await recheckHard(drizzle(counter.db), oi, [ci], NOW);
+		expect([...out]).toEqual([ci]);
+		expect(counter.waves()).toBe(2);
 	});
 
 	it("候補側がpausedなら除外される", async () => {

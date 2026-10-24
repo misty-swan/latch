@@ -258,49 +258,48 @@ const chunksOf = (ids: string[], size: number): string[][] => {
 	return chunks;
 };
 
+/** 候補Intent行の読み込み(100件チャンクのin句を同時に投げる)。重複IDは1行にまとめる */
+export const fetchIntentRows = async (
+	db: DrizzleD1Database,
+	ids: string[],
+): Promise<IntentRow[]> => {
+	const chunks = await Promise.all(
+		chunksOf([...new Set(ids)], CHUNK_SIZE).map((chunk) =>
+			db.select().from(intents).where(inArray(intents.id, chunk)),
+		),
+	);
+	return chunks.flat();
+};
+
 /**
- * Layer 1の判定データをD1から一括取得する。すべての照会(候補Intent・users・
- * blocks・proposal_history)を100件チャンクで分割発行する(docs/06 §3)。
- * blocks・proposal_historyは起点ユーザー↔候補ユーザーの両方向を照会し、
- * 正規化キー(low:high)のSetにまとめる
+ * 候補Intent行を読んだ後の判定データ(users・blocks・proposal_history)。
+ * 3表とも候補行のuser_idだけに依存し互いに依存しないため、全チャンクを同時に投げる
+ * (D1の直列の待ちを1段にする・#36)
  */
-export const fetchL1Data = async (
+export const fetchL1DataForRows = async (
 	db: DrizzleD1Database,
 	originUserId: string,
-	candidateIds: string[],
+	intentRows: IntentRow[],
 ): Promise<L1Data> => {
-	// 候補Intent行(100件チャンクのin句)。重複IDは1行にまとめる
-	const candidateIdList = [...new Set(candidateIds)];
-	const intentRows: IntentRow[] = [];
-	for (const chunk of chunksOf(candidateIdList, CHUNK_SIZE)) {
-		intentRows.push(
-			...(await db.select().from(intents).where(inArray(intents.id, chunk))),
-		);
-	}
 	const intentsRecord: Record<string, IntentRow> = Object.fromEntries(
 		intentRows.map((row) => [row.id, row]),
 	);
 
 	// users.birth_date(飲酒年齢の判定は起点・候補の両者分が必要)
-	const birthDates: Record<string, string> = {};
 	const userIds = [
 		...new Set([originUserId, ...intentRows.map((r) => r.userId)]),
 	];
-	for (const chunk of chunksOf(userIds, CHUNK_SIZE)) {
-		const rows = await db
+	const userReads = chunksOf(userIds, CHUNK_SIZE).map((chunk) =>
+		db
 			.select({ id: users.id, birthDate: users.birthDate })
 			.from(users)
-			.where(inArray(users.id, chunk));
-		for (const row of rows) {
-			birthDates[row.id] = row.birthDate;
-		}
-	}
+			.where(inArray(users.id, chunk)),
+	);
 
 	// blocks(両方向)。起点を含まない組の行は照会しない
 	const candidateUserIds = [...new Set(intentRows.map((r) => r.userId))];
-	const blockedPairs = new Set<string>();
-	for (const chunk of chunksOf(candidateUserIds, PAIR_CHUNK_SIZE)) {
-		const rows = await db
+	const blockReads = chunksOf(candidateUserIds, PAIR_CHUNK_SIZE).map((chunk) =>
+		db
 			.select()
 			.from(blocks)
 			.where(
@@ -314,40 +313,65 @@ export const fetchL1Data = async (
 						eq(blocks.blockedUserId, originUserId),
 					),
 				),
-			);
-		for (const row of rows) {
-			blockedPairs.add(pairKey(row.blockerUserId, row.blockedUserId));
-		}
-	}
+			),
+	);
 
 	// proposal_history(恒久排除はmatched/rejected行の存在のみ・docs/01 §8)
-	const historyPairs = new Set<string>();
-	for (const chunk of chunksOf(candidateUserIds, PAIR_CHUNK_SIZE)) {
-		const rows = await db
-			.select()
-			.from(proposalHistory)
-			.where(
-				and(
-					inArray(proposalHistory.outcome, ["matched", "rejected"]),
-					or(
-						and(
-							eq(proposalHistory.userLow, originUserId),
-							inArray(proposalHistory.userHigh, chunk),
-						),
-						and(
-							eq(proposalHistory.userHigh, originUserId),
-							inArray(proposalHistory.userLow, chunk),
+	const historyReads = chunksOf(candidateUserIds, PAIR_CHUNK_SIZE).map(
+		(chunk) =>
+			db
+				.select()
+				.from(proposalHistory)
+				.where(
+					and(
+						inArray(proposalHistory.outcome, ["matched", "rejected"]),
+						or(
+							and(
+								eq(proposalHistory.userLow, originUserId),
+								inArray(proposalHistory.userHigh, chunk),
+							),
+							and(
+								eq(proposalHistory.userHigh, originUserId),
+								inArray(proposalHistory.userLow, chunk),
+							),
 						),
 					),
 				),
-			);
-		for (const row of rows) {
-			historyPairs.add(pairKey(row.userLow, row.userHigh));
-		}
+	);
+
+	const [userRows, blockRows, historyRows] = await Promise.all([
+		Promise.all(userReads),
+		Promise.all(blockReads),
+		Promise.all(historyReads),
+	]);
+	const birthDates: Record<string, string> = {};
+	for (const row of userRows.flat()) {
+		birthDates[row.id] = row.birthDate;
+	}
+	const blockedPairs = new Set<string>();
+	for (const row of blockRows.flat()) {
+		blockedPairs.add(pairKey(row.blockerUserId, row.blockedUserId));
+	}
+	const historyPairs = new Set<string>();
+	for (const row of historyRows.flat()) {
+		historyPairs.add(pairKey(row.userLow, row.userHigh));
 	}
 
 	return { intents: intentsRecord, birthDates, blockedPairs, historyPairs };
 };
+
+/**
+ * Layer 1の判定データをD1から一括取得する。すべての照会(候補Intent・users・
+ * blocks・proposal_history)を100件チャンクで分割発行する(docs/06 §3)。
+ * blocks・proposal_historyは起点ユーザー↔候補ユーザーの両方向を照会し、
+ * 正規化キー(low:high)のSetにまとめる。候補行の読み込み→残り3表(同時)の2段で読む(#36)
+ */
+export const fetchL1Data = async (
+	db: DrizzleD1Database,
+	originUserId: string,
+	candidateIds: string[],
+): Promise<L1Data> =>
+	fetchL1DataForRows(db, originUserId, await fetchIntentRows(db, candidateIds));
 
 /**
  * Poolのメンバー(起点+Pool・最大16人)全員のユーザー間について、Layer 1の判定データを
@@ -368,39 +392,40 @@ export const fetchMembersL1Data = async (
 		return { birthDates, blockedPairs, historyPairs };
 	}
 
-	const userRows = await db
-		.select({ id: users.id, birthDate: users.birthDate })
-		.from(users)
-		.where(inArray(users.id, userIds));
+	// 3表は互いに依存しないため同時に投げる(D1の直列の待ちを1段にする・#36)
+	const [userRows, blockRows, historyRows] = await Promise.all([
+		db
+			.select({ id: users.id, birthDate: users.birthDate })
+			.from(users)
+			.where(inArray(users.id, userIds)),
+		// blocks(両端がメンバーの行。向きは問わず1キーにまとめる)
+		db
+			.select()
+			.from(blocks)
+			.where(
+				and(
+					inArray(blocks.blockerUserId, userIds),
+					inArray(blocks.blockedUserId, userIds),
+				),
+			),
+		// proposal_history(恒久排除はmatched/rejected行の存在のみ・docs/01 §8)
+		db
+			.select()
+			.from(proposalHistory)
+			.where(
+				and(
+					inArray(proposalHistory.outcome, ["matched", "rejected"]),
+					inArray(proposalHistory.userLow, userIds),
+					inArray(proposalHistory.userHigh, userIds),
+				),
+			),
+	]);
 	for (const row of userRows) {
 		birthDates[row.id] = row.birthDate;
 	}
-
-	// blocks(両端がメンバーの行。向きは問わず1キーにまとめる)
-	const blockRows = await db
-		.select()
-		.from(blocks)
-		.where(
-			and(
-				inArray(blocks.blockerUserId, userIds),
-				inArray(blocks.blockedUserId, userIds),
-			),
-		);
 	for (const row of blockRows) {
 		blockedPairs.add(pairKey(row.blockerUserId, row.blockedUserId));
 	}
-
-	// proposal_history(恒久排除はmatched/rejected行の存在のみ・docs/01 §8)
-	const historyRows = await db
-		.select()
-		.from(proposalHistory)
-		.where(
-			and(
-				inArray(proposalHistory.outcome, ["matched", "rejected"]),
-				inArray(proposalHistory.userLow, userIds),
-				inArray(proposalHistory.userHigh, userIds),
-			),
-		);
 	for (const row of historyRows) {
 		historyPairs.add(pairKey(row.userLow, row.userHigh));
 	}

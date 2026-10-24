@@ -21,36 +21,39 @@ export const canPresent = async (
 	intentIds: string[],
 	now: Date,
 ): Promise<boolean> => {
-	if (userIds.length > 0) {
-		const perUser = await db
-			.select({ userId: notifications.userId, n: count() })
-			.from(notifications)
-			.where(
-				and(
-					inArray(notifications.userId, userIds),
-					eq(notifications.type, "proposal"),
-					gte(notifications.createdAt, jstDayStart(now)),
-				),
-			)
-			.groupBy(notifications.userId);
-		if (perUser.some((r) => r.n >= LIMITS.NOTIFICATIONS_PER_DAY)) return false;
-	}
-
-	if (intentIds.length > 0) {
-		// latches.intent_ids(JSON配列)は json_each で展開して照合する
-		const perIntent = await db.all<{ intent_id: string; n: number }>(
-			sql`SELECT j.value AS intent_id, COUNT(*) AS n
-				FROM ${latches}, json_each(${latches.intentIds}) AS j
-				WHERE ${latches.status} IN ('proposed', 'partial_accept')
-					AND j.value IN (${sql.join(
-						intentIds.map((id) => sql`${id}`),
-						sql`, `,
-					)})
-				GROUP BY j.value`,
-		);
-		if (perIntent.some((r) => r.n >= LATCH.CONCURRENT_PER_INTENT)) {
-			return false;
-		}
+	// 2つの照会は互いに依存しないため同時に投げる(D1の直列の待ちを1段にする・#36)。
+	// 判定は従来どおり、どちらかが上限に達していれば保留
+	const [perUser, perIntent] = await Promise.all([
+		userIds.length > 0
+			? db
+					.select({ userId: notifications.userId, n: count() })
+					.from(notifications)
+					.where(
+						and(
+							inArray(notifications.userId, userIds),
+							eq(notifications.type, "proposal"),
+							gte(notifications.createdAt, jstDayStart(now)),
+						),
+					)
+					.groupBy(notifications.userId)
+			: Promise.resolve([]),
+		intentIds.length > 0
+			? // latches.intent_ids(JSON配列)は json_each で展開して照合する
+				db.all<{ intent_id: string; n: number }>(
+					sql`SELECT j.value AS intent_id, COUNT(*) AS n
+					FROM ${latches}, json_each(${latches.intentIds}) AS j
+					WHERE ${latches.status} IN ('proposed', 'partial_accept')
+						AND j.value IN (${sql.join(
+							intentIds.map((id) => sql`${id}`),
+							sql`, `,
+						)})
+					GROUP BY j.value`,
+				)
+			: Promise.resolve([]),
+	]);
+	if (perUser.some((r) => r.n >= LIMITS.NOTIFICATIONS_PER_DAY)) return false;
+	if (perIntent.some((r) => r.n >= LATCH.CONCURRENT_PER_INTENT)) {
+		return false;
 	}
 	return true;
 };

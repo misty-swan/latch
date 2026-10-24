@@ -124,35 +124,41 @@ export const blockedForProposal = async (
 		string,
 		{ outcome: HistoryOutcome; updatedAt: Date }
 	>();
+	// チャンクは互いに依存しないため同時に投げる(#36)
+	const chunks: string[][] = [];
 	for (let i = 0; i < otherUserIds.length; i += PAIR_CHUNK_SIZE) {
-		const chunk = otherUserIds.slice(i, i + PAIR_CHUNK_SIZE);
-		const rows = await db
-			.select({
-				userLow: proposalHistory.userLow,
-				userHigh: proposalHistory.userHigh,
-				outcome: proposalHistory.outcome,
-				updatedAt: proposalHistory.updatedAt,
-			})
-			.from(proposalHistory)
-			.where(
-				or(
-					and(
-						eq(proposalHistory.userLow, origin.userId),
-						inArray(proposalHistory.userHigh, chunk),
-					),
-					and(
-						eq(proposalHistory.userHigh, origin.userId),
-						inArray(proposalHistory.userLow, chunk),
+		chunks.push(otherUserIds.slice(i, i + PAIR_CHUNK_SIZE));
+	}
+	const results = await Promise.all(
+		chunks.map((chunk) =>
+			db
+				.select({
+					userLow: proposalHistory.userLow,
+					userHigh: proposalHistory.userHigh,
+					outcome: proposalHistory.outcome,
+					updatedAt: proposalHistory.updatedAt,
+				})
+				.from(proposalHistory)
+				.where(
+					or(
+						and(
+							eq(proposalHistory.userLow, origin.userId),
+							inArray(proposalHistory.userHigh, chunk),
+						),
+						and(
+							eq(proposalHistory.userHigh, origin.userId),
+							inArray(proposalHistory.userLow, chunk),
+						),
 					),
 				),
-			);
-		for (const row of rows) {
-			const other = row.userLow === origin.userId ? row.userHigh : row.userLow;
-			historyByUser.set(other, {
-				outcome: row.outcome,
-				updatedAt: row.updatedAt,
-			});
-		}
+		),
+	);
+	for (const row of results.flat()) {
+		const other = row.userLow === origin.userId ? row.userHigh : row.userLow;
+		historyByUser.set(other, {
+			outcome: row.outcome,
+			updatedAt: row.updatedAt,
+		});
 	}
 	for (const other of others) {
 		const history = historyByUser.get(other.userId);
@@ -183,24 +189,28 @@ const historiesAmongUsers = async (
 	userIds: string[],
 ): Promise<Map<string, HistoryRow>> => {
 	const ids = [...new Set(userIds)];
-	const out = new Map<string, HistoryRow>();
+	// low・highのチャンクの組は互いに依存しないため同時に投げる(#36)
+	const reads: Promise<HistoryRow[]>[] = [];
 	for (let i = 0; i < ids.length; i += PAIR_CHUNK_SIZE) {
 		const lows = ids.slice(i, i + PAIR_CHUNK_SIZE);
 		for (let j = 0; j < ids.length; j += PAIR_CHUNK_SIZE) {
 			const highs = ids.slice(j, j + PAIR_CHUNK_SIZE);
-			const rows = await db
-				.select()
-				.from(proposalHistory)
-				.where(
-					and(
-						inArray(proposalHistory.userLow, lows),
-						inArray(proposalHistory.userHigh, highs),
+			reads.push(
+				db
+					.select()
+					.from(proposalHistory)
+					.where(
+						and(
+							inArray(proposalHistory.userLow, lows),
+							inArray(proposalHistory.userHigh, highs),
+						),
 					),
-				);
-			for (const row of rows) {
-				out.set(pairKey(row.userLow, row.userHigh), row);
-			}
+			);
 		}
+	}
+	const out = new Map<string, HistoryRow>();
+	for (const row of (await Promise.all(reads)).flat()) {
+		out.set(pairKey(row.userLow, row.userHigh), row);
 	}
 	return out;
 };
@@ -283,11 +293,32 @@ export const proposeSet = async (
 	// 1. 機会で対象時刻まで75分未満なら提案しない(docs/01 §8)
 	if (targetAt !== null && isTooLate(targetAt, now)) return "skipped";
 
-	// 2. 全ペアの既存の提案履歴(ペア単位・low < high に正規化)
-	const histories = await historiesAmongUsers(
-		db,
-		members.map((m) => m.userId),
-	);
+	// 2〜3の読み込み(全ペアの履歴・提示か保留かの上限・地名)は互いに依存しないため同時に投げる
+	// (D1の直列の待ちを1段にする・#36)。履歴で提案しないと決まる場合も上限と地名は読むが、
+	// 読むだけで何も書かない。上限の判定と書き込みは元から同一文ではない(caps.ts・設計 §3.3)
+	const base = baseIntentOf(members);
+	const [histories, present, regionName] = await Promise.all([
+		// 2. 全ペアの既存の提案履歴(ペア単位・low < high に正規化)
+		historiesAmongUsers(
+			db,
+			members.map((m) => m.userId),
+		),
+		// 3. 提示か保留か(F4a設計 §3.3をn人へ拡張・F4b設計 §3.1)
+		canPresent(
+			db,
+			members.map((m) => m.userId),
+			members.map((m) => m.id),
+			now,
+		),
+		base.geoCenterLat !== null &&
+		base.geoCenterLng !== null &&
+		base.geoRadiusM !== null
+			? lookupRegionName(db, {
+					lat: base.geoCenterLat,
+					lng: base.geoCenterLng,
+				})
+			: Promise.resolve(null),
+	]);
 	const pairs = pairsOf(members).map(([p, q]) => {
 		const [userLow, userHigh] =
 			p.userId < q.userId ? [p.userId, q.userId] : [q.userId, p.userId];
@@ -305,10 +336,10 @@ export const proposeSet = async (
 		return "skipped";
 	}
 	if (existingRows.length > 0) {
-		const prevs: ({ score: number; createdAt: Date } | null)[] = [];
-		for (const r of existingRows) {
-			prevs.push(await prevLatchOf(db, r.latchId));
-		}
+		// 前回LATCHの読み込みは行ごとに独立のため同時に投げる(#36)
+		const prevs = await Promise.all(
+			existingRows.map((r) => prevLatchOf(db, r.latchId)),
+		);
 		// 再提案判定用に最も新しい前回LATCHのscoreを記録する(再提案でもスキップでも)
 		let latest: { score: number; createdAt: Date } | null = null;
 		for (const prev of prevs) {
@@ -339,24 +370,6 @@ export const proposeSet = async (
 		}
 	}
 
-	// 3. 提示か保留か(F4a設計 §3.3をn人へ拡張・F4b設計 §3.1)
-	const present = await canPresent(
-		db,
-		members.map((m) => m.userId),
-		members.map((m) => m.id),
-		now,
-	);
-
-	const base = baseIntentOf(members);
-	const regionName =
-		base.geoCenterLat !== null &&
-		base.geoCenterLng !== null &&
-		base.geoRadiusM !== null
-			? await lookupRegionName(db, {
-					lat: base.geoCenterLat,
-					lng: base.geoCenterLng,
-				})
-			: null;
 	const proposal = buildProposal(members, regionName);
 	const expiresAt = minExpiry(members);
 	const status = present ? "proposed" : "candidate";
@@ -487,7 +500,14 @@ export const proposeSet = async (
 	const notifyStatements = present
 		? members.map((m) => insertNotification(m.userId))
 		: [];
-	await db.batch([
+	// 5. 全ペアを確保できなかった(並行した別の提案化が先に確保した等)ならLATCHは無い。
+	// 確認の読み込みはバッチの末尾に置き、巻き戻しの後の同じトランザクションの状態を読む
+	// (別の往復で読まない・#36)
+	const createdCheck = db
+		.select({ id: latches.id })
+		.from(latches)
+		.where(eq(latches.id, latchId));
+	const results = await db.batch([
 		// proposal_history.latch_id → latches.id の外部キー検査をコミット時へ遅らせる
 		// (履歴確保を先頭に置くため。D1のバッチは1トランザクションで、終了時に自動で戻る)
 		db.run(sql`PRAGMA defer_foreign_keys = ON`),
@@ -500,13 +520,9 @@ export const proposeSet = async (
 		// 巻き戻し(F4b設計 §3.1): 一部のペアしか確保できなかったときだけ働く。
 		// 巻き戻すほど確保数は減るため、途中で条件が反転することはない
 		...compensations,
+		createdCheck,
 	]);
-
-	// 5. 全ペアを確保できなかった(並行した別の提案化が先に確保した等)ならLATCHは無い
-	const created = await db
-		.select({ id: latches.id })
-		.from(latches)
-		.where(eq(latches.id, latchId));
+	const created = results[results.length - 1] as { id: string }[];
 	if (created.length === 0) return "skipped";
 	return present ? "proposed" : "held";
 };

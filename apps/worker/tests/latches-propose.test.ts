@@ -23,6 +23,7 @@ import {
 import type { Env as WorkerEnv } from "../src/env";
 import { proposeSet } from "../src/latches/propose";
 import type { IntentRow } from "../src/pipeline/consumer";
+import { countD1RoundTrips } from "./d1-round-trips";
 
 const db = drizzle((env as unknown as WorkerEnv).DB);
 const NOW = new Date("2026-06-01T03:00:00Z");
@@ -261,6 +262,31 @@ describe("proposeSet(1対1)", () => {
 		expect(hs[0].userHigh).toBe(highOf(a.userId, b.userId));
 
 		expect((await candidateOf(rowId)).status).toBe("proposed");
+	});
+
+	it("新規ペアの提案化はD1の直列の待ちを2段にする(読み込みを同時に投げ、確認をバッチに含める・#36)", async () => {
+		const { a, input } = await setup("occasion", {
+			geoCenterLat: 35.68,
+			geoCenterLng: 139.76,
+			geoRadiusM: 3000,
+		});
+		const counter = countD1RoundTrips((env as unknown as WorkerEnv).DB);
+		expect(await proposeSet(drizzle(counter.db), input, NOW)).toBe("proposed");
+		expect(counter.waves()).toBe(2);
+		expect(await latchesOf(a.id)).toHaveLength(1);
+	});
+
+	it("並行した別の提案化に確保で負けたときは、バッチ内の確認でskippedを返す(#36)", async () => {
+		const { a, b, input } = await setup("connection");
+		// 先に別の提案化が全ペアを確保した状態(同じ履歴行が別のLATCHを指す)
+		const first = await proposeSet(db, input, NOW);
+		expect(first).toBe("proposed");
+		const counter = countD1RoundTrips((env as unknown as WorkerEnv).DB);
+		// 履歴の読み込みはproposed(進行中)を見てskipped。読み込みは1段
+		expect(await proposeSet(drizzle(counter.db), input, NOW)).toBe("skipped");
+		expect(counter.waves()).toBe(1);
+		expect(await latchesOf(a.id)).toHaveLength(1);
+		expect(await historyOf(a, b)).toHaveLength(1);
 	});
 
 	it("(b) 同じinputの並行2回でもLATCHは1件・片方はskipped", async () => {
