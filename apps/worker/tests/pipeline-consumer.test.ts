@@ -41,8 +41,8 @@ import {
 	holdMemoryVectorWrites,
 	memoryVectorStore,
 	releaseMemoryVectorWrites,
-	resetMemoryVectorStore,
 } from "../src/vectorstore/memory";
+import { resetVectorState } from "./reset-vector-state";
 
 const testEnv = env as unknown as WorkerEnv;
 const db = drizzle(testEnv.DB);
@@ -59,9 +59,9 @@ const sendResponse = (): QueueSendResponse => ({
 const spySend = () =>
 	vi.spyOn(testEnv.MATCH_QUEUE, "send").mockResolvedValue(sendResponse());
 
-beforeEach(() => {
+beforeEach(async () => {
 	// テスト間のベクトル汚染除去(シングルトンのインメモリ実装のため)
-	resetMemoryVectorStore();
+	await resetVectorState();
 });
 
 afterEach(() => {
@@ -1080,6 +1080,7 @@ describe("ログの分離と計測(docs/06 §7・docs/08 §6)", () => {
 			"group_held_proposals",
 			"group_failed",
 			"retrieval_ms",
+			"supplement_count",
 		]);
 		// 相手が居ないためグループの項目はすべて0
 		expect(payload).toMatchObject({

@@ -1,6 +1,6 @@
 /**
  * 構造化ログ・許可リスト(docs/08 §6)。
- * ログに出力できるフィールドは許可リストの8種のみ。呼び出し側が余分なキーを渡しても
+ * ログに出力できるフィールドは許可リスト(LOG_FIELD_ALLOWLIST)の項目のみ。呼び出し側が余分なキーを渡しても
  * Serializer段(JSON化の直前)の実行時フィルタで黙って破棄する。
  * raw_text・座標・NG条件・表示名・user_idは不許可(08 §6。user_idを含む個人を識別
  * できる値はAnalytics Engine・Workers Logsにも書かない)。
@@ -19,6 +19,9 @@ export const LOG_FIELD_ALLOWLIST = [
 	"notification_id",
 	"http_status",
 	"push_result",
+	// 評価のLayer 2 Candidate Retrievalの照会の件数と控えから補った件数(#47・設計 2026-10-25 §1.5)
+	"retrieval_count",
+	"supplement_count",
 ] as const;
 
 export type LogField = (typeof LOG_FIELD_ALLOWLIST)[number];

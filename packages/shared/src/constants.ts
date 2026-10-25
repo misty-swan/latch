@@ -276,6 +276,9 @@ export const PIPELINE = {
 	// 直近のベクトルの控え(recent_vectors)を残す埋め込みからの経過(15分・#47)。
 	// 反映確認の打ち切り(REFLECTION_GIVE_UP_MS・8分)より長い余裕。過ぎた行は毎分Cronの保持期間の処理で消す
 	RECENT_VECTOR_TTL_MS: 15 * 60_000,
+	// 評価で控えから補う行の上限(50件・#47)。埋め込みの新しい順に読み、Layer 2 Candidate Retrievalの
+	// 照会の結果に無いものだけを類似度で混ぜて topK(TOP_K_RETRIEVAL)で切る
+	RECENT_VECTOR_SUPPLEMENT_MAX: 50,
 } as const;
 
 /**

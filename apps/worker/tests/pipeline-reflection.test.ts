@@ -34,8 +34,8 @@ import {
 	holdMemoryVectorWrites,
 	memoryVectorStore,
 	releaseMemoryVectorWrites,
-	resetMemoryVectorStore,
 } from "../src/vectorstore/memory";
+import { resetVectorState } from "./reset-vector-state";
 
 const testEnv = env as unknown as WorkerEnv;
 const db = drizzle(testEnv.DB);
@@ -56,8 +56,8 @@ const spySend = () =>
 
 type SendSpy = ReturnType<typeof spySend>;
 
-beforeEach(() => {
-	resetMemoryVectorStore();
+beforeEach(async () => {
+	await resetVectorState();
 });
 
 afterEach(() => {
@@ -581,11 +581,21 @@ describe("同時に預けた2件(#7)", () => {
 		return stage1.delayed.map((d) => d.body);
 	};
 
-	it("hold中に両方の第1段・第2段を回すと提案は無く、release後に反映確認を回すと2人の提案が1件できる", async () => {
+	it("控えを読めないとき、hold中に両方の第1段・第2段を回すと提案は無く、release後に反映確認を回すと2人の提案が1件できる", async () => {
 		const a = await insertIntent({ topic: "同時に預けた学習仲間A" });
 		const b = await insertIntent({ topic: "同時に預けた学習仲間B" });
 		const send = spySend();
 		holdMemoryVectorWrites();
+		// 直近のベクトルの控え(#47)の読み込みだけを失敗させ、照会だけに頼る状態にする
+		// (反映確認の評価し直しの経路を確かめる。書き込みと削除は通す)
+		const realPrepare = testEnv.DB.prepare.bind(testEnv.DB);
+		vi.spyOn(testEnv.DB, "prepare").mockImplementation((query: string) => {
+			if (/^select/i.test(query) && query.includes('"recent_vectors"')) {
+				throw new Error("D1_ERROR: 試験用の失敗");
+			}
+			return realPrepare(query);
+		});
+		vi.spyOn(console, "log").mockImplementation(() => {});
 
 		const reflections = await runStages(send, a.id, b.id);
 
@@ -613,6 +623,39 @@ describe("同時に預けた2件(#7)", () => {
 			0,
 		);
 		expect(proposedTotal).toBe(1);
+	});
+
+	it("hold中でも後の第2段は先の相手を控えから補って提案し(#47)、release後の反映確認で二重に提案されない", async () => {
+		const a = await insertIntent({ topic: "同時に預けた学習仲間A" });
+		const b = await insertIntent({ topic: "同時に預けた学習仲間B" });
+		const send = spySend();
+		holdMemoryVectorWrites();
+
+		const reflections = await runStages(send, a.id, b.id);
+
+		// 照会には互いのベクトルが見えないが、後に評価した側が控えから相手を補って提案する
+		expect(await sharedLatchCount(a.userId, b.userId)).toBe(1);
+		const completed = await eventsOfType([a.id, b.id], "embedding_completed");
+		expect(completed).toHaveLength(2);
+		const supplemented = completed.reduce(
+			(sum, e) =>
+				sum +
+				Number((e.payload as { supplement_count: number }).supplement_count),
+			0,
+		);
+		expect(supplemented).toBeGreaterThanOrEqual(1);
+
+		releaseMemoryVectorWrites();
+		await runBodies(reflections);
+
+		expect(await sharedLatchCount(a.userId, b.userId)).toBe(1);
+		const done = await eventsOfType([a.id, b.id], "vector_reflection");
+		expect(done).toHaveLength(2);
+		const proposedTotal = done.reduce(
+			(sum, e) => sum + Number((e.payload as { proposed: number }).proposed),
+			0,
+		);
+		expect(proposedTotal).toBe(0);
 	});
 
 	it("即時の評価で提案済みの組は、評価し直しで二重に提案されない", async () => {

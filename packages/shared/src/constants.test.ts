@@ -129,6 +129,8 @@ describe("PIPELINE", () => {
 			CRON_BATCH_LIMIT: 500,
 			// 直近のベクトルの控えを残す経過(15分・#47)
 			RECENT_VECTOR_TTL_MS: 15 * 60_000,
+			// 評価で控えから補う行の上限(50件・#47)
+			RECENT_VECTOR_SUPPLEMENT_MAX: 50,
 		});
 	});
 

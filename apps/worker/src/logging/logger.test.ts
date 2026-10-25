@@ -100,7 +100,7 @@ describe("createLogger(08 §6: 許可リスト方式の構造化ログ)", () => 
 		expect(Object.keys(parsed).sort()).toEqual(["event", "level"]);
 	});
 
-	it("許可リストは08 §6の8フィールドとF7b設計 §5.8のPush結果3フィールドと完全一致する", () => {
+	it("許可リストは08 §6の8フィールド・F7b設計 §5.8のPush結果3フィールド・評価の補いの2フィールド(#47)と完全一致する", () => {
 		expect([...LOG_FIELD_ALLOWLIST]).toEqual([
 			"intent_id",
 			"latch_id",
@@ -113,6 +113,8 @@ describe("createLogger(08 §6: 許可リスト方式の構造化ログ)", () => 
 			"notification_id",
 			"http_status",
 			"push_result",
+			"retrieval_count",
+			"supplement_count",
 		]);
 	});
 
@@ -131,6 +133,8 @@ describe("createLogger(08 §6: 許可リスト方式の構造化ログ)", () => 
 			notification_id: "01HZZZZZZZZZZZZZZZZZZZZZZZ",
 			http_status: 410,
 			push_result: "gone",
+			retrieval_count: 100,
+			supplement_count: 1,
 		});
 		const parsed = parseSingleLine(lines);
 		const fieldKeys = Object.keys(parsed)

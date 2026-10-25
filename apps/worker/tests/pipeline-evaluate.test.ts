@@ -41,6 +41,7 @@ import {
 	matchCandidates,
 	matchEvents,
 	proposalHistory,
+	recentVectors,
 	users,
 } from "../src/db/schema";
 // ルート・handleQueueBatch・evaluateIntentが受け取るEnv(src/env.ts・生成型Envの宣言部分型)
@@ -57,13 +58,15 @@ import { handleQueueBatch } from "../src/pipeline/consumer";
 import { evaluateIntent } from "../src/pipeline/evaluate";
 import { pairKey } from "../src/pipeline/layer1";
 import { buildNormalizedText } from "../src/pipeline/normalize";
+import { decodeVector } from "../src/pipeline/recent-vectors";
 import {
+	holdMemoryVectorWrites,
 	memoryVectorStore,
-	resetMemoryVectorStore,
 } from "../src/vectorstore/memory";
 import type { StoredVector } from "../src/vectorstore/types";
 import { countD1RoundTrips } from "./d1-round-trips";
 import privateJwkText from "./fixtures/test-idp-private.jwk?raw";
+import { resetVectorState } from "./reset-vector-state";
 
 const testEnv = env as unknown as WorkerEnv;
 const db = drizzle(testEnv.DB);
@@ -224,6 +227,8 @@ const NO_GROUP = {
 	groupFailed: 0,
 	/** Candidate Retrievalの所要時間(実時間の計測のため値は固定しない) */
 	retrievalMs: expect.any(Number),
+	/** 控えの補い(インメモリは常に最新を返すため補いは重複として除かれる・#47) */
+	supplementCount: 0,
 } as const;
 
 /** NO_GROUPのpayload表記(consumer.tsのキー名・F4b設計 §5) */
@@ -239,6 +244,8 @@ const NO_GROUP_PAYLOAD = {
 	group_failed: 0,
 	/** Candidate Retrievalの所要時間(実時間の計測のため値は固定しない) */
 	retrieval_ms: expect.any(Number),
+	/** 控えの補い(インメモリは常に最新を返すため補いは重複として除かれる・#47) */
+	supplement_count: 0,
 } as const;
 
 /** vi.waitUntilのタイムアウト(waitUntil内のINSERT完了待ち・CIの遅延を吸収) */
@@ -430,9 +437,9 @@ const seedCompletedEvent = async (
 	return eventId;
 };
 
-beforeEach(() => {
+beforeEach(async () => {
 	// テスト間のベクトル汚染除去(シングルトンのインメモリ実装のため)
-	resetMemoryVectorStore();
+	await resetVectorState();
 });
 
 afterEach(() => {
@@ -654,6 +661,7 @@ describe("直接呼び出しパターン(行INSERT+ベクトルupsert+fixedClock
 			groupHeldProposals: 0,
 			groupFailed: 0,
 			retrievalMs: expect.any(Number),
+			supplementCount: 0,
 		});
 		expect(await candidatesInvolving(origin.id)).toHaveLength(2);
 	});
@@ -1473,6 +1481,7 @@ describe("Layer 4・Layer 5・提案化の連結(F4a設計 §2.6・§3.1)", () =
 				[
 					"prepare",
 					"retrieval",
+					"supplement",
 					"layer1",
 					"candidates",
 					"layer3",
@@ -1514,9 +1523,11 @@ describe("Layer 4・Layer 5・提案化の連結(F4a設計 §2.6・§3.1)", () =
 			directClock,
 		);
 		expect(result?.proposed).toBe(1);
-		// 段ごと: prepare 1・layer1 2・candidates 1・jev_pre 1・jev_reserve 1・jev_post 1・
-		// 再検証とLの保存 2(同時)・proposeSet 2・finish 1 = 12。直す前は23段
-		expect(counter.waves()).toBeLessThanOrEqual(12);
+		// 段ごと: prepare 1・控えの読み込み 1・layer1 2・candidates 1・jev_pre 1・jev_reserve 1・
+		// jev_post 1・再検証とLの保存 2(同時)・proposeSet 2・finish 1 = 13。直す前は23段。
+		// 控えの読み込み(#47)は照会(Vectorize)と同時に投げるため本番では直列の待ちにならないが、
+		// インメモリの照会は即座に返るため、ここでは1段として数える
+		expect(counter.waves()).toBeLessThanOrEqual(13);
 		expect(await latchesOfUser(userA)).toHaveLength(1);
 	});
 
@@ -1529,8 +1540,9 @@ describe("Layer 4・Layer 5・提案化の連結(F4a設計 §2.6・§3.1)", () =
 			directClock,
 		);
 		expect(result?.l5OverThreshold).toBe(0);
-		// 直す前は13段(Lの保存とlast_evaluated_atの更新が別の往復・layer1 4段・candidates 3段)
-		expect(counter.waves()).toBeLessThanOrEqual(8);
+		// 直す前は13段(Lの保存とlast_evaluated_atの更新が別の往復・layer1 4段・candidates 3段)。
+		// 控えの読み込み(#47・照会と同時に投げる)の1段を含めて9段
+		expect(counter.waves()).toBeLessThanOrEqual(9);
 		const [row] = await candidatesInvolving(origin.id);
 		expect(row?.latchScore).toBeCloseTo(STUB_JEV_LOW);
 		expect((await intentRowOf(origin.id))?.lastEvaluatedAt).toEqual(FIXED_NOW);
@@ -1697,5 +1709,252 @@ describe("Layer 4・Layer 5・提案化の連結(F4a設計 §2.6・§3.1)", () =
 		expect(await latchesOfUser(userA)).toHaveLength(0);
 		const [row] = await candidatesInvolving(origin.id);
 		expect(row?.jevResult).toBeNull();
+	});
+});
+
+describe("直近のベクトルの控えによる補い(#47・設計 2026-10-25 §1.4〜§1.5)", () => {
+	beforeEach(() => {
+		spySend();
+	});
+
+	/** 第1段の入口のイベント(intent_created/intent_updated)を投入し、directClockで消費する */
+	const runStage1 = async (
+		intentId: string,
+		eventType: "intent_created" | "intent_updated" = "intent_created",
+		version = 1,
+	): Promise<void> => {
+		const eventId = ulid();
+		await db.insert(matchEvents).values({
+			id: eventId,
+			eventType,
+			sourceIntentId: intentId,
+			version,
+			payload: {},
+			status: "pending",
+			createdAt: FIXED_NOW,
+		});
+		expectAcked(await runBatch("match-events", [eventId], directClock));
+	};
+
+	/** 起点のembedding_completed(第2段)のpayload */
+	const stage2PayloadOf = async (
+		intentId: string,
+	): Promise<Record<string, unknown>> => {
+		const completed = (await eventsOf(intentId)).filter(
+			(e) => e.eventType === "embedding_completed",
+		);
+		const last = completed.at(-1);
+		expect(last?.status).toBe("processed");
+		return last?.payload as Record<string, unknown>;
+	};
+
+	/** 埋め込み前のつながりIntent(別ユーザー)を1件投入する */
+	const seedUnembedded = async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const row = intentFixture({ id: ulid(), userId });
+		await insertIntentRow(row);
+		return row;
+	};
+
+	/** 控え(recent_vectors)の行 */
+	const recentRowsOf = (intentId: string) =>
+		db.select().from(recentVectors).where(eq(recentVectors.intentId, intentId));
+
+	/**
+	 * 反映の遅れ(hold)の中で相手Aの第1段を済ませる。Aのベクトルは照会に出ないが、
+	 * 控え(recent_vectors)にはAの行がある
+	 */
+	const seedHeldPartner = async () => {
+		holdMemoryVectorWrites();
+		const a = await seedUnembedded();
+		await runStage1(a.id);
+		expect(await memoryVectorStore().getByIds([a.id])).toEqual([null]);
+		expect(await recentRowsOf(a.id)).toHaveLength(1);
+		return a;
+	};
+
+	/** console.logの行のうち指定のイベントだけをJSONで返す */
+	const logLines = (
+		spy: { mock: { calls: unknown[][] } },
+		event: string,
+	): Record<string, unknown>[] =>
+		spy.mock.calls
+			.map((call) => JSON.parse(String(call[0])) as Record<string, unknown>)
+			.filter((l) => l.event === event);
+
+	it("照会に出ない相手Aを控えから補い、Layer 1以降へ進めて提案し、payloadにsupplement_count: 1を載せる", async () => {
+		const a = await seedHeldPartner();
+		const b = await seedUnembedded();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runStage1(b.id);
+
+		// 照会はhold中で何も返さない(自分も相手も未反映)。補いの1件がLayer 1を通る
+		expect(await stage2PayloadOf(b.id)).toMatchObject({
+			retrieval_count: 0,
+			supplement_count: 1,
+			l1_pass: 1,
+			proposed: 1,
+		});
+		expect(await latchesOfUser(a.userId)).toHaveLength(1);
+		expect(await latchesOfUser(b.userId)).toHaveLength(1);
+		// 評価の完了のログに照会の件数と補った件数が載る(許可リストの項目)
+		const completed = logLines(logSpy, "pipeline.stage2.completed").filter(
+			(l) => l.intent_id === b.id,
+		);
+		expect(completed).toHaveLength(1);
+		expect(completed[0]).toMatchObject({
+			retrieval_count: 0,
+			supplement_count: 1,
+		});
+		// 段の計測に補いの段("supplement")が加わる
+		expect(
+			logLines(logSpy, "pipeline.stage2.timing")
+				.filter((l) => l.intent_id === b.id)
+				.map((l) => l.layer),
+		).toContain("supplement");
+	});
+
+	it.each([
+		["paused", { status: "paused" }],
+		["別form", { form: "occasion" }],
+	] as const)(
+		"相手Aが%sなら補わない(supplement_count: 0・提案なし)",
+		async (_label, change) => {
+			const a = await seedHeldPartner();
+			await db.update(intents).set(change).where(eq(intents.id, a.id));
+			const b = await seedUnembedded();
+
+			await runStage1(b.id);
+
+			expect(await stage2PayloadOf(b.id)).toMatchObject({
+				supplement_count: 0,
+				proposed: 0,
+			});
+			expect(await latchesOfUser(b.userId)).toHaveLength(0);
+		},
+	);
+
+	it("相手Aの埋め込みが15分より前なら補わない(supplement_count: 0・提案なし)", async () => {
+		const a = await seedHeldPartner();
+		await db
+			.update(recentVectors)
+			.set({ embeddedAt: new Date(BASE - PIPELINE.RECENT_VECTOR_TTL_MS - 1) })
+			.where(eq(recentVectors.intentId, a.id));
+		const b = await seedUnembedded();
+
+		await runStage1(b.id);
+
+		expect(await stage2PayloadOf(b.id)).toMatchObject({
+			supplement_count: 0,
+			proposed: 0,
+		});
+		expect(await latchesOfUser(b.userId)).toHaveLength(0);
+	});
+
+	it("自分自身の控えは補わない(supplement_count: 0)", async () => {
+		holdMemoryVectorWrites();
+		const b = await seedUnembedded();
+
+		await runStage1(b.id);
+
+		// 控えには自分の行があるが、自分は候補にしない
+		expect(await recentRowsOf(b.id)).toHaveLength(1);
+		expect(await stage2PayloadOf(b.id)).toMatchObject({
+			retrieval_count: 0,
+			supplement_count: 0,
+			l1_pass: 0,
+			proposed: 0,
+		});
+	});
+
+	it("相手Aが内容を直してversionが上がった後も、補われたAは現在のversionで候補行が作られる", async () => {
+		const a = await seedHeldPartner();
+		const [before] = await recentRowsOf(a.id);
+		// 内容の変更(version 2・埋め込み前に戻る)と埋め込み直し(hold中)。
+		// 控えは同じintent_idで新しいベクトルに上書きされる
+		await db
+			.update(intents)
+			.set({
+				version: 2,
+				topic: "評価試験の学習仲間(直した)",
+				embeddedAt: null,
+			})
+			.where(eq(intents.id, a.id));
+		await runStage1(a.id, "intent_updated", 2);
+		const after = await recentRowsOf(a.id);
+		expect(after).toHaveLength(1);
+		expect(decodeVector(after[0]?.vector as Uint8Array)).not.toEqual(
+			decodeVector(before?.vector as Uint8Array),
+		);
+		const b = await seedUnembedded();
+
+		await runStage1(b.id);
+
+		expect(await stage2PayloadOf(b.id)).toMatchObject({ supplement_count: 1 });
+		const rows = await candidatesInvolving(b.id);
+		expect(rows).toHaveLength(1);
+		const aVersion =
+			rows[0]?.intentAId === a.id
+				? rows[0]?.intentAVersion
+				: rows[0]?.intentBVersion;
+		expect(aVersion).toBe(2);
+	});
+
+	it("照会の結果に既に相手Aがあるとき(保留なし)は supplement_count: 0 で、結果は従来と同じ", async () => {
+		const a = await seedUnembedded();
+		await runStage1(a.id);
+		const b = await seedUnembedded();
+
+		await runStage1(b.id);
+
+		// 照会は自分とAの2件を返し、控えのAは重複として除かれる
+		expect(await stage2PayloadOf(b.id)).toMatchObject({
+			retrieval_count: 2,
+			supplement_count: 0,
+			l1_pass: 1,
+			proposed: 1,
+		});
+		expect(await latchesOfUser(a.userId)).toHaveLength(1);
+	});
+
+	it("控えの読み込みが失敗しても補いなしで評価を続け、pipeline.recent_vector.failed(layer=load)を出す", async () => {
+		const origin = await seedUnembedded();
+		const { values } = await vectorFor(origin);
+		// 控え(recent_vectors)を読む文だけを失敗させる
+		const failingDb = new Proxy(testEnv.DB, {
+			get: (t, prop) => {
+				if (prop === "prepare") {
+					return (query: string) => {
+						if (query.includes("recent_vectors")) {
+							throw new Error("D1_ERROR: 試験用の失敗");
+						}
+						return t.prepare(query);
+					};
+				}
+				const v = Reflect.get(t, prop, t);
+				return typeof v === "function" ? v.bind(t) : v;
+			},
+		});
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		const result = await evaluateIntent(
+			{ ...testEnv, DB: failingDb },
+			origin.id,
+			directClock,
+			{ vector: values },
+		);
+
+		expect(result?.supplementCount).toBe(0);
+		expect(logLines(logSpy, "pipeline.recent_vector.failed")).toEqual([
+			{
+				level: "warn",
+				event: "pipeline.recent_vector.failed",
+				intent_id: origin.id,
+				layer: "load",
+				error_code: expect.any(String),
+			},
+		]);
 	});
 });

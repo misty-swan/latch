@@ -4,6 +4,7 @@
  * - 同じintent_idの上書き・意思の削除でのCASCADE・15分を過ぎた行の削除
  * - 第1段の成功の後に控えが書かれ、embedded_atが意思の行と等しい
  * - 書き込みの失敗は例外を外へ出さない(第1段の失敗にしない)
+ * - 評価での補い: 控えの読み込み(loadRecentVectors)と照会の結果への混ぜ込み(mergeSupplement)
  * 時刻はfixedClockで固定し、意思の行は直接投入する。
  */
 
@@ -27,9 +28,12 @@ import {
 	decodeVector,
 	deleteExpiredRecentVectors,
 	encodeVector,
+	loadRecentVectors,
+	mergeSupplement,
 	saveRecentVector,
 } from "../src/pipeline/recent-vectors";
-import { resetMemoryVectorStore } from "../src/vectorstore/memory";
+import { cosineSimilarity } from "../src/vectorstore/similarity";
+import { resetVectorState } from "./reset-vector-state";
 
 const testEnv = env as unknown as WorkerEnv;
 const db = drizzle(testEnv.DB);
@@ -39,8 +43,8 @@ const sendResponse = (): QueueSendResponse => ({
 	metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
 });
 
-beforeEach(() => {
-	resetMemoryVectorStore();
+beforeEach(async () => {
+	await resetVectorState();
 });
 
 afterEach(() => {
@@ -218,5 +222,130 @@ describe("第1段での書き込み", () => {
 		expect(intent?.embeddedAt).not.toBeNull();
 		expect(rows[0]?.embeddedAt.getTime()).toBe(intent?.embeddedAt?.getTime());
 		expect(decodeVector(rows[0]?.vector as Uint8Array)).toHaveLength(1024);
+	});
+});
+
+describe("mergeSupplement(照会の結果への補いの混ぜ込み)", () => {
+	const own = [1, 0, 0];
+
+	it("照会の結果にあるidは重複させず、supplementedに数えない", () => {
+		const hits = [{ id: "A", score: 0.9 }];
+		const merged = mergeSupplement(
+			hits,
+			[{ id: "A", values: [1, 0, 0] }],
+			own,
+			10,
+		);
+		expect(merged.hits).toEqual([{ id: "A", score: 0.9 }]);
+		expect(merged.supplemented).toBe(0);
+	});
+
+	it("補った行は照会と同じコサイン類似度で並び、topKで切られ、残った補いだけを数える", () => {
+		const hits = [
+			{ id: "H1", score: 0.9 },
+			{ id: "H2", score: 0.5 },
+			{ id: "H3", score: 0.4 },
+		];
+		const high = [0.8, 0.6, 0]; // 類似度0.8(上位に入る)
+		const low = [0, 1, 0]; // 類似度0(切られる)
+		const merged = mergeSupplement(
+			hits,
+			[
+				{ id: "S1", values: high },
+				{ id: "S2", values: low },
+			],
+			own,
+			3,
+		);
+		expect(merged.hits.map((h) => h.id)).toEqual(["H1", "S1", "H2"]);
+		expect(merged.hits[1]?.score).toBe(cosineSimilarity(own, high));
+		expect(merged.hits[1]?.score).toBeCloseTo(0.8, 10);
+		expect(merged.supplemented).toBe(1);
+	});
+
+	it("同点はid昇順で並ぶ", () => {
+		const merged = mergeSupplement(
+			[{ id: "B", score: 1 }],
+			[{ id: "A", values: [2, 0, 0] }],
+			own,
+			10,
+		);
+		expect(merged.hits.map((h) => h.id)).toEqual(["A", "B"]);
+		expect(merged.supplemented).toBe(1);
+	});
+
+	it("自分のベクトルと次元の違う行は読み飛ばす", () => {
+		const merged = mergeSupplement(
+			[],
+			[
+				{ id: "X", values: [1, 0] },
+				{ id: "Y", values: [1, 0, 0] },
+			],
+			own,
+			10,
+		);
+		expect(merged.hits.map((h) => h.id)).toEqual(["Y"]);
+		expect(merged.supplemented).toBe(1);
+	});
+});
+
+describe("loadRecentVectors(控えの読み込み)", () => {
+	it("同じform・active・15分以内・自分以外を、埋め込みの新しい順にlimit件まで読む", async () => {
+		const now = clock.now().getTime();
+		const self = await seedIntent();
+		const older = await seedIntent();
+		const newer = await seedIntent();
+		const third = await seedIntent();
+		const paused = await seedIntent();
+		const occasion = await seedIntent();
+		const expired = await seedIntent();
+		await db
+			.update(intents)
+			.set({ status: "paused" })
+			.where(eq(intents.id, paused));
+		await db
+			.update(intents)
+			.set({ form: "occasion" })
+			.where(eq(intents.id, occasion));
+		const at = (offsetMs: number) => new Date(now - offsetMs);
+		await saveRecentVector(testEnv.DB, self, at(0), sampleVector(0));
+		await saveRecentVector(testEnv.DB, older, at(60_000), sampleVector(1));
+		await saveRecentVector(testEnv.DB, newer, at(10_000), sampleVector(2));
+		await saveRecentVector(testEnv.DB, third, at(120_000), sampleVector(3));
+		await saveRecentVector(testEnv.DB, paused, at(0), sampleVector(4));
+		await saveRecentVector(testEnv.DB, occasion, at(0), sampleVector(5));
+		await saveRecentVector(
+			testEnv.DB,
+			expired,
+			at(PIPELINE.RECENT_VECTOR_TTL_MS + 1),
+			sampleVector(6),
+		);
+		// ちょうど15分前の行は読む(embedded_at ≥ now − 15分)
+		const edge = await seedIntent();
+		await saveRecentVector(
+			testEnv.DB,
+			edge,
+			at(PIPELINE.RECENT_VECTOR_TTL_MS),
+			sampleVector(7),
+		);
+
+		const all = await loadRecentVectors(testEnv.DB, {
+			form: "connection",
+			selfId: self,
+			now: clock.now(),
+			limit: 50,
+		});
+		expect(all.map((r) => r.id)).toEqual([newer, older, third, edge]);
+		expect(all[0]?.values).toEqual(
+			Array.from(Float32Array.from(sampleVector(2))),
+		);
+
+		const limited = await loadRecentVectors(testEnv.DB, {
+			form: "connection",
+			selfId: self,
+			now: clock.now(),
+			limit: 2,
+		});
+		expect(limited.map((r) => r.id)).toEqual([newer, older]);
 	});
 });

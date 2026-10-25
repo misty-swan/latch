@@ -45,6 +45,7 @@ import { type L4Candidate, runLayer4 } from "./layer4";
 import { type L5Item, latchScore, pickProposals, recheckHard } from "./layer5";
 import { type EvaluateOrigin, writeStage2Metrics } from "./metrics";
 import { createMetricsBudget, type MetricsBudget } from "./metrics-budget";
+import { loadRecentVectors, mergeSupplement } from "./recent-vectors";
 
 const logger = createLogger();
 
@@ -53,7 +54,7 @@ type IntentRow = typeof intents.$inferSelect;
 
 /** evaluateIntentの戻り値(第2段の計測結果・docs/06 §7の層通過件数) */
 export interface Stage2Result {
-	/** Vectorize取得件数(topKで頭打ち・自idの除外前) */
+	/** Vectorize取得件数(topKで頭打ち・自idの除外前・控えの補いを含まない) */
 	retrievalCount: number;
 	/** Layer 1判定の通過後、上位K_vに絞り込んでLayer 3へ渡した件数 */
 	l1Pass: number;
@@ -97,6 +98,8 @@ export interface Stage2Result {
 	groupFailed: 0 | 1;
 	/** Layer 2 Candidate Retrieval(store.query)の所要時間(ミリ秒・負荷試験の集計用) */
 	retrievalMs: number;
+	/** 直近のベクトルの控えから補い、topKで切った後に残った件数(#47・設計 2026-10-25 §1.5) */
+	supplementCount: number;
 }
 
 /** 第2段の計測結果を起点イベントのpayloadへ載せる形にする(docs/06 §7・順序は試験で固定) */
@@ -125,6 +128,7 @@ export const stage2Payload = (
 	group_held_proposals: result.groupHeldProposals,
 	group_failed: result.groupFailed,
 	retrieval_ms: result.retrievalMs,
+	supplement_count: result.supplementCount,
 });
 
 /** evaluateIntentの差し替え口(試験用)。jevはLayer 4へそのまま渡す */
@@ -148,6 +152,8 @@ export interface EvaluateOptions {
  * 段の名前と範囲:
  * - prepare: 意思の読み込み・30分抑制の判定・自分のベクトルの取得(getByIds)
  * - retrieval: Layer 2 Candidate Retrieval(store.query)
+ * - supplement: 直近のベクトルの控え(recent_vectors)の読み込み(照会と同時に投げた残りの待ち)と
+ *   照会の結果への混ぜ込み(#47)
  * - layer1: Layer 1(D1の読み込みfetchL1Data・孤立ベクトルの自己修復・判定・上位K_vの選択)
  * - layer3: Layer 3の点数付けと上位K_cの選択・match_candidatesの行の組み立て(計算のみ)
  * - candidates: match_candidatesへのupsert・提案履歴による除外・1対1の対象の組み立て
@@ -285,6 +291,25 @@ export const evaluateIntent = async (
 	}
 	const startedAtMs = now.getTime();
 	timer.lap("prepare");
+	// 直近のベクトルの控えによる補い(#47・設計 2026-10-25 §1.4): 照会(Vectorize)が古い状態を
+	// 返して相手を見落とすことがあるため、15分以内に埋め込んだ同じformのactiveの意思を控えから読み、
+	// 照会の結果に無いものだけを類似度で混ぜてtopKで切る。以降は合わせた結果を従来どおり使う。
+	// 補った行はD1に意思の行があるため、孤立したベクトルの自己修復の対象にならない。
+	// 控えの読み込み(D1)は照会と同時に投げ、直列の待ちを増やさない(#36)。
+	// 読み込みの失敗は補いなしで続ける(従来の動作に戻るだけ)
+	const recentPromise = loadRecentVectors(env.DB, {
+		form,
+		selfId: intentId,
+		now,
+		limit: PIPELINE.RECENT_VECTOR_SUPPLEMENT_MAX,
+	}).catch((error: unknown) => {
+		logger.warn("pipeline.recent_vector.failed", {
+			intent_id: intentId,
+			layer: "load",
+			error_code: errorCodeOf(error),
+		});
+		return [];
+	});
 	// Layer 2 Candidate Retrieval(docs/06 §3): filter={form, status:"active"}付きで
 	// topK=100。取り出し後の判定はLayer 1が担う
 	// 所要時間は処理時間の計測でありClockを使う時刻依存のロジックではないため
@@ -296,9 +321,18 @@ export const evaluateIntent = async (
 	});
 	const retrievalMs = Math.round(performance.now() - retrievalStart);
 	timer.lap("retrieval");
+	// 照会が返した件数(補いを含まない・自idの除外前)
 	const retrievalCount = hits.length;
+	const merged = mergeSupplement(
+		hits,
+		await recentPromise,
+		ownValues,
+		PIPELINE.TOP_K_RETRIEVAL,
+	);
+	const supplementCount = merged.supplemented;
+	timer.lap("supplement");
 	// 自己idの除外は呼び出し側が担う(vectorstore/types.tsの契約)
-	const retrieved = hits.filter((hit) => hit.id !== intentId);
+	const retrieved = merged.hits.filter((hit) => hit.id !== intentId);
 
 	// Layer 1 Hard Filter(docs/06 §3・コード+D1): 除外理由を集計する
 	const l1 = await fetchL1Data(
@@ -672,6 +706,7 @@ export const evaluateIntent = async (
 		groupHeldProposals: group?.held ?? 0,
 		groupFailed,
 		retrievalMs,
+		supplementCount,
 	};
 	// 計測(Analytics Engine+ログ・docs/06 §7)。Cron呼び出しはこの計測のみを受け、
 	// イベントpayloadへの反映は呼び出し側(consumer.ts)が行う
@@ -691,6 +726,8 @@ export const evaluateIntent = async (
 		intent_id: intentId,
 		count: result.l3Pass,
 		latency: latencyMs,
+		retrieval_count: retrievalCount,
+		supplement_count: supplementCount,
 	});
 	return result;
 };

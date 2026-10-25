@@ -41,18 +41,16 @@ import {
 } from "../src/pipeline/group";
 import { prepareGroups } from "../src/pipeline/group-eval";
 import { buildNormalizedText } from "../src/pipeline/normalize";
-import {
-	memoryVectorStore,
-	resetMemoryVectorStore,
-} from "../src/vectorstore/memory";
+import { memoryVectorStore } from "../src/vectorstore/memory";
+import { resetVectorState } from "./reset-vector-state";
 
 const testEnv = env as unknown as WorkerEnv;
 const db = drizzle(testEnv.DB);
 const NOW = new Date("2026-06-01T00:00:00Z");
 const DAY = 24 * 60 * 60_000;
 
-beforeEach(() => {
-	resetMemoryVectorStore();
+beforeEach(async () => {
+	await resetVectorState();
 });
 
 const insertUser = async (): Promise<string> => {

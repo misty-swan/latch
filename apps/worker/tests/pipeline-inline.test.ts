@@ -31,11 +31,9 @@ import { intents, matchEvents, notifications } from "../src/db/schema";
 import type { Env as WorkerEnv } from "../src/env";
 import worker from "../src/index";
 import { handleQueueBatch } from "../src/pipeline/consumer";
-import {
-	memoryVectorStore,
-	resetMemoryVectorStore,
-} from "../src/vectorstore/memory";
+import { memoryVectorStore } from "../src/vectorstore/memory";
 import privateJwkText from "./fixtures/test-idp-private.jwk?raw";
+import { resetVectorState } from "./reset-vector-state";
 
 const testEnv = env as unknown as WorkerEnv;
 const db = drizzle(testEnv.DB);
@@ -189,8 +187,8 @@ const logsOf = (
 		})
 		.filter((line: Record<string, unknown>) => line.event === event);
 
-beforeEach(() => {
-	resetMemoryVectorStore();
+beforeEach(async () => {
+	await resetVectorState();
 });
 
 afterEach(() => {
