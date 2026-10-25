@@ -183,6 +183,16 @@ const logStage1Skipped = (intentId: string, source: Stage1Source): void => {
 	});
 };
 
+/**
+ * upsertのやり直しの待ちにばらつき(0.5〜1.5倍)を掛ける(LAT-100)。Vectorizeの
+ * VECTOR_UPSERT_40041は同時の多数のupsertで出ており、同じ待ちでやり直すと同じ時刻に
+ * またぶつかるため、要求ごとにずらす。0はそのまま0(試験の待ちなし)
+ */
+export const jitterUpsertRetryDelay = (
+	delayMs: number,
+	random: () => number = Math.random,
+): number => Math.round(delayMs * (0.5 + random()));
+
 /** 試験専用: upsertのやり直しの待ちの既定を差し替える(未設定なら定数・nullで戻す) */
 let upsertRetryDelaysOverride: readonly number[] | null = null;
 export const setStage1UpsertRetryDelaysForTest = (
@@ -264,8 +274,8 @@ export const runEmbeddingStage = async (
 			},
 		};
 		// upsertだけを短く待ってやり直す(#44)。Vectorizeの一時的な失敗は数秒で直ることが多く、
-		// 応答の後の実行(上限30秒)に収まる最大3秒の待ちで拾う。尽きたら最後の例外を投げ、
-		// 従来どおり第1段の失敗(キューのやり直し)へ回る
+		// 応答の後の実行(上限30秒)に収まる最大10.5秒の待ち(ばらつき込み・LAT-100)で拾う。
+		// 尽きたら最後の例外を投げ、従来どおり第1段の失敗(キューのやり直し)へ回る
 		const retryDelays =
 			options.upsertRetryDelaysMs ??
 			upsertRetryDelaysOverride ??
@@ -279,7 +289,9 @@ export const runEmbeddingStage = async (
 				if (delay === undefined) {
 					throw error;
 				}
-				await new Promise((resolve) => setTimeout(resolve, delay));
+				await new Promise((resolve) =>
+					setTimeout(resolve, jitterUpsertRetryDelay(delay)),
+				);
 			}
 		}
 		layer = "d1";

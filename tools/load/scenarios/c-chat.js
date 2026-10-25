@@ -218,9 +218,18 @@ export default function (data) {
 	};
 	ws.onclose = (event) => {
 		if (state === "open") {
+			const code = String(event?.code ?? "unknown");
 			holdMs.add(Date.now() - openedAt);
-			closeCode.add(1, { code: String(event?.code ?? "unknown") });
-			if (!closingPlanned) closedEarly.add(1);
+			closeCode.add(1, { code });
+			if (!closingPlanned) {
+				closedEarly.add(1);
+				// 途中で閉じた接続を1本ずつ残す(LAT-101)。同じ組の2人が同じ時刻に閉じたか
+				// (部屋の側の切断)、片側だけか(手元とCloudflareの間の切断)を見分ける。
+				// 組の番号・側・コード・保持時間・時刻だけで、チケット・URLは出さない
+				console.log(
+					`chat.closed_early pair=${Math.floor((vu - 1) / 2)} side=${(vu - 1) % 2} code=${code} hold_ms=${Date.now() - openedAt} at=${new Date().toISOString()}`,
+				);
+			}
 		}
 		fail();
 		state = "closed";

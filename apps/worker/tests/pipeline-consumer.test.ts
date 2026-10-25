@@ -25,6 +25,7 @@ import {
 	type IntentStatus,
 	type MatchEventType,
 	type MatchQueueMessage,
+	PIPELINE,
 } from "@latch/shared";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -38,6 +39,7 @@ import { stubEmbedding } from "../src/llm/stub/embedding";
 import {
 	handleQueueBatch,
 	isDlqQueue,
+	jitterUpsertRetryDelay,
 	runEmbeddingStage,
 } from "../src/pipeline/consumer";
 import { buildNormalizedText } from "../src/pipeline/normalize";
@@ -1093,6 +1095,14 @@ describe("ログの分離と計測(docs/06 §7・docs/08 §6)", () => {
 			.from(intents)
 			.where(eq(intents.id, intentId));
 		expect(row.embeddedAt).toBeNull();
+	});
+
+	it("既定のupsertのやり直しは3回で、待ちに0.5〜1.5倍のばらつきを掛ける(LAT-100)", () => {
+		expect(PIPELINE.STAGE1_UPSERT_RETRY_DELAYS_MS).toHaveLength(3);
+		expect(jitterUpsertRetryDelay(2_000, () => 0)).toBe(1_000);
+		expect(jitterUpsertRetryDelay(2_000, () => 0.5)).toBe(2_000);
+		expect(jitterUpsertRetryDelay(2_000, () => 0.999)).toBe(2_998);
+		expect(jitterUpsertRetryDelay(0, () => 0.7)).toBe(0);
 	});
 
 	it("第2段のpayloadは既存の項目の後にF4bの項目を同順で載せる(F4b設計 §5)", async () => {
