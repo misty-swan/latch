@@ -213,8 +213,18 @@ interface Client {
 }
 
 const sockets: WebSocket[] = [];
-afterEach(() => {
-	for (const ws of sockets.splice(0)) ws.close();
+afterEach(async () => {
+	// 閉じ終わり(相手側のclose)を待つ。DOのwebSocketCloseのログが試験の終了後に出ないようにする
+	await Promise.all(
+		sockets.splice(0).map(
+			(ws) =>
+				new Promise<void>((resolve) => {
+					ws.addEventListener("close", () => resolve());
+					setTimeout(resolve, 1000);
+					ws.close();
+				}),
+		),
+	);
 });
 
 const wsFetch = (latchId: string, ticket: string, upgrade = true) =>
