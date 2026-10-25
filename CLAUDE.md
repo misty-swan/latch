@@ -7,10 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 現在の状態
 
 - 文書駆動開発。`docs/`(00〜12)が製品仕様の正本。工程とゲートは docs/12 §2、受け入れ条件は 02 §4 の #1〜#35
-- 完了した工程: F0〜F8b(F4・F6・F7・F8は分割して実施)・不具合の修正工程(第1〜3回)・LLM real接続(精度ゲート合格・stagingは `LATCH_LLM_MODE=real`)。各工程の内容と決定は docs/12 §2 と 01 冒頭の決定記録、計画と設計は `docs/superpowers/plans`・`specs`
-- 進行中: 不具合の修正工程(第4回・issue #32・#37・#42〜#47。続けて02 #33をstagingで測り直す。設計は `docs/superpowers/specs/2026-10-25-bugfix-phase4-design.md`)
+- 完了した工程: F0〜F8b(F4・F6・F7・F8は分割して実施)・不具合の修正工程(第1〜4回)・LLM real接続(精度ゲート合格・stagingは `LATCH_LLM_MODE=real`)。各工程の内容と決定は docs/12 §2 と 01 冒頭の決定記録、計画と設計は `docs/superpowers/plans`・`specs`
+- 進行中: なし(次は新しい不具合の修正工程(LAT-98〜LAT-102)の後に02 #33を測り直す。第4回の設計は `docs/superpowers/specs/2026-10-25-bugfix-phase4-design.md`)
 - この後: F9 品質確立(02 #34・#35)→ F10 公開準備(法務確認・本番IdP(Google/Apple)・本番VAPID鍵・prodのreal化とAccessの扱い)
-- 02 §4 の未了: #31(規約の草案は配置済み・弁護士等の法務確認は現時点で行わずF10の前に扱いを判断)・#32(実機確認のオーナーの記録待ち)・#33(real接続で計測済み・目標外あり)・#34・#35
+- 02 §4 の未了: #31(規約の草案は配置済み・弁護士等の法務確認は現時点で行わずF10の前に扱いを判断)・#32(実機確認のオーナーの記録待ち)・#33(完了ではない・real接続で計測済み・(d)の通知が目標外=LAT-98)・#34・#35
 - F3は未決D-C-01/D-C-02を暫定案(K_v=50・0.7/0.3)で着手済み(調整は運用データ後・06 §8)
 - 細かい進み具合・残りの作業・不具合・オーナーの判断待ちは Linear が正本(下の「作業管理」)。この節には書き足さず、工程の区切りで要約だけを直す
 - 03(UX仕様)は不作成(2026-10-18オーナー裁定・docs/00の決定記録)。`prototype/` がUIの正本(README・project/latch.css)で、実装側のスタイリング正本は`apps/web/src/styles/latch.css`(prototypeから不改変コピー・docs/04 §3.2)
