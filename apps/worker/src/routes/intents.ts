@@ -43,7 +43,17 @@ import {
 	parseResponseSchema,
 	patchIntentRequestSchema,
 } from "@latch/shared";
-import { and, count, desc, eq, inArray, like, lt, or } from "drizzle-orm";
+import {
+	and,
+	count,
+	desc,
+	eq,
+	getTableColumns,
+	inArray,
+	like,
+	lt,
+	or,
+} from "drizzle-orm";
 import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -449,6 +459,46 @@ intentRoutes.post("/parse", requireRegistered, async (c) => {
 	return c.json(body, 200);
 });
 
+/**
+ * activeのIntent作成: 上限の確認と挿入を条件付きの1文にまとめる(#32)。
+ * 通常の挿入(drizzleのvalues)のSQLを取り出し、`values (…)` を
+ * `select … where (参加中activeの数) < 上限` に置き換えて1回で実行する(往復は1回)。
+ * 条件を満たさなければ0行で、同じ利用者の同時作成でも上限を超えない。
+ * 返った行が無ければ undefined(上限到達)
+ */
+const insertIntentIfUnderActiveLimit = async (
+	d1: D1Database,
+	insertQuery: { toSQL(): { sql: string; params: unknown[] } },
+	userId: string,
+): Promise<typeof intents.$inferSelect | undefined> => {
+	const { sql: text, params } = insertQuery.toSQL();
+	const m = /^(insert into [^)]*\)) values \((.*)\) (returning .*)$/is.exec(
+		text,
+	);
+	if (m === null) {
+		throw new Error("insert文の形が想定と違います");
+	}
+	const conditional = `${m[1]} select ${m[2]} where (select count(*) from "intents" where "user_id" = ? and "status" = 'active') < ${LIMITS.ACTIVE_INTENTS_PER_USER} ${m[3]}`;
+	const { results } = await d1
+		.prepare(conditional)
+		.bind(...params, userId)
+		.all<Record<string, unknown>>();
+	const raw = results[0];
+	if (raw === undefined) {
+		return undefined;
+	}
+	// 生の行(列名=snake_case)をdrizzleの行(プロパティ名)へ戻す
+	const row: Record<string, unknown> = {};
+	for (const [key, column] of Object.entries(getTableColumns(intents))) {
+		const value = raw[column.name];
+		row[key] =
+			value === null || value === undefined
+				? null
+				: column.mapFromDriverValue(value);
+	}
+	return row as typeof intents.$inferSelect;
+};
+
 intentRoutes.post("/", requireRegistered, async (c) => {
 	const parsed = createIntentRequestSchema.safeParse(await readJsonBody(c));
 	if (!parsed.success) {
@@ -534,27 +584,12 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 		if (alcoholRejection) {
 			return c.json(alcoholRejection.body, alcoholRejection.status);
 		}
-		// 参加中active数の上限(上限5件・docs/05 §3.1のACTIVE_INTENT_LIMIT=422)
-		const [counted] = await db
-			.select({ value: count() })
-			.from(intents)
-			.where(and(eq(intents.userId, sub), eq(intents.status, "active")));
-		if ((counted?.value ?? 0) >= LIMITS.ACTIVE_INTENTS_PER_USER) {
-			logger.warn("intents.create.rejected", {
-				error_code: "ACTIVE_INTENT_LIMIT",
-			});
-			const r = errorJson(
-				"ACTIVE_INTENT_LIMIT",
-				"参加中のIntentが上限に達しています。既存のIntentを見直してください",
-			);
-			return c.json(r.body, r.status);
-		}
 		// 期限は検証結果(active化時刻+7/30/90日・start+3時間・明示値)で確定
 		expiresAt = validation.expiresAt;
 	}
 
-	const insertStartedAt = systemClock.now().getTime();
-	const [inserted] = await db
+	const insertStartedAt = performance.now();
+	const insertQuery = db
 		.insert(intents)
 		.values({
 			id: newUlid(),
@@ -595,14 +630,41 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 			updatedAt: now,
 		})
 		.returning();
-	if (inserted === undefined) {
-		const r = errorJson("INTERNAL", "Intentの作成に失敗しました");
-		return c.json(r.body, r.status);
+	// draftは従来の1文の挿入。activeは上限の確認と挿入を条件付きの1文にまとめ、
+	// 往復を1回減らす(#32)。同じ利用者の同時作成でも上限5件を超えない
+	let inserted: typeof intents.$inferSelect | undefined;
+	if (d.status === "active") {
+		inserted = await insertIntentIfUnderActiveLimit(c.env.DB, insertQuery, sub);
+		if (inserted === undefined) {
+			logger.warn("intents.create.rejected", {
+				error_code: "ACTIVE_INTENT_LIMIT",
+			});
+			const r = errorJson(
+				"ACTIVE_INTENT_LIMIT",
+				"参加中のIntentが上限に達しています。既存のIntentを見直してください",
+			);
+			return c.json(r.body, r.status);
+		}
+	} else {
+		[inserted] = await insertQuery;
+		if (inserted === undefined) {
+			const r = errorJson("INTERNAL", "Intentの作成に失敗しました");
+			return c.json(r.body, r.status);
+		}
+	}
+	// 段ごとの所要時間: auth=認証(JWT検証+KV失効リスト)・insert=上限の確認を含む挿入(#32)
+	const authLatency = c.get("authLatencyMs");
+	if (authLatency !== undefined) {
+		logger.info("intents.create.timing", {
+			intent_id: inserted.id,
+			layer: "auth",
+			latency: authLatency,
+		});
 	}
 	logger.info("intents.create.timing", {
 		intent_id: inserted.id,
-		layer: "d1",
-		latency: systemClock.now().getTime() - insertStartedAt,
+		layer: "insert",
+		latency: Math.round(performance.now() - insertStartedAt),
 	});
 	logger.info("intents.created", {
 		intent_id: inserted.id,

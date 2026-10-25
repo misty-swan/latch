@@ -16,7 +16,7 @@ import {
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { importJWK, SignJWT } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
 import { intents, users } from "../src/db/schema";
 import { MS_PER_DAY } from "../src/intents/expiry";
@@ -486,6 +486,63 @@ describe("POST /v1/intents・入力検証と上限(docs/05 §3.1・§2.2)", () =
 			status: "draft",
 		});
 		expect(draft.status).toBe(201);
+	});
+
+	it("activeが4件ある利用者の5件目は201・6件目は422 ACTIVE_INTENT_LIMIT(#32)", async () => {
+		const accessToken = await registerUser("limit-edge");
+		for (let i = 0; i < 4; i++) {
+			const res = await postIntents(
+				accessToken,
+				connectionBody(`境界の学習仲間その${i + 1}`),
+			);
+			expect(res.status).toBe(201);
+		}
+		const fifth = await postIntents(accessToken, connectionBody("5件目の仲間"));
+		expect(fifth.status).toBe(201);
+		const sixth = await postIntents(accessToken, connectionBody("6件目の仲間"));
+		expect(sixth.status).toBe(422);
+		const body = (await sixth.json()) as ErrorResponse;
+		expect(body.error.code).toBe("ACTIVE_INTENT_LIMIT");
+	});
+
+	it("activeが4件ある利用者の同時2件のactive作成は201が1件・422が1件でactiveは5件(#32・1文にまとめた上限の確認)", async () => {
+		const accessToken = await registerUser("limit-race");
+		for (let i = 0; i < 4; i++) {
+			const res = await postIntents(
+				accessToken,
+				connectionBody(`競りの学習仲間その${i + 1}`),
+			);
+			expect(res.status).toBe(201);
+		}
+		const [a, b] = await Promise.all([
+			postIntents(accessToken, connectionBody("同時その1")),
+			postIntents(accessToken, connectionBody("同時その2")),
+		]);
+		expect([a.status, b.status].sort()).toEqual([201, 422]);
+		const rows = await db.select().from(intents);
+		const mine = rows.filter(
+			(r) => r.status === "active" && r.topic?.startsWith("競りの") === true,
+		);
+		const racers = rows.filter(
+			(r) => r.status === "active" && r.topic?.startsWith("同時その") === true,
+		);
+		expect(mine.length + racers.length).toBe(5);
+	});
+
+	it("create.timingにauth・limit・insertの段が載る(#32)", async () => {
+		const accessToken = await registerUser("timing-layers");
+		const logSpy = vi.spyOn(console, "log");
+		try {
+			const res = await postIntents(accessToken, connectionBody("計測の仲間"));
+			expect(res.status).toBe(201);
+			const layers = logSpy.mock.calls
+				.map((args) => String(args[0]))
+				.filter((line) => line.includes("intents.create.timing"))
+				.map((line) => (JSON.parse(line) as { layer?: string }).layer);
+			expect(layers).toEqual(expect.arrayContaining(["auth", "insert"]));
+		} finally {
+			logSpy.mockRestore();
+		}
 	});
 
 	it("未認証の作成は401 UNAUTHORIZED", async () => {

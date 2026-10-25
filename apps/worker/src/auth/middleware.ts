@@ -18,6 +18,8 @@ export type AppEnv = {
 	Bindings: Env;
 	Variables: {
 		auth: AccessClaims & { exp: number };
+		/** requireRegisteredの認証(JWT検証+KV失効リストの読み)の所要時間ms(Intent作成の計測用・#32) */
+		authLatencyMs?: number;
 	};
 };
 
@@ -103,7 +105,9 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 
 /** requireAuthの検証+登録済みユーザーのトークン(subあり)必須。無ければ401(docs/05 §3.1) */
 export const requireRegistered: MiddlewareHandler<AppEnv> = async (c, next) => {
+	const authStartedAt = performance.now();
 	const result = await authenticate(c.env, c.req.header("Authorization"));
+	c.set("authLatencyMs", Math.round(performance.now() - authStartedAt));
 	if (!result.ok) {
 		return c.json(result.result.body, result.result.status);
 	}
