@@ -115,6 +115,8 @@ describe("createLogger(08 §6: 許可リスト方式の構造化ログ)", () => 
 			"push_result",
 			"retrieval_count",
 			"supplement_count",
+			"close_code",
+			"hold_ms",
 		]);
 	});
 
@@ -135,6 +137,8 @@ describe("createLogger(08 §6: 許可リスト方式の構造化ログ)", () => 
 			push_result: "gone",
 			retrieval_count: 100,
 			supplement_count: 1,
+			close_code: 1006,
+			hold_ms: 1234,
 		});
 		const parsed = parseSingleLine(lines);
 		const fieldKeys = Object.keys(parsed)

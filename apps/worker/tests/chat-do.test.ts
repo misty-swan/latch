@@ -8,7 +8,7 @@ import type { ChatServerFrame, MessageDTO } from "@latch/shared";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { listMessages } from "../src/chat/messages";
 import { forwardSend, notifyClosed } from "../src/chat/notify";
 import { latches, latchMembers, messages, users } from "../src/db/schema";
@@ -175,6 +175,35 @@ afterEach(() => {
 });
 
 describe("ChatRoomDO", () => {
+	it("接続が閉じるとchat.ws.closedをclose_code・hold_ms・latch_id付きで記録し、本文や表示名は出さない(#46)", async () => {
+		const { id, members } = await setup();
+		const lines: string[] = [];
+		const spy = vi.spyOn(console, "log").mockImplementation((l: unknown) => {
+			lines.push(String(l));
+		});
+		try {
+			const c = await connect(id, members[0]);
+			c.ws.close(1000, "bye");
+			await c.closed;
+			await vi.waitFor(() => {
+				expect(lines.some((l) => l.includes("chat.ws.closed"))).toBe(true);
+			});
+		} finally {
+			spy.mockRestore();
+		}
+		const line = lines.find((l) => l.includes("chat.ws.closed")) ?? "{}";
+		const parsed = JSON.parse(line) as Record<string, unknown>;
+		expect(parsed.close_code).toBe(1000);
+		expect(parsed.latch_id).toBe(id);
+		expect(typeof parsed.hold_ms).toBe("number");
+		expect(Object.keys(parsed).sort()).toEqual([
+			"close_code",
+			"event",
+			"hold_ms",
+			"latch_id",
+			"level",
+		]);
+	});
 	it("①WSの送信がA・Bに届き、client_idは送信者の接続だけ・D1に1行", async () => {
 		const { id, members } = await setup();
 		const [a, b] = members;

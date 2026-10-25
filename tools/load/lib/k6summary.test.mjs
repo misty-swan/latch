@@ -28,6 +28,9 @@ describe("readK6Metrics", () => {
 			parseP95: null,
 			chatDeliveryP95: null,
 			chatConnect: null,
+			chatClosedEarly: null,
+			chatCloseCodes: null,
+			chatHold: null,
 		});
 		const m = readK6Metrics({
 			a: { metrics: { "http_req_duration{name:parse}": { "p(95)": "x" } } },

@@ -61,6 +61,13 @@ const delivery = new Trend("chat_delivery_ms", true);
 const connectFailed = new Rate("chat_connect_failed");
 const sent = new Counter("chat_messages_sent");
 const unmatched = new Counter("chat_pairs_unmatched");
+// 接続の切断の記録(#46)。openの後、予定の保持時間の前に閉じた接続はこれまでどの指標にも出なかった
+const closedEarly = new Counter("chat_closed_early");
+const closeCode = new Counter("chat_close_code");
+const holdMs = new Trend("chat_hold_ms", true);
+
+/** 閉じた理由のコード(RFC 6455とCloudflareが返し得るもの)。サブ指標をsummaryに出すため閾値を置く */
+const CLOSE_CODES = [1000, 1001, 1002, 1005, 1006, 1008, 1011, 1012];
 
 /** 送るのを止めてから接続を閉じるまでの間(ミリ秒)。最後の送信の到着を待つ */
 const CLOSE_GRACE_MS = 2_000;
@@ -82,6 +89,10 @@ export const options = {
 		// 全員が接続できること(01 §20に目標値は無く、到着の時間は参考値として報告書に載せる)
 		chat_connect_failed: ["rate<0.01"],
 		chat_pairs_unmatched: ["count<1"],
+		// コードごとの件数をsummary-exportへ出すための閾値(常に真)
+		...Object.fromEntries(
+			CLOSE_CODES.map((c) => [`chat_close_code{code:${c}}`, ["count>=0"]]),
+		),
 	},
 };
 
@@ -154,6 +165,9 @@ export default function (data) {
 
 	// connecting→open→closed。openに至らずに終わったら接続の失敗として1回だけ数える
 	let state = "connecting";
+	let openedAt = 0;
+	// 予定の保持時間が過ぎて自分から閉じ始めたか(閉じる前に閉じられたら途中で閉じた接続)
+	let closingPlanned = false;
 	let seq = 0;
 	const timers = [];
 	const stopTimers = () => {
@@ -172,6 +186,7 @@ export default function (data) {
 	);
 	ws.onopen = () => {
 		state = "open";
+		openedAt = Date.now();
 		connectFailed.add(0);
 		timers.push(
 			setInterval(() => {
@@ -188,6 +203,7 @@ export default function (data) {
 			setInterval(() => ws.send("ping"), PING_INTERVAL_SEC * 1_000),
 		);
 		setTimeout(() => {
+			closingPlanned = true;
 			stopTimers();
 			setTimeout(() => ws.close(), CLOSE_GRACE_MS);
 		}, holdSec * 1_000);
@@ -200,7 +216,12 @@ export default function (data) {
 		// エラーの内容にはURL(チケットを含む)が入り得るため表示しない
 		fail();
 	};
-	ws.onclose = () => {
+	ws.onclose = (event) => {
+		if (state === "open") {
+			holdMs.add(Date.now() - openedAt);
+			closeCode.add(1, { code: String(event?.code ?? "unknown") });
+			if (!closingPlanned) closedEarly.add(1);
+		}
 		fail();
 		state = "closed";
 		stopTimers();

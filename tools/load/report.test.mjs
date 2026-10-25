@@ -160,3 +160,34 @@ describe("buildReport: 初期判定の行の経路の内訳", () => {
 		);
 	});
 });
+
+describe("buildReport: チャットの切断の記録(#46)", () => {
+	it("途中で閉じた接続の数・コード別の件数・保持時間の最小とp50を出す", () => {
+		const out = buildReport(
+			"202610251200",
+			{
+				a: null,
+				c: {
+					metrics: {
+						chat_closed_early: { count: 3 },
+						"chat_close_code{code:1006}": { count: 2 },
+						"chat_close_code{code:1000}": { count: 97 },
+						chat_hold_ms: { min: 106000, med: 300500 },
+					},
+				},
+			},
+			empty,
+		);
+		expect(out).toContain("| チャット 途中で閉じた接続 | 3件 |");
+		expect(out).toContain(
+			"| チャット 閉じた理由のコード別 | 1000: 97件・1006: 2件 |",
+		);
+		expect(out).toContain("| チャット 保持時間 最小 | 106.00秒 |");
+		expect(out).toContain("| チャット 保持時間 p50 | 300.50秒 |");
+	});
+	it("指標が無いときは計測なし", () => {
+		const out = buildReport("202610251200", { a: null, c: null }, empty);
+		expect(out).toContain("| チャット 途中で閉じた接続 | 計測なし |");
+		expect(out).toContain("| チャット 保持時間 最小 | 計測なし |");
+	});
+});

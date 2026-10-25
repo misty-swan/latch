@@ -22,6 +22,9 @@ export const LOG_FIELD_ALLOWLIST = [
 	// 評価のLayer 2 Candidate Retrievalの照会の件数と控えから補った件数(#47・設計 2026-10-25 §1.5)
 	"retrieval_count",
 	"supplement_count",
+	// チャット接続の切断の記録(#46)。閉じた理由のコードと接続を受け入れてからの保持時間(ミリ秒)
+	"close_code",
+	"hold_ms",
 ] as const;
 
 export type LogField = (typeof LOG_FIELD_ALLOWLIST)[number];

@@ -25,6 +25,8 @@ const logger = createLogger();
 interface Attachment {
 	userId: string;
 	latchId: string;
+	/** 接続を受け入れた時刻(エポックミリ秒)。切断の記録の保持時間に使う(#46) */
+	acceptedAt?: number;
 }
 
 /** 内部要求の文字列項目(空でない文字列) */
@@ -139,7 +141,11 @@ export class ChatRoomDO extends DurableObject<Env> {
 
 		const { 0: client, 1: server } = new WebSocketPair();
 		this.ctx.acceptWebSocket(server, [userId]);
-		server.serializeAttachment({ userId, latchId } satisfies Attachment);
+		server.serializeAttachment({
+			userId,
+			latchId,
+			acceptedAt: systemClock.now().getTime(),
+		} satisfies Attachment);
 		return new Response(null, { status: 101, webSocket: client });
 	}
 
@@ -219,12 +225,15 @@ export class ChatRoomDO extends DurableObject<Env> {
 		}
 	}
 
-	async webSocketClose(ws: WebSocket): Promise<void> {
+	async webSocketClose(ws: WebSocket, code: number): Promise<void> {
 		// 状態はD1にあり、DOに残すものは無い。閉じるだけ(F6a設計 §4)
+		logClosed(ws, code);
 		closeQuietly(ws);
 	}
 
 	async webSocketError(ws: WebSocket): Promise<void> {
+		// エラーでは閉じたコードが分からない。1006(異常終了)として記録する
+		logClosed(ws, 1006);
 		closeQuietly(ws);
 	}
 
@@ -310,6 +319,26 @@ const sendQuietly = (ws: WebSocket, data: string): void => {
 		ws.send(data);
 	} catch {
 		// 既に閉じている
+	}
+};
+
+/** 接続が閉じたことの記録(#46)。コードと保持時間とLATCHだけで、本文・表示名は出さない */
+const logClosed = (ws: WebSocket, code: number): void => {
+	try {
+		const a = ws.deserializeAttachment() as Attachment | null;
+		const fields: Record<string, string | number> = { close_code: code };
+		if (a !== null) {
+			fields.latch_id = a.latchId;
+			if (typeof a.acceptedAt === "number") {
+				fields.hold_ms = Math.max(
+					0,
+					systemClock.now().getTime() - a.acceptedAt,
+				);
+			}
+		}
+		logger.info("chat.ws.closed", fields);
+	} catch {
+		// 記録の失敗で閉じる処理を止めない
 	}
 };
 
