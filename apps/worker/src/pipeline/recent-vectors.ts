@@ -8,7 +8,19 @@
  * (loadRecentVectorValues)、類似度で混ぜる(mergeSupplement・設計 §1.4)。
  */
 import { PIPELINE } from "@latch/shared";
-import { and, desc, eq, gte, inArray, lt, ne } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	gte,
+	inArray,
+	isNull,
+	lt,
+	ne,
+	or,
+	type SQL,
+	sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { intents, recentVectors } from "../db/schema";
 import { createLogger } from "../logging/logger";
@@ -78,24 +90,58 @@ export interface RecentVectorRef {
 	embeddedAt: Date;
 }
 
+/** 補いの読み込みが使う起点の意思の項目 */
+export type RecentVectorOrigin = Pick<
+	typeof intents.$inferSelect,
+	"id" | "userId" | "form" | "startsAt" | "endsAt" | "expiresAt"
+>;
+
+/**
+ * 機会Intentどうしの時間の重なりが15分未満の相手を除く条件(LAT-99)。Layer 1のtime_no_overlap
+ * (layer1.tsのtimeOverlapMs)と同じ式で、終端はends_atを優先し無ければexpires_at。起点か相手の
+ * どちらかで判定できない(starts_atか終端がnull)ときはLayer 1と同じく除かない。つながりIntentでは
+ * 条件を付けない(undefined)
+ */
+const timeOverlapCondition = (origin: RecentVectorOrigin): SQL | undefined => {
+	const originEnd = origin.endsAt ?? origin.expiresAt;
+	if (
+		origin.form !== "occasion" ||
+		origin.startsAt === null ||
+		originEnd === null
+	) {
+		return undefined;
+	}
+	const candidateEnd = sql`coalesce(${intents.endsAt}, ${intents.expiresAt})`;
+	return or(
+		isNull(intents.startsAt),
+		sql`${candidateEnd} is null`,
+		sql`min(${candidateEnd}, ${originEnd.getTime()}) - max(${intents.startsAt}, ${origin.startsAt.getTime()}) >= ${PIPELINE.TIME_OVERLAP_MIN_MS}`,
+	);
+};
+
 /**
  * 評価で補う控えの候補を読む(設計 §1.4の1)。intentsと結合し、起点と同じform・status='active'・
  * 埋め込みから15分以内(embedded_at ≥ now − RECENT_VECTOR_TTL_MS)・自分以外で、控えの embedded_at が
  * intents.embedded_at と等しい(現在の版の埋め込みである)行を、
- * 埋め込みの新しい順にlimit件まで返す。ベクトル(BLOB)は読まない: D1のJSのAPIはBLOBを数値の配列で
- * 返すため1行で約15KBになり、照会の結果に既にある相手(普段はほぼ全部)の分まで毎回読むと
+ * 埋め込みの新しい順にlimit件まで返す。Layer 1で必ず不合格になる相手(同じ利用者=self_pair・
+ * 機会Intentの時間の重なり15分未満=time_no_overlap)は先に除き、limit件の枠を見込みのある相手に
+ * 使う(LAT-99。Layer 1の判定の結果は変わらない)。ベクトル(BLOB)は読まない: D1のJSのAPIはBLOBを
+ * 数値の配列で返すため1行で約15KBになり、照会の結果に既にある相手(普段はほぼ全部)の分まで毎回読むと
  * 通信が評価1回あたり約0.75MBになる。ベクトルは照会の結果に無いidだけをloadRecentVectorValuesで読む。
  * 例外はそのまま投げる(呼び出し側が補いなしで続ける)
  */
 export const loadRecentVectorRefs = async (
 	db: D1Database,
 	opts: {
-		form: NonNullable<(typeof intents.$inferSelect)["form"]>;
-		selfId: string;
+		origin: RecentVectorOrigin;
 		now: Date;
 		limit: number;
 	},
 ): Promise<RecentVectorRef[]> => {
+	const { origin } = opts;
+	if (origin.form === null) {
+		return [];
+	}
 	const cutoff = new Date(opts.now.getTime() - PIPELINE.RECENT_VECTOR_TTL_MS);
 	return drizzle(db)
 		.select({
@@ -106,13 +152,15 @@ export const loadRecentVectorRefs = async (
 		.innerJoin(intents, eq(intents.id, recentVectors.intentId))
 		.where(
 			and(
-				eq(intents.form, opts.form),
+				eq(intents.form, origin.form),
 				eq(intents.status, "active"),
 				gte(recentVectors.embeddedAt, cutoff),
 				// 現在の版の埋め込みだけを使う(内容の変更でintents.embedded_atが消えた・別の時刻で
 				// 埋め込み直された意思の、古い版の控えを補わない)
 				eq(intents.embeddedAt, recentVectors.embeddedAt),
-				ne(recentVectors.intentId, opts.selfId),
+				ne(recentVectors.intentId, origin.id),
+				ne(intents.userId, origin.userId),
+				timeOverlapCondition(origin),
 			),
 		)
 		.orderBy(desc(recentVectors.embeddedAt), recentVectors.intentId)

@@ -277,10 +277,20 @@ const recordPrevScore = async (
 	}
 };
 
+/**
+ * proposeSetの任意の指定。notifiedAtは提案の通知の行のcreated_atだけに使う時刻(省略時はnow)。
+ * 評価はnowに評価の開始時刻を渡すため、通知の行には提案を作る直前の時刻を別に渡し、
+ * 「判定後」の起点を判定の終わりに揃える(LAT-98・01 §20の通知の目標)。提案の行・期限・履歴はnowのまま
+ */
+export interface ProposeSetOptions {
+	notifiedAt?: Date;
+}
+
 export const proposeSet = async (
 	db: DrizzleD1Database,
 	input: ProposeSetInput,
 	now: Date,
+	options?: ProposeSetOptions,
 ): Promise<ProposeOutcome> => {
 	const { members, score, source } = input;
 	if (members.length < 2 || members.length > 4) {
@@ -379,6 +389,7 @@ export const proposeSet = async (
 		: expiresAt;
 	const latchId = newUlid();
 	const nowMs = now.getTime();
+	const notifiedAtMs = (options?.notifiedAt ?? now).getTime();
 	// 全ペアの両方向(ブロックはどちらの向きでも提案を止める・F7a設計 §2.4)
 	const blockPairs = sql.join(
 		pairs.flatMap((pair) => [
@@ -494,7 +505,7 @@ export const proposeSet = async (
 		db
 			.insert(notifications)
 			.select(
-				sql`SELECT ${newUlid()}, ${userId}, 'proposal', ${latchId}, NULL, ${nowMs}, NULL, 'pending', NULL WHERE ${secured}`,
+				sql`SELECT ${newUlid()}, ${userId}, 'proposal', ${latchId}, NULL, ${notifiedAtMs}, NULL, 'pending', NULL WHERE ${secured}`,
 			);
 
 	const notifyStatements = present

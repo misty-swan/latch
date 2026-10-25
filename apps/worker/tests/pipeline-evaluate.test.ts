@@ -40,6 +40,7 @@ import {
 	latchMembers,
 	matchCandidates,
 	matchEvents,
+	notifications,
 	proposalHistory,
 	recentVectors,
 	users,
@@ -1460,6 +1461,29 @@ describe("Layer 4・Layer 5・提案化の連結(F4a設計 §2.6・§3.1)", () =
 		const [row] = await candidatesInvolving(origin.id);
 		expect(row?.latchScore).toBeCloseTo(STUB_JEV_HIGH);
 		expect(row?.status).toBe("proposed");
+	});
+
+	it("提案の通知の行の作成時刻は評価の開始でなく提案を作る直前の時刻で、LATCHの行は評価の開始のまま(LAT-98)", async () => {
+		const { userA, userB, origin } = await seedConnectionPair();
+		// 呼ぶたびに1秒ずつ進む時計(評価の開始=1回目がFIXED_NOW)
+		let calls = 0;
+		const steppingClock = {
+			now: () => new Date(BASE + 1_000 * calls++),
+		};
+		const result = await evaluateIntent(testEnv, origin.id, steppingClock);
+		expect(result?.proposed).toBe(1);
+		const [latch] = await latchesOfUser(userA);
+		expect(latch?.createdAt.getTime()).toBe(BASE);
+		const rows = await db
+			.select()
+			.from(notifications)
+			.where(eq(notifications.latchId, latch?.id ?? ""));
+		expect(rows.map((r) => r.userId).sort()).toEqual([userA, userB].sort());
+		for (const row of rows) {
+			expect(row.type).toBe("proposal");
+			expect(row.createdAt.getTime()).toBeGreaterThan(BASE);
+			expect(row.createdAt.getTime()).toBeLessThan(BASE + 1_000 * calls);
+		}
 	});
 
 	it("提案ができる評価は pipeline.stage2.timing を段ごとに1行ずつ出し、項目は許可リストの範囲だけ(#36)", async () => {

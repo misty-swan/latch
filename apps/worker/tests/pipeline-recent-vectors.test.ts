@@ -25,6 +25,7 @@ import { intents, matchEvents, recentVectors, users } from "../src/db/schema";
 import type { Env as WorkerEnv } from "../src/env";
 import { handleQueueBatch } from "../src/pipeline/consumer";
 import { runScheduledPipeline } from "../src/pipeline/cron";
+import { layer1Judge } from "../src/pipeline/layer1";
 import {
 	decodeVector,
 	deleteExpiredRecentVectors,
@@ -54,23 +55,25 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-/** 利用者とactiveの意思を1件ずつ投入する */
-const seedIntent = async (): Promise<string> => {
-	const userId = ulid();
+/** 利用者とactiveの意思を1件ずつ投入する(userIdを渡したときはその利用者の意思だけを足す) */
+const seedIntent = async (existingUserId?: string): Promise<string> => {
+	const userId = existingUserId ?? ulid();
 	const intentId = ulid();
 	const now = clock.now();
-	await db.insert(users).values({
-		id: userId,
-		authProvider: "google",
-		authSubject: `recent-vectors-${intentId}`,
-		actorType: "individual",
-		displayName: "控えの試験",
-		bio: "",
-		birthDate: "1990-01-01",
-		status: "active",
-		createdAt: now,
-		updatedAt: now,
-	});
+	if (existingUserId === undefined) {
+		await db.insert(users).values({
+			id: userId,
+			authProvider: "google",
+			authSubject: `recent-vectors-${intentId}`,
+			actorType: "individual",
+			displayName: "控えの試験",
+			bio: "",
+			birthDate: "1990-01-01",
+			status: "active",
+			createdAt: now,
+			updatedAt: now,
+		});
+	}
 	await db.insert(intents).values({
 		id: intentId,
 		userId,
@@ -93,6 +96,15 @@ const seedIntent = async (): Promise<string> => {
 		updatedAt: now,
 	});
 	return intentId;
+};
+
+/** 補いの読み込みへ渡す起点の意思の行 */
+const originOf = async (intentId: string) => {
+	const [row] = await db.select().from(intents).where(eq(intents.id, intentId));
+	if (row === undefined) {
+		throw new Error(`intent not found: ${intentId}`);
+	}
+	return row;
 };
 
 const rowsOf = (intentId: string) =>
@@ -344,8 +356,7 @@ describe("loadRecentVectorRefs・loadRecentVectorValues(控えの読み込み)",
 		await saveRecentVector(testEnv.DB, reembedded, at(2_000), sampleVector(9));
 
 		const refs = await loadRecentVectorRefs(testEnv.DB, {
-			form: "connection",
-			selfId: self,
+			origin: await originOf(self),
 			now: clock.now(),
 			limit: 50,
 		});
@@ -359,12 +370,180 @@ describe("loadRecentVectorRefs・loadRecentVectorValues(控えの読み込み)",
 		);
 
 		const limited = await loadRecentVectorRefs(testEnv.DB, {
-			form: "connection",
-			selfId: self,
+			origin: await originOf(self),
 			now: clock.now(),
 			limit: 2,
 		});
 		expect(limited.map((r) => r.id)).toEqual([newer, older]);
+	});
+
+	it("Layer 1で必ず落ちる相手(同じ利用者・機会Intentの時間の重なり15分未満)を除いて読む(LAT-99)", async () => {
+		const now = clock.now().getTime();
+		const hour = 60 * 60_000;
+		const minute = 60_000;
+		const base = now + 24 * hour;
+		/** 機会Intentにして時間を決め、控えを現在の版として書く */
+		const occasionAt = async (
+			id: string,
+			window: { startsAt: number | null; endsAt: number | null },
+			expiresAt: number,
+			embeddedOffsetMs: number,
+		) => {
+			const embeddedAt = new Date(now - embeddedOffsetMs);
+			await db
+				.update(intents)
+				.set({
+					form: "occasion",
+					startsAt: window.startsAt === null ? null : new Date(window.startsAt),
+					endsAt: window.endsAt === null ? null : new Date(window.endsAt),
+					expiresAt: new Date(expiresAt),
+					embeddedAt,
+				})
+				.where(eq(intents.id, id));
+			await saveRecentVector(testEnv.DB, id, embeddedAt, sampleVector(1));
+		};
+		// 起点は base〜base+2時間
+		const self = await seedIntent();
+		await occasionAt(
+			self,
+			{ startsAt: base, endsAt: base + 2 * hour },
+			base + 3 * hour,
+			0,
+		);
+		const selfRow = await originOf(self);
+		// 同じ利用者の別の意思(時間は重なる)→ self_pair で除く
+		const sameUser = await seedIntent(selfRow.userId);
+		await occasionAt(
+			sameUser,
+			{ startsAt: base, endsAt: base + 2 * hour },
+			base + 3 * hour,
+			1_000,
+		);
+		// 重なり14分 → 除く
+		const short = await seedIntent();
+		await occasionAt(
+			short,
+			{ startsAt: base + 2 * hour - 14 * minute, endsAt: base + 4 * hour },
+			base + 5 * hour,
+			2_000,
+		);
+		// 重なりちょうど15分 → 残す
+		const edge = await seedIntent();
+		await occasionAt(
+			edge,
+			{ startsAt: base + 2 * hour - 15 * minute, endsAt: base + 4 * hour },
+			base + 5 * hour,
+			3_000,
+		);
+		// ends_atが無くexpires_atを終端にする: base−1時間〜base+30分で重なり30分 → 残す
+		const byExpiry = await seedIntent();
+		await occasionAt(
+			byExpiry,
+			{ startsAt: base - hour, endsAt: null },
+			base + 30 * minute,
+			4_000,
+		);
+		// ends_atが無くexpires_atが base+10分で重なり10分 → 除く
+		const byExpiryShort = await seedIntent();
+		await occasionAt(
+			byExpiryShort,
+			{ startsAt: base - hour, endsAt: null },
+			base + 10 * minute,
+			5_000,
+		);
+		// starts_atが無い(判定できない)→ Layer 1と同じく除かない
+		const noStart = await seedIntent();
+		await occasionAt(
+			noStart,
+			{ startsAt: null, endsAt: null },
+			base + 5 * hour,
+			6_000,
+		);
+		// 時間が全く重ならない → 除く
+		const later = await seedIntent();
+		await occasionAt(
+			later,
+			{ startsAt: base + 5 * hour, endsAt: base + 6 * hour },
+			base + 7 * hour,
+			7_000,
+		);
+
+		const refs = await loadRecentVectorRefs(testEnv.DB, {
+			origin: selfRow,
+			now: clock.now(),
+			limit: 50,
+		});
+		expect(refs.map((r) => r.id)).toEqual([edge, byExpiry, noStart]);
+
+		// Layer 1の判定と食い違わない(除いた相手はLayer 1でも不合格・残した相手はこの2つの理由では落ちない)
+		const birthDates: Record<string, string> = {};
+		for (const id of [
+			sameUser,
+			short,
+			edge,
+			byExpiry,
+			byExpiryShort,
+			noStart,
+			later,
+		]) {
+			const row = await originOf(id);
+			birthDates[row.userId] = "1990-01-01";
+		}
+		birthDates[selfRow.userId] = "1990-01-01";
+		const reasons = new Map<string, string | undefined>();
+		for (const id of [
+			sameUser,
+			short,
+			edge,
+			byExpiry,
+			byExpiryShort,
+			noStart,
+			later,
+		]) {
+			reasons.set(
+				id,
+				layer1Judge(
+					selfRow,
+					await originOf(id),
+					birthDates,
+					false,
+					false,
+					clock.now(),
+				).reason,
+			);
+		}
+		expect(Object.fromEntries(reasons)).toEqual({
+			[sameUser]: "self_pair",
+			[short]: "time_no_overlap",
+			[edge]: undefined,
+			[byExpiry]: undefined,
+			[byExpiryShort]: "time_no_overlap",
+			[noStart]: undefined,
+			[later]: "time_no_overlap",
+		});
+	});
+
+	it("つながりIntentの起点では時間の条件を付けず、同じ利用者だけを除く(LAT-99)", async () => {
+		const now = clock.now().getTime();
+		const self = await seedIntent();
+		const selfRow = await originOf(self);
+		const sameUser = await seedIntent(selfRow.userId);
+		const other = await seedIntent();
+		for (const [id, offset] of [
+			[self, 0],
+			[sameUser, 1_000],
+			[other, 2_000],
+		] as const) {
+			const embeddedAt = new Date(now - offset);
+			await db.update(intents).set({ embeddedAt }).where(eq(intents.id, id));
+			await saveRecentVector(testEnv.DB, id, embeddedAt, sampleVector(1));
+		}
+		const refs = await loadRecentVectorRefs(testEnv.DB, {
+			origin: selfRow,
+			now: clock.now(),
+			limit: 50,
+		});
+		expect(refs.map((r) => r.id)).toEqual([other]);
 	});
 
 	it("loadRecentVectorValuesは1回目の後に上書き・削除された行を返さず、refsの順で返す", async () => {

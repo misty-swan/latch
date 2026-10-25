@@ -216,7 +216,8 @@ export interface GroupOutcome {
  * 揃ったものだけaggregate(全ペアのLATCH Scoreの最小値)を出してgroup_candidatesへ
  * upsertする(dedup_key衝突はaggregate_scoreのみ更新・statusは保持)。閾値超過を
  * aggregate降順に見て、全メンバーの再検証(recheckSet)→proposeSet(group)を行い、
- * proposedまたはheldになった時点で止める(1回の評価で提案する集合は1つだけ)
+ * proposedまたはheldになった時点で止める(1回の評価で提案する集合は1つだけ)。
+ * notifiedAtは提案の通知の行の作成時刻を提案の直前に取る口(LAT-98・省略時はnow)
  */
 export const finishGroups = async (
 	db: DrizzleD1Database,
@@ -224,6 +225,7 @@ export const finishGroups = async (
 	plannedSets: GroupSet[],
 	axesByRow: Map<string, JevAxes>,
 	now: Date,
+	notifiedAt?: () => Date,
 ): Promise<GroupOutcome> => {
 	// ペアごとのLATCH Score(今回の実行分+既存のjev_result・Hは候補化時点で1)
 	const scoreByPair = new Map<string, number>();
@@ -303,6 +305,7 @@ export const finishGroups = async (
 				source: { kind: "group", groupCandidateId },
 			},
 			now,
+			{ notifiedAt: notifiedAt?.() },
 		);
 		if (outcome === "proposed") {
 			proposed = 1;

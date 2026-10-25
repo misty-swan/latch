@@ -299,6 +299,7 @@ export const evaluateIntent = async (
 	// 直近のベクトルの控えによる補い(#47・設計 2026-10-25 §1.4): 照会(Vectorize)が古い状態を
 	// 返して相手を見落とすことがあるため、15分以内に埋め込んだ同じformのactiveの意思を控えから読み、
 	// 照会の結果に無いものだけを類似度で混ぜてtopKで切る。以降は合わせた結果を従来どおり使う。
+	// 控えはLayer 1で必ず落ちる相手(同じ利用者・時間の重なり15分未満)を除いて読む(LAT-99)。
 	// 補った行はD1に意思の行があるため、孤立したベクトルの自己修復の対象にならない。
 	// 控えのidと時刻の読み込み(D1)は照会と同時に投げ、直列の待ちを増やさない(#36)。
 	// ベクトルは照会の結果に無いidがあるときだけ2回目に読む(通信を数KBに抑える)。
@@ -312,8 +313,7 @@ export const evaluateIntent = async (
 		return [];
 	};
 	const refsPromise = loadRecentVectorRefs(env.DB, {
-		form,
-		selfId: intentId,
+		origin: intent,
 		now,
 		limit: PIPELINE.RECENT_VECTOR_SUPPLEMENT_MAX,
 	}).catch(recentLoadFailed);
@@ -613,7 +613,8 @@ export const evaluateIntent = async (
 	timer.lap("layer5");
 
 	// 提案の直前にHをD1の現行値で再検証し、合格した相手だけを
-	// L降順に提案化する(docs/06 §6・F4a設計 §3.1〜§3.2)
+	// L降順に提案化する(docs/06 §6・F4a設計 §3.1〜§3.2)。提案の通知の行の作成時刻は
+	// 評価の開始時刻(now)でなく提案を作る直前の時刻にする(判定後の起点・LAT-98)
 	let proposed = 0;
 	let held = 0;
 	// 提案が無いときは、Lの保存をlast_evaluated_atの更新と同じバッチへ回す(間に挟まるのは
@@ -658,6 +659,7 @@ export const evaluateIntent = async (
 					source: { kind: "pair", rowId: pick.rowId },
 				},
 				now,
+				{ notifiedAt: clock.now() },
 			);
 			if (outcome === "proposed") {
 				proposed += 1;
@@ -673,7 +675,14 @@ export const evaluateIntent = async (
 	let group: GroupOutcome | null = null;
 	if (prep !== null) {
 		try {
-			group = await finishGroups(db, prep, plan.plannedSets, l4.axesByRow, now);
+			group = await finishGroups(
+				db,
+				prep,
+				plan.plannedSets,
+				l4.axesByRow,
+				now,
+				() => clock.now(),
+			);
 		} catch (error) {
 			groupFailed = 1;
 			logger.warn("pipeline.group.failed", {
