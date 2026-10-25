@@ -183,6 +183,14 @@ const logStage1Skipped = (intentId: string, source: Stage1Source): void => {
 	});
 };
 
+/** 試験専用: upsertのやり直しの待ちの既定を差し替える(未設定なら定数・nullで戻す) */
+let upsertRetryDelaysOverride: readonly number[] | null = null;
+export const setStage1UpsertRetryDelaysForTest = (
+	delays: readonly number[] | null,
+): void => {
+	upsertRetryDelaysOverride = delays;
+};
+
 /**
  * 第1段の本体(docs/06 §2)。埋め込み→VectorStoreへのupsert(反映は待たない)→
  * intents.embedding_model/embedded_atの更新→vector_reflectionの投入(同version・遅延付き)→
@@ -209,6 +217,8 @@ export const runEmbeddingStage = async (
 		emitCompleted?: boolean;
 		/** 第1段を呼んだ経路(完了ログのlayer・既定queue) */
 		source?: Stage1Source;
+		/** upsertのやり直しの待ち(ミリ秒)。試験で短くするための上書き・既定は定数 */
+		upsertRetryDelaysMs?: readonly number[];
 	} = {},
 ): Promise<EmbeddingStageResult> => {
 	const emitCompleted = options.emitCompleted ?? true;
@@ -242,19 +252,36 @@ export const runEmbeddingStage = async (
 		// ベクトルid=Intent ULID・metadataはLayer 2のfilterに使う(docs/05 §2.3)。
 		// 第1段はactive化済みのIntentのみで呼ばれるためformは非null
 		// (draft→active化でform検証済み・docs/05 §2.2)
-		await store.upsert([
-			{
-				id: intent.id,
-				values,
-				metadata: {
-					form: intent.form as string,
-					status: "active",
-					category: intent.category,
-					user_id: intent.userId,
-					version: intent.version,
-				},
+		const vectorToWrite = {
+			id: intent.id,
+			values,
+			metadata: {
+				form: intent.form as string,
+				status: "active" as const,
+				category: intent.category,
+				user_id: intent.userId,
+				version: intent.version,
 			},
-		]);
+		};
+		// upsertだけを短く待ってやり直す(#44)。Vectorizeの一時的な失敗は数秒で直ることが多く、
+		// 応答の後の実行(上限30秒)に収まる最大3秒の待ちで拾う。尽きたら最後の例外を投げ、
+		// 従来どおり第1段の失敗(キューのやり直し)へ回る
+		const retryDelays =
+			options.upsertRetryDelaysMs ??
+			upsertRetryDelaysOverride ??
+			PIPELINE.STAGE1_UPSERT_RETRY_DELAYS_MS;
+		for (let attempt = 0; ; attempt += 1) {
+			try {
+				await store.upsert([vectorToWrite]);
+				break;
+			} catch (error) {
+				const delay = retryDelays[attempt];
+				if (delay === undefined) {
+					throw error;
+				}
+				await new Promise((resolve) => setTimeout(resolve, delay));
+			}
+		}
 		layer = "d1";
 		const db = drizzle(env.DB);
 		// embedded_atは埋め込んだ版のときだけ書く(upsertの間に版が上がったら書かずに止める)

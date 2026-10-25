@@ -10,7 +10,9 @@ const MAX_CAUSE_DEPTH = 3;
  * 返すのは分類名だけで、メッセージの中身(個人情報を含み得る)は出さない
  */
 const classifyMessage = (message: string): string | undefined => {
-	const vector = /^VECTOR_(GET|UPSERT)_ERROR \(code = (\d+)\)/.exec(message);
+	const vector = /^VECTOR_(GET|UPSERT|DELETE)_ERROR \(code = (\d+)\)/.exec(
+		message,
+	);
 	if (vector !== null) {
 		return `VECTOR_${vector[1]}_${vector[2]}`;
 	}

@@ -1559,7 +1559,8 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 
 		await runScheduledPipeline(testEnv, directClock);
 
-		expect(upsertSpy).toHaveBeenCalledTimes(LATCH.BACKFILL_FAILURE_ABORT);
+		// 1件ごとにupsertを最初+やり直し2回の計3回試す(#44)
+		expect(upsertSpy).toHaveBeenCalledTimes(LATCH.BACKFILL_FAILURE_ABORT * 3);
 		expect(logsOf(logSpy, "cron.backfill.aborted")).toEqual([
 			{
 				level: "warn",
@@ -1575,12 +1576,13 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 		const original = store.upsert.bind(store);
 		let calls = 0;
 		// 4件失敗 → 1件成功 → 以降は失敗。成功で連続数が0に戻るため、
-		// 打ち切りは成功の後の5件目(通算10件目)になる
+		// 打ち切りは成功の後の5件目(通算10件目)になる。1件ごとに最大3回試すので
+		// 4件の失敗は12回・成功は13回目・以降の5件の失敗は15回(計28回・#44)
 		const upsertSpy = vi
 			.spyOn(store, "upsert")
 			.mockImplementation(async (vectors) => {
 				calls += 1;
-				if (calls === 5) {
+				if (calls === 13) {
 					return original(vectors);
 				}
 				throw new Error("UPSERT_FAILED: 試験用の失敗");
@@ -1589,7 +1591,7 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 
 		await runScheduledPipeline(testEnv, directClock);
 
-		expect(upsertSpy).toHaveBeenCalledTimes(10);
+		expect(upsertSpy).toHaveBeenCalledTimes(28);
 		// count=打ち切り時点までの当回の失敗件数(4+5)
 		expect(logsOf(logSpy, "cron.backfill.aborted")).toEqual([
 			{ level: "warn", event: "cron.backfill.aborted", count: 9 },

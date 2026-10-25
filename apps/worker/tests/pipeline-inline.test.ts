@@ -277,7 +277,7 @@ describe("activeでの作成の応答の後の第1段・第2段(#30・設計 §3
 		const store = memoryVectorStore();
 		const upsert = vi
 			.spyOn(store, "upsert")
-			.mockRejectedValueOnce(new Error("試験用のupsertの失敗"));
+			.mockRejectedValue(new Error("試験用のupsertの失敗"));
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
 		const res = await createActive(a, "やり直す学習仲間", inlineEnv());

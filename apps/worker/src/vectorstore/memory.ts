@@ -18,6 +18,9 @@ const store = new Map<string, StoredVector>();
 const pending = new Map<string, StoredVector>();
 let holding = false;
 
+/** 試験専用: 次のn回のupsertを失敗させる残り回数 */
+let failUpserts = 0;
+
 /** score降順・同点はid昇順(メモリ実装の結果順を決定的に保つ) */
 const byScoreDescThenIdAsc = (
 	a: { id: string; score: number },
@@ -41,6 +44,10 @@ let limits: { getByIds?: number } | null = null;
  */
 const singleton: VectorStore = {
 	upsert: async (vectors) => {
+		if (failUpserts > 0) {
+			failUpserts -= 1;
+			throw new Error("VECTOR_UPSERT_ERROR (code = 40041): 試験用の失敗");
+		}
 		// 同一idは上書き(Vectorizeのupsertと同じセマンティクス)
 		for (const v of vectors) {
 			(holding ? pending : store).set(v.id, v);
@@ -91,6 +98,7 @@ export const resetMemoryVectorStore = (): void => {
 	pending.clear();
 	holding = false;
 	limits = null;
+	failUpserts = 0;
 };
 
 /**
@@ -115,4 +123,9 @@ export const releaseMemoryVectorWrites = (): void => {
 		store.set(id, v);
 	}
 	pending.clear();
+};
+
+/** 試験専用: 次のn回のupsertをVECTOR_UPSERT_ERROR (code = 40041)で失敗させる。index.tsからは再exportしない */
+export const failMemoryVectorUpserts = (n: number): void => {
+	failUpserts = n;
 };

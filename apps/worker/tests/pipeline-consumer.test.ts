@@ -35,9 +35,14 @@ import { intents, matchEvents, notifications, users } from "../src/db/schema";
 // ルート・handleQueueBatchが受け取るEnv(src/env.ts・生成型Envの宣言部分型)
 import type { Env as WorkerEnv } from "../src/env";
 import { stubEmbedding } from "../src/llm/stub/embedding";
-import { handleQueueBatch, isDlqQueue } from "../src/pipeline/consumer";
+import {
+	handleQueueBatch,
+	isDlqQueue,
+	runEmbeddingStage,
+} from "../src/pipeline/consumer";
 import { buildNormalizedText } from "../src/pipeline/normalize";
 import {
+	failMemoryVectorUpserts,
 	holdMemoryVectorWrites,
 	memoryVectorStore,
 	releaseMemoryVectorWrites,
@@ -1039,6 +1044,55 @@ describe("ログの分離と計測(docs/06 §7・docs/08 §6)", () => {
 		expect(failed).toHaveLength(1);
 		expect(failed[0]?.layer).toBe("upsert");
 		expect(failed[0]?.error_code).toBe("VECTOR_UPSERT_40012");
+	});
+
+	it("upsertが1回失敗して2回目に成功すれば第1段は成功する(#44)", async () => {
+		const { intentId } = await seedEvent();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const [intent] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		failMemoryVectorUpserts(1);
+
+		const result = await runEmbeddingStage(testEnv, intent, clock, {
+			emitCompleted: false,
+			upsertRetryDelaysMs: [0, 0],
+		});
+
+		expect(result.status).not.toBe("failed");
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		expect(row.embeddedAt).not.toBeNull();
+		expect(logsOf(logSpy, "pipeline.stage1.failed")).toEqual([]);
+	});
+
+	it("upsertが3回失敗すると第1段は従来どおり失敗する(layer=upsert・#44)", async () => {
+		const { intentId } = await seedEvent();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const [intent] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		failMemoryVectorUpserts(3);
+
+		const result = await runEmbeddingStage(testEnv, intent, clock, {
+			emitCompleted: false,
+			upsertRetryDelaysMs: [0, 0],
+		});
+
+		expect(result.status).toBe("failed");
+		const failed = logsOf(logSpy, "pipeline.stage1.failed");
+		expect(failed).toHaveLength(1);
+		expect(failed[0]?.layer).toBe("upsert");
+		expect(failed[0]?.error_code).toBe("VECTOR_UPSERT_40041");
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, intentId));
+		expect(row.embeddedAt).toBeNull();
 	});
 
 	it("第2段のpayloadは既存の項目の後にF4bの項目を同順で載せる(F4b設計 §5)", async () => {

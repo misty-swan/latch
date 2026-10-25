@@ -11,6 +11,12 @@ describe("errorCodeOf の分類(不具合の修正工程 第2回)", () => {
 		).toBe("VECTOR_UPSERT_40012");
 	});
 
+	it("Vectorizeの削除の失敗もコード付きで分類する(#44)", () => {
+		expect(
+			errorCodeOf(new Error("VECTOR_DELETE_ERROR (code = 40041): x")),
+		).toBe("VECTOR_DELETE_40041");
+	});
+
 	it("causeのD1の過負荷とその他のD1の失敗を見分ける", () => {
 		const overloaded = new Error("Failed query: delete from intents", {
 			cause: new Error(

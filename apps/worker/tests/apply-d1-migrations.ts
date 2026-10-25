@@ -11,3 +11,10 @@ await applyD1Migrations(
 	envWithMigrations.DB,
 	envWithMigrations.TEST_MIGRATIONS,
 );
+
+// 第1段のupsertのやり直しの待ち(本番は1秒・2秒)は試験では待たない(#44)。
+// やり直し自体の試験は runEmbeddingStage の upsertRetryDelaysMs で個別に指定する
+const { setStage1UpsertRetryDelaysForTest } = await import(
+	"../src/pipeline/consumer"
+);
+setStage1UpsertRetryDelaysForTest([0, 0]);
