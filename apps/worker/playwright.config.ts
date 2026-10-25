@@ -4,7 +4,7 @@
  * (.dev.varsは事前にscripts/prepare-dev-vars.mjsが生成・docs/04 §4のテスト鍵モード)。
  * --localはwrangler.jsoncのAIバインディングが引き起こすリモートプロキシセッション
  * (アカウント認証が必要)を無効化し、全バインディングをローカルエミュレータで完結
- * させるための指定(AGENTS.mdの環境方針・CIではトークン不要)。
+ * させるための指定(CLAUDE.mdの環境方針・CIではトークン不要)。
  * --test-scheduledはCronの強制発火(GET /__scheduled・F3計画Task 14)のための指定で、
  * 付けないとローカルではscheduledハンドラが一度も走らない。
  * clean-e2e-data.mjsは過去回のE2E由来の残置Intentをexpiredへ倒す(パイプラインE2Eの

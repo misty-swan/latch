@@ -37,7 +37,7 @@ export default defineConfig(async () => {
 	return {
 		plugins: [
 			cloudflareTest({
-				// ローカルのminiflareエミュレータで完結させる(アカウント不要・AGENTS.md環境方針)
+				// ローカルのminiflareエミュレータで完結させる(アカウント不要・CLAUDE.md環境方針)
 				remoteBindings: false,
 				wrangler: { configPath: "./wrangler.jsonc" },
 				miniflare: {
