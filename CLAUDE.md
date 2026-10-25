@@ -19,11 +19,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 作業管理(Linear)
 
-- 作業・不具合・オーナーの判断待ちは Linear の LATCH チーム(issueの番号は `LAT-nn`)で管理する。GitHub の issue は新しく作らない(既存の issue は Linear へ移す・2026-10-25 オーナー決定)
+- 作業・不具合・オーナーの判断待ちは Linear の LATCH チーム(issueの番号は `LAT-nn`)で管理する。GitHub の issue は新しく作らない(既存の issue は閉じたものも含めて同じ番号で Linear へ取り込み済み=GitHub の #nn は LAT-nn・2026-10-25 オーナー決定・12 §2 の決定記録(作業の管理))
 - 工程は Project(F9・F10・不具合の修正工程(第N回)・時期未定の作業など)。02 §4 の受け入れ条件は Project「v1.0 受け入れ条件(02 §4)」に1条件1 issue
 - ラベル: `オーナー作業`(オーナーが手を動かす)・`オーナー判断`(オーナーが決める・未決のD-IDを含む)・`オーナー確認待ち`(直した後にオーナーの確認で閉じる)・`受け入れ条件`
 - 見つけた不具合はその場で直さず LAT に登録し、出し切ってから修正工程でまとめて直す
-- 文書・コミットの「issue #nn」は GitHub の旧番号(Linear の取り込み元のリンクでたどれる)。新しいものは「LAT-nn」と書く
+- 文書・コミットの「issue #nn」は GitHub の旧番号で、LAT-nn と同じ番号。新しいものは「LAT-nn」と書く
+- 02 §4 の未了は「受け入れ条件」ラベルで絞る。オーナーへの依頼は担当者をオーナーにし、`オーナー作業`/`オーナー判断` を付ける
 - 工程を終えたら docs(12 §2・02 §4 など)の記録に加えて、Linear の Project と issue の状態を更新する
 - 仕様・計画・設計の本文は Linear に写さず、docs へのリンクを張る
 - 操作は Orca CLI(`orca linear …`・Linux では `~/.config/orca/linux-orca-cli-shim/orca`)か Linear の MCP。チームの作成と GitHub からの取り込みは Linear の画面でしかできない
