@@ -7,8 +7,9 @@
 import { and, inArray, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { matchCandidates } from "../db/schema";
+import { intents, matchCandidates } from "../db/schema";
 import type { JevAxes } from "../llm/types";
+import { errorCodeOf } from "./errors";
 import { intentPairKey } from "./group";
 
 /** 候補upsertの分割幅(13列×7行=91バインド・D1の上限100対策) */
@@ -43,7 +44,7 @@ interface SavedRow {
  * 行をupsertし、UNIQUEキーで読み直した実際の行id(衝突時は既存行のid)と
  * jev_resultを返す。戻り値のキーはintentPairKey(intentAId, intentBId)
  */
-export const upsertCandidateRows = async (
+const upsertAndReadRows = async (
 	db: DrizzleD1Database,
 	rows: (typeof matchCandidates.$inferInsert)[],
 	now: Date,
@@ -121,4 +122,57 @@ export const upsertCandidateRows = async (
 		}
 	}
 	return out;
+};
+
+/** エラー(causeを含む)のメッセージに外部キー違反の語があるか。中身は返さない */
+const isForeignKeyViolation = (error: unknown): boolean => {
+	if (errorCodeOf(error) !== "D1_CONSTRAINT") {
+		return false;
+	}
+	let node: unknown = error;
+	for (let i = 0; i < 4 && node instanceof Error; i += 1) {
+		if (/FOREIGN KEY/i.test(node.message)) {
+			return true;
+		}
+		node = node.cause;
+	}
+	return false;
+};
+
+/** IN句の分割幅(100バインドの上限対策) */
+const EXISTENCE_CHUNK_SIZE = 90;
+
+/**
+ * 行をupsertし、実際の行idとjev_resultを返す。評価がLayer 1で読んだ後に相手の意思が
+ * 削除されると、その相手を含む行が外部キー違反になりバッチ全体が失敗する(#43)。
+ * その場合だけ、D1に行の無い意思を含む行を除いて1回だけやり直す(除いた行は戻り値に入らない)。
+ * やり直しも失敗したら例外を外へ出す。UNIQUE衝突はON CONFLICTで処理済みのため対象外
+ */
+export const upsertCandidateRows = async (
+	db: DrizzleD1Database,
+	rows: (typeof matchCandidates.$inferInsert)[],
+	now: Date,
+): Promise<Map<string, { id: string; jevResult: JevAxes | null }>> => {
+	try {
+		return await upsertAndReadRows(db, rows, now);
+	} catch (error) {
+		if (!isForeignKeyViolation(error)) {
+			throw error;
+		}
+		const ids = [...new Set(rows.flatMap((r) => [r.intentAId, r.intentBId]))];
+		const existing = new Set<string>();
+		for (let i = 0; i < ids.length; i += EXISTENCE_CHUNK_SIZE) {
+			const found = await db
+				.select({ id: intents.id })
+				.from(intents)
+				.where(inArray(intents.id, ids.slice(i, i + EXISTENCE_CHUNK_SIZE)));
+			for (const f of found) {
+				existing.add(f.id);
+			}
+		}
+		const kept = rows.filter(
+			(r) => existing.has(r.intentAId) && existing.has(r.intentBId),
+		);
+		return await upsertAndReadRows(db, kept, now);
+	}
 };

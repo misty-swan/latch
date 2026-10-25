@@ -340,16 +340,6 @@ export const evaluateIntent = async (
 		intent.userId,
 		retrieved.map((hit) => hit.id),
 	);
-	// 孤立したベクトルの自己修復(#20・設計 §5.2): Layer 1が読んだ結果にD1の行が無いhitは、
-	// 削除の後に残ったベクトル(意思の行は必ずベクトルより先に作られる)。追加の照会はせず、
-	// 1回の評価でORPHAN_DELETE_MAX件まで消す。行のあるhit(反映待ち・paused等)は消さない
-	await deleteOrphanVectors(
-		store,
-		retrieved
-			.map((hit) => hit.id)
-			.filter((id) => l1.intents[id] === undefined)
-			.slice(0, PIPELINE.ORPHAN_DELETE_MAX),
-	);
 	const exclusions: Record<string, number> = {};
 	const passed: { id: string; score: number; candidate: IntentRow }[] = [];
 	for (const hit of retrieved) {
@@ -449,6 +439,18 @@ export const evaluateIntent = async (
 			now,
 		),
 	]);
+	// 孤立したベクトルの自己修復(#20・設計 §5.2): Layer 1が読んだ結果にD1の行が無いhitは、
+	// 削除の後に残ったベクトル(意思の行は必ずベクトルより先に作られる)。
+	// 候補行の保存の後に消す(#43): 評価の途中で相手が削除された競り合いでは、先にベクトルを
+	// 消すと保存側の外部キー違反の原因調査と混ざるため、保存が終わってから後始末する。追加の照会はせず、
+	// 1回の評価でORPHAN_DELETE_MAX件まで消す。行のあるhit(反映待ち・paused等)は消さない
+	await deleteOrphanVectors(
+		store,
+		retrieved
+			.map((hit) => hit.id)
+			.filter((id) => l1.intents[id] === undefined)
+			.slice(0, PIPELINE.ORPHAN_DELETE_MAX),
+	);
 	// 1対1の対象(F4b設計 §2.1・§2.4の1): 履歴で除外されず、人数2が双方の区間に
 	// 入る候補をLayer 3降順のまま。人数条件の不合格はJevの枠を使わない
 	const oneOnOne = new Map<string, { rowId: string; other: IntentRow }>();
