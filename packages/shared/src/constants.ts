@@ -273,6 +273,9 @@ export const PIPELINE = {
 	ORPHAN_DELETE_MAX: 10,
 	// Cron各処理の1実行あたり処理上限。docs/04 §4
 	CRON_BATCH_LIMIT: 500,
+	// 直近のベクトルの控え(recent_vectors)を残す埋め込みからの経過(15分・#47)。
+	// 反映確認の打ち切り(REFLECTION_GIVE_UP_MS・8分)より長い余裕。過ぎた行は毎分Cronの保持期間の処理で消す
+	RECENT_VECTOR_TTL_MS: 15 * 60_000,
 } as const;
 
 /**

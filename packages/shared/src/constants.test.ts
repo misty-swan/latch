@@ -127,6 +127,8 @@ describe("PIPELINE", () => {
 			INLINE_FALLBACK_DELAY_S: 60,
 			ORPHAN_DELETE_MAX: 10,
 			CRON_BATCH_LIMIT: 500,
+			// 直近のベクトルの控えを残す経過(15分・#47)
+			RECENT_VECTOR_TTL_MS: 15 * 60_000,
 		});
 	});
 

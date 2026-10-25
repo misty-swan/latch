@@ -35,6 +35,7 @@ import { evaluateIntent, stage2Payload } from "./evaluate";
 import { emitMatchEvent, recordMatchEvent, sendToMatchQueue } from "./events";
 import { createMetricsBudget, type MetricsBudget } from "./metrics-budget";
 import { buildNormalizedText } from "./normalize";
+import { saveRecentVector } from "./recent-vectors";
 import { consumeReflectionEvent, type MatchEventRow } from "./reflection";
 
 const logger = createLogger();
@@ -257,9 +258,10 @@ export const runEmbeddingStage = async (
 		layer = "d1";
 		const db = drizzle(env.DB);
 		// embedded_atは埋め込んだ版のときだけ書く(upsertの間に版が上がったら書かずに止める)
+		const embeddedAt = clock.now();
 		const updated = await db
 			.update(intents)
-			.set({ embeddingModel: embedder.modelId, embeddedAt: clock.now() })
+			.set({ embeddingModel: embedder.modelId, embeddedAt })
 			.where(
 				and(eq(intents.id, intent.id), eq(intents.version, intent.version)),
 			)
@@ -268,6 +270,10 @@ export const runEmbeddingStage = async (
 			logStage1Skipped(intent.id, source);
 			return { status: "gone" };
 		}
+		// 直近のベクトルの控え(#47)。Layer 2 Candidate Retrievalの照会の見落としを補うため、
+		// embedded_atと同じ時刻・同じベクトルでD1にも書く(同じ意思は上書き)。バックフィルも
+		// この本体を通るため同じく書かれる。失敗は例外にならずログだけ(第1段は成功のまま進む)
+		await saveRecentVector(env.DB, intent.id, embeddedAt, values);
 		layer = "emit";
 		// キューの経路(embedding_completedの行を作る)だけが、投入の失敗をretryで
 		// やり直せる。Cronの経路はvector_reflectionの失敗をログだけにする

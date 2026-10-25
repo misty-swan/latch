@@ -7,6 +7,7 @@ import rollback0005Sql from "../migrations_rollback/0005_rollback.sql?raw";
 import rollback0006Sql from "../migrations_rollback/0006_rollback.sql?raw";
 import rollback0007Sql from "../migrations_rollback/0007_rollback.sql?raw";
 import rollback0008Sql from "../migrations_rollback/0008_rollback.sql?raw";
+import rollback0009Sql from "../migrations_rollback/0009_rollback.sql?raw";
 
 /**
  * マイグレーション適用結果の検証。
@@ -369,4 +370,39 @@ it("戻しマイグレーション0008の適用でmatch_eventsの2索引が消�
 	const indexes = await indexNamesOf("match_events");
 	expect(indexes).not.toContain("match_events_source_intent_id_idx");
 	expect(indexes).not.toContain("match_events_status_created_at_idx");
+});
+
+it("0009適用後、recent_vectors(intent_id主キー・embedded_at・vector BLOB・intentsへのON DELETE CASCADE)とembedded_atの索引がある(#47)", async () => {
+	const cols = await columnsOf("recent_vectors");
+	expect(cols.map((c) => c.name)).toEqual([
+		"intent_id",
+		"embedded_at",
+		"vector",
+	]);
+	expect(cols.find((c) => c.name === "embedded_at")?.notnull).toBe(1);
+	expect(cols.find((c) => c.name === "vector")?.notnull).toBe(1);
+	const fks = await env.DB.prepare(
+		"PRAGMA foreign_key_list(recent_vectors)",
+	).all<{ table: string; from: string; to: string; on_delete: string }>();
+	expect(fks.results).toEqual([
+		expect.objectContaining({
+			table: "intents",
+			from: "intent_id",
+			to: "id",
+			on_delete: "CASCADE",
+		}),
+	]);
+	expect(await indexNamesOf("recent_vectors")).toContain(
+		"recent_vectors_embedded_at_idx",
+	);
+});
+
+it("戻しマイグレーション0009の適用でrecent_vectorsの表と索引が消える(docs/11 §3の対マイグレーション)", async () => {
+	for (const statement of toStatements(rollback0009Sql)) {
+		await env.DB.prepare(statement).run();
+	}
+	const row = await env.DB.prepare(
+		"SELECT count(*) AS n FROM sqlite_master WHERE name IN ('recent_vectors', 'recent_vectors_embedded_at_idx')",
+	).first<{ n: number }>();
+	expect(row?.n).toBe(0);
 });

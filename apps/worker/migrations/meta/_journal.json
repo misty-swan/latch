@@ -64,6 +64,13 @@
       "when": 1792745620276,
       "tag": "0008_match_events_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1792889860359,
+      "tag": "0009_recent_vectors",
+      "breakpoints": true
     }
   ]
 }

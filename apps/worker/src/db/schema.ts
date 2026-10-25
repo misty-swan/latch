@@ -9,7 +9,8 @@
  * - 論理値 = integer boolean / JSON = text json-mode
  * - 列挙 = text + $type<union>(CHECK制約は付けない・検証はZod層=packages/shared)
  * - FKは docs/05 §2.2の「FK」表記どおり references() を付け、ON DELETE は付けない
- *   (削除は常にアプリ層の明示操作・docs/05 §2.5)
+ *   (削除は常にアプリ層の明示操作・docs/05 §2.5)。例外はrecent_vectors(意思の削除で
+ *   一緒に消える控えのためON DELETE CASCADE・#47)
  */
 import type {
 	AuthProvider,
@@ -24,6 +25,7 @@ import type {
 	PushState,
 } from "@latch/shared";
 import {
+	blob,
 	index,
 	integer,
 	primaryKey,
@@ -631,4 +633,24 @@ export const geofeatures = sqliteTable(
 		gridKey: text("grid_key").notNull(),
 	},
 	(t) => [index("geofeatures_grid_key_idx").on(t.gridKey)],
+);
+
+/**
+ * 直近のベクトルの控え(#47・設計 2026-10-25 §1.2)。Layer 2 Candidate Retrievalの照会が
+ * 古い状態を返したときに、埋め込みから15分以内の意思を補うためにD1にも控える。
+ * 1つの意思に1行(新しい埋め込みで上書き)。formとstatusは持たず、評価の照会でintentsと結合して絞る。
+ * 意思の削除で一緒に消える(ON DELETE CASCADE)。15分を過ぎた行は毎分Cronの保持期間の処理で消す
+ */
+export const recentVectors = sqliteTable(
+	"recent_vectors",
+	{
+		intentId: text("intent_id", { length: 26 })
+			.primaryKey()
+			.references(() => intents.id, { onDelete: "cascade" }),
+		/** 埋め込みの時刻(intents.embedded_atと同じ値) */
+		embeddedAt: integer("embedded_at", { mode: "timestamp_ms" }).notNull(),
+		/** 埋め込みのベクトル(float32の並び・bge-m3は1,024次元で約4KB) */
+		vector: blob("vector", { mode: "buffer" }).notNull(),
+	},
+	(t) => [index("recent_vectors_embedded_at_idx").on(t.embeddedAt)],
 );

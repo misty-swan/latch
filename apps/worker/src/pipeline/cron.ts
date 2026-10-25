@@ -65,6 +65,7 @@ import { type IntentRow, runEmbeddingStage } from "./consumer";
 import { errorCodeOf } from "./errors";
 import { evaluateIntent } from "./evaluate";
 import { createMetricsBudget, type MetricsBudget } from "./metrics-budget";
+import { deleteExpiredRecentVectors } from "./recent-vectors";
 
 const logger = createLogger();
 
@@ -698,6 +699,14 @@ const runRetentionSweep = async (env: Env, clock: Clock): Promise<void> => {
 		(counterResult.meta.changes ?? 0);
 	if (deleted > 0) {
 		logger.info("cron.retention.deleted", { count: deleted });
+	}
+	// 直近のベクトルの控え(#47)は埋め込みから15分で消す。行数は15分間に埋め込んだ意思の数で
+	// 上限づけられるため一括で削除する(上の件数と分けて数える)
+	const recentDeleted = await deleteExpiredRecentVectors(env.DB, clock.now());
+	if (recentDeleted > 0) {
+		logger.info("cron.retention.recent_vectors_deleted", {
+			count: recentDeleted,
+		});
 	}
 };
 
