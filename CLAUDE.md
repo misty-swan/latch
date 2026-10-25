@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - 文書駆動開発。`docs/`(00〜12)が製品仕様の正本。工程とゲートは docs/12 §2、受け入れ条件は 02 §4 の #1〜#35
 - 完了した工程: F0〜F8b(F4・F6・F7・F8は分割して実施)・不具合の修正工程(第1〜4回)・LLM real接続(精度ゲート合格・stagingは `LATCH_LLM_MODE=real`)。各工程の内容と決定は docs/12 §2 と 01 冒頭の決定記録、計画と設計は `docs/superpowers/plans`・`specs`
-- 進行中: なし(次は新しい不具合の修正工程(LAT-98〜LAT-102)の後に02 #33を測り直す。第4回の設計は `docs/superpowers/specs/2026-10-25-bugfix-phase4-design.md`)
+- 進行中: 不具合の修正工程(第5回・LAT-98〜LAT-102・LinearのProject「不具合の修正工程(第5回)」)。直し方の合意は docs/12 §2 の決定記録(不具合の修正工程(第5回))。修正の後に02 #33を測り直す
 - この後: F9 品質確立(02 #34・#35)→ F10 公開準備(法務確認・本番IdP(Google/Apple)・本番VAPID鍵・prodのreal化とAccessの扱い)
 - 02 §4 の未了: #31(規約の草案は配置済み・弁護士等の法務確認は現時点で行わずF10の前に扱いを判断)・#32(実機確認のオーナーの記録待ち)・#33(完了ではない・real接続で計測済み・(d)の通知が目標外=LAT-98)・#34・#35
 - F3は未決D-C-01/D-C-02を暫定案(K_v=50・0.7/0.3)で着手済み(調整は運用データ後・06 §8)
