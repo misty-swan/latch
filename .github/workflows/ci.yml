@@ -8,6 +8,8 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    # 試験が止まったときに既定の6時間まで待たない(普段は約7分・2026-10-25に約3時間40分止まった前例)
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4 # versionはpackage.jsonのpackageManagerフィールドから自動参照
@@ -31,6 +33,8 @@ jobs:
   # 既定ポートも分離している(web=8788・worker=8787・LATCH_E2E_PORTで上書き可)
   web-e2e:
     runs-on: ubuntu-latest
+    # 普段は約2〜3分(chromiumの取得を含む)。止まったときの損失を抑える
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4

@@ -466,19 +466,29 @@ intentRoutes.post("/parse", requireRegistered, async (c) => {
  * 条件を満たさなければ0行で、同じ利用者の同時作成でも上限を超えない。
  * 返った行が無ければ undefined(上限到達)
  */
-const insertIntentIfUnderActiveLimit = async (
-	d1: D1Database,
-	insertQuery: { toSQL(): { sql: string; params: unknown[] } },
-	userId: string,
-): Promise<typeof intents.$inferSelect | undefined> => {
-	const { sql: text, params } = insertQuery.toSQL();
+/**
+ * drizzleの挿入のSQL(`insert into … values (…) returning …`)を、上限の確認付きの
+ * `insert into … select … where (参加中activeの数) < 上限 returning …` に書き換える。
+ * 引数は元の並びの後ろに利用者のid(?)が1つ加わる。形が合わなければ例外を投げる
+ * (drizzleの版の更新でSQLの形が変わったときは単体試験 tests/intents-active-insert-sql.test.ts が落ちる)
+ */
+export const toActiveLimitedInsertSql = (text: string): string => {
 	const m = /^(insert into [^)]*\)) values \((.*)\) (returning .*)$/is.exec(
 		text,
 	);
 	if (m === null) {
 		throw new Error("insert文の形が想定と違います");
 	}
-	const conditional = `${m[1]} select ${m[2]} where (select count(*) from "intents" where "user_id" = ? and "status" = 'active') < ${LIMITS.ACTIVE_INTENTS_PER_USER} ${m[3]}`;
+	return `${m[1]} select ${m[2]} where (select count(*) from "intents" where "user_id" = ? and "status" = 'active') < ${LIMITS.ACTIVE_INTENTS_PER_USER} ${m[3]}`;
+};
+
+const insertIntentIfUnderActiveLimit = async (
+	d1: D1Database,
+	insertQuery: { toSQL(): { sql: string; params: unknown[] } },
+	userId: string,
+): Promise<typeof intents.$inferSelect | undefined> => {
+	const { sql: text, params } = insertQuery.toSQL();
+	const conditional = toActiveLimitedInsertSql(text);
 	const { results } = await d1
 		.prepare(conditional)
 		.bind(...params, userId)

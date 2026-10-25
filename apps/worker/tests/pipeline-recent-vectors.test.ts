@@ -4,7 +4,8 @@
  * - 同じintent_idの上書き・意思の削除でのCASCADE・15分を過ぎた行の削除
  * - 第1段の成功の後に控えが書かれ、embedded_atが意思の行と等しい
  * - 書き込みの失敗は例外を外へ出さない(第1段の失敗にしない)
- * - 評価での補い: 控えの読み込み(loadRecentVectors)と照会の結果への混ぜ込み(mergeSupplement)
+ * - 評価での補い: 控えの読み込み(loadRecentVectorRefs→照会の結果に無いidだけloadRecentVectorValues)と
+ *   照会の結果への混ぜ込み(mergeSupplement)
  * 時刻はfixedClockで固定し、意思の行は直接投入する。
  */
 
@@ -28,8 +29,10 @@ import {
 	decodeVector,
 	deleteExpiredRecentVectors,
 	encodeVector,
-	loadRecentVectors,
+	loadRecentVectorRefs,
+	loadRecentVectorValues,
 	mergeSupplement,
+	refsMissingFromHits,
 	saveRecentVector,
 } from "../src/pipeline/recent-vectors";
 import { cosineSimilarity } from "../src/vectorstore/similarity";
@@ -289,7 +292,7 @@ describe("mergeSupplement(照会の結果への補いの混ぜ込み)", () => {
 	});
 });
 
-describe("loadRecentVectors(控えの読み込み)", () => {
+describe("loadRecentVectorRefs・loadRecentVectorValues(控えの読み込み)", () => {
 	it("同じform・active・15分以内・自分以外・現在の版の埋め込みを、新しい順にlimit件まで読む", async () => {
 		const now = clock.now().getTime();
 		const self = await seedIntent();
@@ -340,23 +343,71 @@ describe("loadRecentVectors(控えの読み込み)", () => {
 		await saveCurrent(reembedded, at(1_000), sampleVector(9));
 		await saveRecentVector(testEnv.DB, reembedded, at(2_000), sampleVector(9));
 
-		const all = await loadRecentVectors(testEnv.DB, {
+		const refs = await loadRecentVectorRefs(testEnv.DB, {
 			form: "connection",
 			selfId: self,
 			now: clock.now(),
 			limit: 50,
 		});
+		expect(refs.map((r) => r.id)).toEqual([newer, older, third, edge]);
+		// 1回目はベクトルを読まない(idと時刻だけ)
+		expect(Object.keys(refs[0] ?? {}).sort()).toEqual(["embeddedAt", "id"]);
+		const all = await loadRecentVectorValues(testEnv.DB, refs);
 		expect(all.map((r) => r.id)).toEqual([newer, older, third, edge]);
 		expect(all[0]?.values).toEqual(
 			Array.from(Float32Array.from(sampleVector(2))),
 		);
 
-		const limited = await loadRecentVectors(testEnv.DB, {
+		const limited = await loadRecentVectorRefs(testEnv.DB, {
 			form: "connection",
 			selfId: self,
 			now: clock.now(),
 			limit: 2,
 		});
 		expect(limited.map((r) => r.id)).toEqual([newer, older]);
+	});
+
+	it("loadRecentVectorValuesは1回目の後に上書き・削除された行を返さず、refsの順で返す", async () => {
+		const now = clock.now().getTime();
+		const a = await seedIntent();
+		const b = await seedIntent();
+		const c = await seedIntent();
+		const at = new Date(now - 10_000);
+		await saveRecentVector(testEnv.DB, a, at, sampleVector(1));
+		await saveRecentVector(testEnv.DB, b, at, sampleVector(2));
+		await saveRecentVector(testEnv.DB, c, at, sampleVector(3));
+		// bは1回目の後に埋め込み直された(時刻が変わった)・cは消えた
+		await saveRecentVector(testEnv.DB, b, clock.now(), sampleVector(4));
+		await db.delete(recentVectors).where(eq(recentVectors.intentId, c));
+		const values = await loadRecentVectorValues(testEnv.DB, [
+			{ id: c, embeddedAt: at },
+			{ id: b, embeddedAt: at },
+			{ id: a, embeddedAt: at },
+		]);
+		expect(values.map((v) => v.id)).toEqual([a]);
+	});
+
+	it("loadRecentVectorValuesはrefsが空ならD1を読まない", async () => {
+		const throwing = {
+			prepare: () => {
+				throw new Error("読んではいけない");
+			},
+		} as unknown as D1Database;
+		await expect(loadRecentVectorValues(throwing, [])).resolves.toEqual([]);
+	});
+
+	it("refsMissingFromHitsは照会の結果に無い候補だけを順のまま返す", () => {
+		const at = clock.now();
+		const refs = [
+			{ id: "A", embeddedAt: at },
+			{ id: "B", embeddedAt: at },
+			{ id: "C", embeddedAt: at },
+		];
+		expect(
+			refsMissingFromHits(refs, [{ id: "B" }, { id: "X" }]).map((r) => r.id),
+		).toEqual(["A", "C"]);
+		expect(
+			refsMissingFromHits(refs, [{ id: "A" }, { id: "B" }, { id: "C" }]),
+		).toEqual([]);
 	});
 });

@@ -422,6 +422,9 @@ const repairVectorMetadata = async (env: Env, clock: Clock): Promise<void> => {
 					const stage = await runEmbeddingStage(env, row, clock, {
 						emitCompleted: false,
 						source: "repair",
+						// upsertのやり直しの待ち(#44)は応答の後の第1段のためのもの。Cronでは待たずに
+						// 次の分に回し、後ろの走査を押さない
+						upsertRetryDelaysMs: [],
 					});
 					if (stage.status === "embedded") {
 						recovered += 1;
@@ -509,6 +512,9 @@ const runBackfillSweep = async (
 			const stage = await runEmbeddingStage(env, row, clock, {
 				emitCompleted: false,
 				source: "backfill",
+				// upsertのやり直しの待ち(#44)は応答の後の第1段のためのもの。Cronでは待たずに
+				// 次の分に回し、後ろの走査を押さない
+				upsertRetryDelaysMs: [],
 			});
 			// 埋め込みの間に削除・一時停止・版の更新があった意思は書かずに止めた(失敗に数えない・#20)
 			if (stage.status === "gone") {

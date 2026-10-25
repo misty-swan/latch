@@ -3,11 +3,12 @@
  * Layer 2 Candidate Retrievalの照会(Vectorize)が古い状態を返して相手を見落とすことがあるため、
  * 新しく計算した埋め込みを15分(PIPELINE.RECENT_VECTOR_TTL_MS)だけD1にも控える。
  * ベクトルはfloat32の並び(リトルエンディアン・1,024次元で4,096バイト)のBLOBで持つ。
- * 評価(evaluate.ts)はLayer 2 Candidate Retrievalの照会の直後に控えを読み(loadRecentVectors)、
- * 照会の結果に無い相手だけを類似度で混ぜる(mergeSupplement・設計 §1.4)。
+ * 評価(evaluate.ts)はLayer 2 Candidate Retrievalの照会と同時に控えのidと時刻だけを読み
+ * (loadRecentVectorRefs)、照会の結果に無い相手があるときだけそのベクトルを読んで
+ * (loadRecentVectorValues)、類似度で混ぜる(mergeSupplement・設計 §1.4)。
  */
 import { PIPELINE } from "@latch/shared";
-import { and, desc, eq, gte, lt, ne } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { intents, recentVectors } from "../db/schema";
 import { createLogger } from "../logging/logger";
@@ -71,14 +72,22 @@ export const deleteExpiredRecentVectors = async (
 	return result.meta.changes ?? 0;
 };
 
+/** 控えの行の識別(意思のidと控えの埋め込みの時刻) */
+export interface RecentVectorRef {
+	id: string;
+	embeddedAt: Date;
+}
+
 /**
- * 評価で補う控えを読む(設計 §1.4の1)。intentsと結合し、起点と同じform・status='active'・
+ * 評価で補う控えの候補を読む(設計 §1.4の1)。intentsと結合し、起点と同じform・status='active'・
  * 埋め込みから15分以内(embedded_at ≥ now − RECENT_VECTOR_TTL_MS)・自分以外で、控えの embedded_at が
  * intents.embedded_at と等しい(現在の版の埋め込みである)行を、
- * 埋め込みの新しい順にlimit件まで返す。照会の結果との重複はmergeSupplementが除く。
+ * 埋め込みの新しい順にlimit件まで返す。ベクトル(BLOB)は読まない: D1のJSのAPIはBLOBを数値の配列で
+ * 返すため1行で約15KBになり、照会の結果に既にある相手(普段はほぼ全部)の分まで毎回読むと
+ * 通信が評価1回あたり約0.75MBになる。ベクトルは照会の結果に無いidだけをloadRecentVectorValuesで読む。
  * 例外はそのまま投げる(呼び出し側が補いなしで続ける)
  */
-export const loadRecentVectors = async (
+export const loadRecentVectorRefs = async (
 	db: D1Database,
 	opts: {
 		form: NonNullable<(typeof intents.$inferSelect)["form"]>;
@@ -86,10 +95,13 @@ export const loadRecentVectors = async (
 		now: Date;
 		limit: number;
 	},
-): Promise<{ id: string; values: number[] }[]> => {
+): Promise<RecentVectorRef[]> => {
 	const cutoff = new Date(opts.now.getTime() - PIPELINE.RECENT_VECTOR_TTL_MS);
-	const rows = await drizzle(db)
-		.select({ id: recentVectors.intentId, vector: recentVectors.vector })
+	return drizzle(db)
+		.select({
+			id: recentVectors.intentId,
+			embeddedAt: recentVectors.embeddedAt,
+		})
 		.from(recentVectors)
 		.innerJoin(intents, eq(intents.id, recentVectors.intentId))
 		.where(
@@ -105,7 +117,62 @@ export const loadRecentVectors = async (
 		)
 		.orderBy(desc(recentVectors.embeddedAt), recentVectors.intentId)
 		.limit(opts.limit);
-	return rows.map((row) => ({ id: row.id, values: decodeVector(row.vector) }));
+};
+
+/** 照会の結果(hits)に無い控えの候補だけを、候補の並び(新しい順)のまま返す */
+export const refsMissingFromHits = (
+	refs: RecentVectorRef[],
+	hits: { id: string }[],
+): RecentVectorRef[] => {
+	const seen = new Set(hits.map((hit) => hit.id));
+	return refs.filter((ref) => !seen.has(ref.id));
+};
+
+/** in句の幅(D1の照会のチャンク化の慣習・docs/06 §3の100件チャンク) */
+const VALUE_CHUNK = 100;
+
+/**
+ * 控えの候補(refs)のベクトルを読む(2回目の読み込み)。1回目の後に控えが上書きされた行
+ * (embedded_atが変わった行)と消えた行は返さない。並びはrefsの順。refsが空ならD1を読まない。
+ * 例外はそのまま投げる(呼び出し側が補いなしで続ける)
+ */
+export const loadRecentVectorValues = async (
+	db: D1Database,
+	refs: RecentVectorRef[],
+): Promise<{ id: string; values: number[] }[]> => {
+	if (refs.length === 0) {
+		return [];
+	}
+	const ids = refs.map((ref) => ref.id);
+	const chunks: string[][] = [];
+	for (let i = 0; i < ids.length; i += VALUE_CHUNK) {
+		chunks.push(ids.slice(i, i + VALUE_CHUNK));
+	}
+	const results = await Promise.all(
+		chunks.map((chunk) =>
+			drizzle(db)
+				.select({
+					id: recentVectors.intentId,
+					embeddedAt: recentVectors.embeddedAt,
+					vector: recentVectors.vector,
+				})
+				.from(recentVectors)
+				.where(inArray(recentVectors.intentId, chunk)),
+		),
+	);
+	const byId = new Map(results.flat().map((row) => [row.id, row]));
+	const out: { id: string; values: number[] }[] = [];
+	for (const ref of refs) {
+		const row = byId.get(ref.id);
+		if (
+			row === undefined ||
+			row.embeddedAt.getTime() !== ref.embeddedAt.getTime()
+		) {
+			continue;
+		}
+		out.push({ id: ref.id, values: decodeVector(row.vector) });
+	}
+	return out;
 };
 
 /** score降順・同点はid昇順(evaluate.ts・インメモリVectorStoreと同じ規律) */

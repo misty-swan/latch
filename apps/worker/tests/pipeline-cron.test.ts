@@ -578,7 +578,8 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 			PIPELINE.METRICS_WRITES_PER_INVOCATION - 2,
 		);
 		expect(logsOf(logSpy, "pipeline.metrics.skipped")).toHaveLength(1);
-	});
+		// 130件を評価するため、並行の試験と重なると既定の5秒の打ち切りに近づく(M7)
+	}, 20_000);
 
 	it("計測の残り(#28): 評価の計測で残りを使い切っても、予算アラートのdata pointは書く", async () => {
 		const day = jstDayKey(FIXED_NOW);
@@ -618,7 +619,8 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 		expect(writeDataPoint.mock.calls.length).toBeLessThanOrEqual(
 			PIPELINE.METRICS_WRITES_PER_INVOCATION,
 		);
-	});
+		// 130件を評価するため、明示の打ち切りを長めにする(M7)
+	}, 20_000);
 
 	it("遅延再評価: つながりを10分経過後に1回だけ再評価する(2度目は実行しない)", async () => {
 		const userId = ulid();
@@ -1559,8 +1561,8 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 
 		await runScheduledPipeline(testEnv, directClock);
 
-		// 1件ごとにupsertを最初+やり直し2回の計3回試す(#44)
-		expect(upsertSpy).toHaveBeenCalledTimes(LATCH.BACKFILL_FAILURE_ABORT * 3);
+		// Cronの経路はupsertのやり直し(#44)をせず、1件ごとに1回だけ試す
+		expect(upsertSpy).toHaveBeenCalledTimes(LATCH.BACKFILL_FAILURE_ABORT);
 		expect(logsOf(logSpy, "cron.backfill.aborted")).toEqual([
 			{
 				level: "warn",
@@ -1576,13 +1578,13 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 		const original = store.upsert.bind(store);
 		let calls = 0;
 		// 4件失敗 → 1件成功 → 以降は失敗。成功で連続数が0に戻るため、
-		// 打ち切りは成功の後の5件目(通算10件目)になる。1件ごとに最大3回試すので
-		// 4件の失敗は12回・成功は13回目・以降の5件の失敗は15回(計28回・#44)
+		// 打ち切りは成功の後の5件目(通算10件目)になる。Cronの経路はupsertのやり直し(#44)を
+		// しないので1件1回(計10回)
 		const upsertSpy = vi
 			.spyOn(store, "upsert")
 			.mockImplementation(async (vectors) => {
 				calls += 1;
-				if (calls === 13) {
+				if (calls === 5) {
 					return original(vectors);
 				}
 				throw new Error("UPSERT_FAILED: 試験用の失敗");
@@ -1591,11 +1593,36 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 
 		await runScheduledPipeline(testEnv, directClock);
 
-		expect(upsertSpy).toHaveBeenCalledTimes(28);
+		expect(upsertSpy).toHaveBeenCalledTimes(10);
 		// count=打ち切り時点までの当回の失敗件数(4+5)
 		expect(logsOf(logSpy, "cron.backfill.aborted")).toEqual([
 			{ level: "warn", event: "cron.backfill.aborted", count: 9 },
 		]);
+	});
+
+	it("修復(埋め込み直し): Cronの経路はupsertのやり直しの待ちをせず、失敗したら次の分に回す(#44)", async () => {
+		const userId = ulid();
+		await insertUserRow(userId);
+		const lost = intentFixture({
+			id: ulid(),
+			userId,
+			topic: "修復でupsertが失敗する学習仲間",
+			embeddedAt: new Date(BASE - 11 * MIN),
+			lastEvaluatedAt: new Date(BASE - 31 * MIN),
+		});
+		await insertIntentRow(lost);
+		const upsertSpy = vi
+			.spyOn(memoryVectorStore(), "upsert")
+			.mockRejectedValue(new Error("UPSERT_FAILED: 試験用の失敗"));
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		await runScheduledPipeline(testEnv, directClock);
+
+		expect(upsertSpy).toHaveBeenCalledTimes(1);
+		expect(logsOf(logSpy, "pipeline.stage1.failed")).toEqual([
+			expect.objectContaining({ intent_id: lost.id, layer: "upsert" }),
+		]);
+		expect(logsOf(logSpy, "cron.recovered")).toEqual([]);
 	});
 });
 

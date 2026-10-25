@@ -45,7 +45,12 @@ import { type L4Candidate, runLayer4 } from "./layer4";
 import { type L5Item, latchScore, pickProposals, recheckHard } from "./layer5";
 import { type EvaluateOrigin, writeStage2Metrics } from "./metrics";
 import { createMetricsBudget, type MetricsBudget } from "./metrics-budget";
-import { loadRecentVectors, mergeSupplement } from "./recent-vectors";
+import {
+	loadRecentVectorRefs,
+	loadRecentVectorValues,
+	mergeSupplement,
+	refsMissingFromHits,
+} from "./recent-vectors";
 
 const logger = createLogger();
 
@@ -295,21 +300,23 @@ export const evaluateIntent = async (
 	// 返して相手を見落とすことがあるため、15分以内に埋め込んだ同じformのactiveの意思を控えから読み、
 	// 照会の結果に無いものだけを類似度で混ぜてtopKで切る。以降は合わせた結果を従来どおり使う。
 	// 補った行はD1に意思の行があるため、孤立したベクトルの自己修復の対象にならない。
-	// 控えの読み込み(D1)は照会と同時に投げ、直列の待ちを増やさない(#36)。
+	// 控えのidと時刻の読み込み(D1)は照会と同時に投げ、直列の待ちを増やさない(#36)。
+	// ベクトルは照会の結果に無いidがあるときだけ2回目に読む(通信を数KBに抑える)。
 	// 読み込みの失敗は補いなしで続ける(従来の動作に戻るだけ)
-	const recentPromise = loadRecentVectors(env.DB, {
-		form,
-		selfId: intentId,
-		now,
-		limit: PIPELINE.RECENT_VECTOR_SUPPLEMENT_MAX,
-	}).catch((error: unknown) => {
+	const recentLoadFailed = (error: unknown) => {
 		logger.warn("pipeline.recent_vector.failed", {
 			intent_id: intentId,
 			layer: "load",
 			error_code: errorCodeOf(error),
 		});
 		return [];
-	});
+	};
+	const refsPromise = loadRecentVectorRefs(env.DB, {
+		form,
+		selfId: intentId,
+		now,
+		limit: PIPELINE.RECENT_VECTOR_SUPPLEMENT_MAX,
+	}).catch(recentLoadFailed);
 	// Layer 2 Candidate Retrieval(docs/06 §3): filter={form, status:"active"}付きで
 	// topK=100。取り出し後の判定はLayer 1が担う
 	// 所要時間は処理時間の計測でありClockを使う時刻依存のロジックではないため
@@ -323,9 +330,14 @@ export const evaluateIntent = async (
 	timer.lap("retrieval");
 	// 照会が返した件数(補いを含まない・自idの除外前)
 	const retrievalCount = hits.length;
+	const missing = refsMissingFromHits(await refsPromise, hits);
+	const recent =
+		missing.length === 0
+			? []
+			: await loadRecentVectorValues(env.DB, missing).catch(recentLoadFailed);
 	const merged = mergeSupplement(
 		hits,
-		await recentPromise,
+		recent,
 		ownValues,
 		PIPELINE.TOP_K_RETRIEVAL,
 	);

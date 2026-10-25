@@ -164,14 +164,28 @@ const postClosed = (latchId: string, userIds: string[] | null) =>
 const countOf = async (id: string) =>
 	(await db.select().from(messages).where(eq(messages.latchId, id))).length;
 
-afterEach(() => {
-	for (const ws of open.splice(0)) {
-		try {
-			ws.close(1000, "test end");
-		} catch {
-			// 既に閉じている
-		}
-	}
+afterEach(async () => {
+	// 閉じ終わり(相手側のclose)を待つ(1秒の打ち切り)。DOのwebSocketCloseのログが試験の終了後に
+	// 出ないようにする(latches-delete.test.tsと同じ片付け)。既に閉じた接続は待たない
+	await Promise.all(
+		open.splice(0).map(
+			(ws) =>
+				new Promise<void>((resolve) => {
+					if (ws.readyState === WebSocket.CLOSED) {
+						resolve();
+						return;
+					}
+					ws.addEventListener("close", () => resolve());
+					setTimeout(resolve, 1000);
+					try {
+						ws.close(1000, "test end");
+					} catch {
+						// 既に閉じている
+						resolve();
+					}
+				}),
+		),
+	);
 });
 
 describe("ChatRoomDO", () => {

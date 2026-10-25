@@ -1783,6 +1783,45 @@ describe("直近のベクトルの控えによる補い(#47・設計 2026-10-25 
 			.map((call) => JSON.parse(String(call[0])) as Record<string, unknown>)
 			.filter((l) => l.event === event);
 
+	/** 控え(recent_vectors)を読む文のSQLを記録するD1(I1: 2回目の読み込みの有無を確かめる) */
+	const recordingRecentDb = () => {
+		const queries: string[] = [];
+		const recorded = new Proxy(testEnv.DB, {
+			get: (t, prop) => {
+				if (prop === "prepare") {
+					return (query: string) => {
+						if (query.includes("recent_vectors")) {
+							queries.push(query);
+						}
+						return t.prepare(query);
+					};
+				}
+				const v = Reflect.get(t, prop, t);
+				return typeof v === "function" ? v.bind(t) : v;
+			},
+		});
+		return { db: recorded, queries };
+	};
+
+	/** 記録用のD1で起点をもう一度評価し、控えを読んだ文を返す(30分の抑制は無視する) */
+	const recentQueriesOfReevaluation = async (
+		intentId: string,
+	): Promise<string[]> => {
+		// 反映の遅れ(hold)の中では起点のベクトルが照会側に無いため、控えの値を渡す
+		const [own] = await recentRowsOf(intentId);
+		const recorder = recordingRecentDb();
+		await evaluateIntent(
+			{ ...testEnv, DB: recorder.db },
+			intentId,
+			directClock,
+			{
+				ignoreSuppression: true,
+				vector: decodeVector(own?.vector as Uint8Array),
+			},
+		);
+		return recorder.queries;
+	};
+
 	it("照会に出ない相手Aを控えから補い、Layer 1以降へ進めて提案し、payloadにsupplement_count: 1を載せる", async () => {
 		const a = await seedHeldPartner();
 		const b = await seedUnembedded();
@@ -1814,6 +1853,11 @@ describe("直近のベクトルの控えによる補い(#47・設計 2026-10-25 
 				.filter((l) => l.intent_id === b.id)
 				.map((l) => l.layer),
 		).toContain("supplement");
+		// 照会の結果に無いAがあるので、idと時刻の読み込みの後にAのベクトルを2回目に読む
+		const queries = await recentQueriesOfReevaluation(b.id);
+		expect(queries).toHaveLength(2);
+		expect(queries[0]).not.toContain('"vector"');
+		expect(queries[1]).toContain('"vector"');
 	});
 
 	it.each([
@@ -1981,6 +2025,10 @@ describe("直近のベクトルの控えによる補い(#47・設計 2026-10-25 
 			proposed: 1,
 		});
 		expect(await latchesOfUser(a.userId)).toHaveLength(1);
+		// 控えの候補がすべて照会の結果にあるので、ベクトルの2回目の読み込みは無い(I1)
+		const queries = await recentQueriesOfReevaluation(b.id);
+		expect(queries).toHaveLength(1);
+		expect(queries[0]).not.toContain('"vector"');
 	});
 
 	it("控えの読み込みが失敗しても補いなしで評価を続け、pipeline.recent_vector.failed(layer=load)を出す", async () => {
