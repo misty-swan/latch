@@ -1819,6 +1819,7 @@ describe("直近のベクトルの控えによる補い(#47・設計 2026-10-25 
 	it.each([
 		["paused", { status: "paused" }],
 		["別form", { form: "occasion" }],
+		["期限切れ", { status: "expired" }],
 	] as const)(
 		"相手Aが%sなら補わない(supplement_count: 0・提案なし)",
 		async (_label, change) => {
@@ -1835,6 +1836,69 @@ describe("直近のベクトルの控えによる補い(#47・設計 2026-10-25 
 			expect(await latchesOfUser(b.userId)).toHaveLength(0);
 		},
 	);
+
+	it("補ったAとBの間にブロックがあれば、補いは数えるがLayer 1が落とし提案しない", async () => {
+		const a = await seedHeldPartner();
+		const b = await seedUnembedded();
+		await db.insert(blocks).values({
+			blockerUserId: a.userId,
+			blockedUserId: b.userId,
+			createdAt: FIXED_NOW,
+		});
+
+		await runStage1(b.id);
+
+		expect(await stage2PayloadOf(b.id)).toMatchObject({
+			supplement_count: 1,
+			l1_pass: 0,
+			proposed: 0,
+		});
+		expect(await latchesOfUser(b.userId)).toHaveLength(0);
+	});
+
+	it("Aが内容を直して埋め込み直す前は古い版の控えを補わず、第1段の埋め込み直しの後は新しいベクトルで補う", async () => {
+		const a = await seedHeldPartner();
+		// 内容の変更(version 2・埋め込み前に戻る)。控えには古い版のベクトルが残っている
+		await db
+			.update(intents)
+			.set({
+				version: 2,
+				topic: "評価試験の学習仲間(直した)",
+				embeddedAt: null,
+			})
+			.where(eq(intents.id, a.id));
+		expect(await recentRowsOf(a.id)).toHaveLength(1);
+		const b = await seedUnembedded();
+		await runStage1(b.id);
+		expect(await stage2PayloadOf(b.id)).toMatchObject({
+			supplement_count: 0,
+			proposed: 0,
+		});
+
+		// Aの第1段が埋め込み直すと、控えとintents.embedded_atが揃い補われる
+		await runStage1(a.id, "intent_updated", 2);
+		const [recent] = await recentRowsOf(a.id);
+		expect(recent?.embeddedAt.getTime()).toBe(
+			(await intentRowOf(a.id))?.embeddedAt?.getTime(),
+		);
+		const c = await seedUnembedded();
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const result = await evaluateIntent(testEnv, c.id, directClock, {
+			vector: decodeVector(recent?.vector as Uint8Array),
+		});
+		logSpy.mockRestore();
+		expect(result?.supplementCount).toBeGreaterThanOrEqual(1);
+		const rows = await candidatesInvolving(c.id);
+		const withA = rows.find(
+			(r) => r.intentAId === a.id || r.intentBId === a.id,
+		);
+		expect(withA).toBeDefined();
+		// 新しいベクトル同士(cのベクトルにAの控えを使う)なので類似度は1
+		expect(withA?.retrievalScore).toBeCloseTo(1, 5);
+		expect(
+			withA?.intentAId === a.id ? withA?.intentAVersion : withA?.intentBVersion,
+		).toBe(2);
+	});
 
 	it("相手Aの埋め込みが15分より前なら補わない(supplement_count: 0・提案なし)", async () => {
 		const a = await seedHeldPartner();

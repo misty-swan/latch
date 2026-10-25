@@ -73,7 +73,8 @@ export const deleteExpiredRecentVectors = async (
 
 /**
  * 評価で補う控えを読む(設計 §1.4の1)。intentsと結合し、起点と同じform・status='active'・
- * 埋め込みから15分以内(embedded_at ≥ now − RECENT_VECTOR_TTL_MS)・自分以外の行を、
+ * 埋め込みから15分以内(embedded_at ≥ now − RECENT_VECTOR_TTL_MS)・自分以外で、控えの embedded_at が
+ * intents.embedded_at と等しい(現在の版の埋め込みである)行を、
  * 埋め込みの新しい順にlimit件まで返す。照会の結果との重複はmergeSupplementが除く。
  * 例外はそのまま投げる(呼び出し側が補いなしで続ける)
  */
@@ -96,6 +97,9 @@ export const loadRecentVectors = async (
 				eq(intents.form, opts.form),
 				eq(intents.status, "active"),
 				gte(recentVectors.embeddedAt, cutoff),
+				// 現在の版の埋め込みだけを使う(内容の変更でintents.embedded_atが消えた・別の時刻で
+				// 埋め込み直された意思の、古い版の控えを補わない)
+				eq(intents.embeddedAt, recentVectors.embeddedAt),
 				ne(recentVectors.intentId, opts.selfId),
 			),
 		)

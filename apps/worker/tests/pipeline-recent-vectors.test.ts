@@ -290,7 +290,7 @@ describe("mergeSupplement(照会の結果への補いの混ぜ込み)", () => {
 });
 
 describe("loadRecentVectors(控えの読み込み)", () => {
-	it("同じform・active・15分以内・自分以外を、埋め込みの新しい順にlimit件まで読む", async () => {
+	it("同じform・active・15分以内・自分以外・現在の版の埋め込みを、新しい順にlimit件まで読む", async () => {
 		const now = clock.now().getTime();
 		const self = await seedIntent();
 		const older = await seedIntent();
@@ -308,26 +308,37 @@ describe("loadRecentVectors(控えの読み込み)", () => {
 			.set({ form: "occasion" })
 			.where(eq(intents.id, occasion));
 		const at = (offsetMs: number) => new Date(now - offsetMs);
-		await saveRecentVector(testEnv.DB, self, at(0), sampleVector(0));
-		await saveRecentVector(testEnv.DB, older, at(60_000), sampleVector(1));
-		await saveRecentVector(testEnv.DB, newer, at(10_000), sampleVector(2));
-		await saveRecentVector(testEnv.DB, third, at(120_000), sampleVector(3));
-		await saveRecentVector(testEnv.DB, paused, at(0), sampleVector(4));
-		await saveRecentVector(testEnv.DB, occasion, at(0), sampleVector(5));
-		await saveRecentVector(
-			testEnv.DB,
+		/** 第1段と同じく、意思の embedded_at と控えを同じ時刻で書く */
+		const saveCurrent = async (
+			id: string,
+			embeddedAt: Date,
+			values: number[],
+		) => {
+			await db.update(intents).set({ embeddedAt }).where(eq(intents.id, id));
+			await saveRecentVector(testEnv.DB, id, embeddedAt, values);
+		};
+		await saveCurrent(self, at(0), sampleVector(0));
+		await saveCurrent(older, at(60_000), sampleVector(1));
+		await saveCurrent(newer, at(10_000), sampleVector(2));
+		await saveCurrent(third, at(120_000), sampleVector(3));
+		await saveCurrent(paused, at(0), sampleVector(4));
+		await saveCurrent(occasion, at(0), sampleVector(5));
+		await saveCurrent(
 			expired,
 			at(PIPELINE.RECENT_VECTOR_TTL_MS + 1),
 			sampleVector(6),
 		);
 		// ちょうど15分前の行は読む(embedded_at ≥ now − 15分)
 		const edge = await seedIntent();
-		await saveRecentVector(
-			testEnv.DB,
-			edge,
-			at(PIPELINE.RECENT_VECTOR_TTL_MS),
-			sampleVector(7),
-		);
+		await saveCurrent(edge, at(PIPELINE.RECENT_VECTOR_TTL_MS), sampleVector(7));
+
+		// 内容を直して埋め込み直す前(intents.embedded_atがnull)・別の時刻で埋め込み直した意思の
+		// 控えは現在の版でないので読まない
+		const edited = await seedIntent();
+		await saveRecentVector(testEnv.DB, edited, at(5_000), sampleVector(8));
+		const reembedded = await seedIntent();
+		await saveCurrent(reembedded, at(1_000), sampleVector(9));
+		await saveRecentVector(testEnv.DB, reembedded, at(2_000), sampleVector(9));
 
 		const all = await loadRecentVectors(testEnv.DB, {
 			form: "connection",
