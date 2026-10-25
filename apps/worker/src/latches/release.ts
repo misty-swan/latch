@@ -18,7 +18,7 @@ import { newUlid } from "../ids";
 import { createLogger } from "../logging/logger";
 import type { IntentRow } from "../pipeline/consumer";
 import { errorCodeOf } from "../pipeline/errors";
-import { canPresent } from "./caps";
+import { presentBlockers } from "./caps";
 import { closeLatch } from "./close";
 import {
 	isTooLate,
@@ -240,6 +240,65 @@ const heldTargets = async (
 	return [...occasions, ...connections];
 };
 
+/** 意思・参加者の行のまとめ読みのチャンク幅(D1の1文あたりバインド上限100の手前) */
+const ID_CHUNK = 90;
+
+/** 走査の前にまとめて読んだ行(#45: 1件ずつの往復をやめる) */
+interface Prefetched {
+	intentById: Map<string, IntentRow>;
+	membersByLatch: Map<string, string[]>;
+}
+
+/**
+ * 対象の全保留の参加Intentの行と参加者の行を、走査の前にまとめて読む(チャンク分割)。
+ * 走査中の書き込み(closeLatch・promote)はどちらの行も変えないため、読んだ値は走査の終わりまで使える
+ */
+const prefetch = async (
+	db: DrizzleD1Database,
+	targets: LatchRow[],
+): Promise<Prefetched> => {
+	const intentById = new Map<string, IntentRow>();
+	const intentIds = [...new Set(targets.flatMap((l) => l.intentIds))];
+	for (const chunk of chunksOf(intentIds, ID_CHUNK)) {
+		const rows = await db
+			.select()
+			.from(intents)
+			.where(inArray(intents.id, chunk));
+		for (const row of rows) intentById.set(row.id, row);
+	}
+	const membersByLatch = new Map<string, string[]>();
+	for (const chunk of chunksOf(
+		targets.map((l) => l.id),
+		ID_CHUNK,
+	)) {
+		const rows = await db
+			.select({ latchId: latchMembers.latchId, userId: latchMembers.userId })
+			.from(latchMembers)
+			.where(inArray(latchMembers.latchId, chunk));
+		for (const row of rows) {
+			const list = membersByLatch.get(row.latchId) ?? [];
+			list.push(row.userId);
+			membersByLatch.set(row.latchId, list);
+		}
+	}
+	return { intentById, membersByLatch };
+};
+
+/** 参加Intentを intent_ids の順で返す。1件でも不在ならnull(intentsOfと同じ判定) */
+const intentsFrom = (pre: Prefetched, latch: LatchRow): IntentRow[] | null => {
+	const ordered = latch.intentIds.map((id) => pre.intentById.get(id));
+	return ordered.every((r) => r !== undefined) ? ordered : null;
+};
+
+/**
+ * 走査中に提示の上限に届いたと分かった利用者・意思。どちらの数(当日の提案の通知・進行中の提案)も
+ * 走査の中の昇格では増える一方のため、これらを含む後続の保留は照会せずに保留のまま残してよい(#45)
+ */
+interface CappedSets {
+	userIds: Set<string>;
+	intentIds: Set<string>;
+}
+
 /**
  * 保留1件を処理する(期限処理・取り消し・昇格)。昇格したらtrue
  */
@@ -247,6 +306,8 @@ const releaseOne = async (
 	db: DrizzleD1Database,
 	latch: LatchRow,
 	now: Date,
+	pre: Prefetched,
+	capped: CappedSets,
 ): Promise<boolean> => {
 	if (latch.expiresAt.getTime() <= now.getTime()) {
 		await closeLatch(
@@ -259,7 +320,7 @@ const releaseOne = async (
 		);
 		return false;
 	}
-	const intentRows = await intentsOf(db, latch);
+	const intentRows = intentsFrom(pre, latch);
 	if (
 		latch.form === "occasion" &&
 		intentRows !== null &&
@@ -298,12 +359,20 @@ const releaseOne = async (
 	// paused(と想定外の状態)は保留のまま残す
 	if (intentRows.some((i) => i.status !== "active")) return false;
 
-	const members = await db
-		.select({ userId: latchMembers.userId })
-		.from(latchMembers)
-		.where(eq(latchMembers.latchId, latch.id));
-	const memberIds = members.map((m) => m.userId);
-	if (!(await canPresent(db, memberIds, latch.intentIds, now))) return false;
+	const memberIds = pre.membersByLatch.get(latch.id) ?? [];
+	// 上限に届いたと分かっている利用者・意思を含む保留は、照会せずに保留のまま残す(判定の結果は照会と同じ)
+	if (
+		memberIds.some((id) => capped.userIds.has(id)) ||
+		latch.intentIds.some((id) => capped.intentIds.has(id))
+	) {
+		return false;
+	}
+	const blockers = await presentBlockers(db, memberIds, latch.intentIds, now);
+	if (blockers.userIds.length > 0 || blockers.intentIds.length > 0) {
+		for (const id of blockers.userIds) capped.userIds.add(id);
+		for (const id of blockers.intentIds) capped.intentIds.add(id);
+		return false;
+	}
 
 	const targetAt =
 		latch.form === "occasion" ? occasionTargetAt(intentRows) : null;
@@ -323,20 +392,39 @@ const releaseOne = async (
  * 75分未満のものは昇格させず expired で閉じる(全体の期限切れは Cron が expireHeld で先に閉じる)。
  * 参加Intentが matched・expired・cancelled・不在なら cancelled で閉じ(排他の取りこぼしの安全網)、
  * paused なら保留のまま残す(pauseは提案を継続する・docs/06 §2)。
+ * 参加Intentと参加者の行は走査の前にまとめて読み、上限に届いた利用者・意思を含む後続の保留は
+ * 照会を省く(#45)。opts.budgetMs を渡すと、読み出しからの経過がそれに達した時点で残りを処理せずに
+ * 返す(残りは candidate のまま毎分Cronの releaseHeld が拾う)。
  * userIds 指定時はその参加者の保留のみを対象とする。戻り値は昇格した件数
  */
 export const releaseHeld = async (
 	db: DrizzleD1Database,
 	now: Date,
 	userIds?: string[],
+	opts?: { budgetMs?: number },
 ): Promise<number> => {
 	if (userIds !== undefined && userIds.length === 0) return 0;
 
+	// 所要時間の計測のため performance.now() を使う(時刻の判定は now で行う)
+	const startedAt = performance.now();
+	const targets = await heldTargets(db, userIds);
+	const pre = await prefetch(db, targets);
+	const capped: CappedSets = { userIds: new Set(), intentIds: new Set() };
 	let released = 0;
-	for (const latch of await heldTargets(db, userIds)) {
+	for (const [index, latch] of targets.entries()) {
+		if (
+			opts?.budgetMs !== undefined &&
+			performance.now() - startedAt >= opts.budgetMs
+		) {
+			logger.info("release.budget_exhausted", {
+				layer: "release_held",
+				count: targets.length - index,
+			});
+			break;
+		}
 		// 1件の失敗で走査全体を止めない(latch_id・error_codeのみをログ・docs/08 §6)
 		try {
-			if (await releaseOne(db, latch, now)) released++;
+			if (await releaseOne(db, latch, now, pre, capped)) released++;
 		} catch (error) {
 			logger.warn("cron.item.failed", {
 				layer: "release_held",

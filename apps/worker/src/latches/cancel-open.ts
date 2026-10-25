@@ -6,6 +6,7 @@
  * 2人がともに参加者のLATCH=src/safety/block.tsのlatch_members自己結合)、取り消しと保留の解放は
  * cancelOpenLatches(ブロック)またはcancelOpenLatchesOnly+releaseAfterCancel(削除・内容の変更)が行う
  */
+import { PIPELINE } from "@latch/shared";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { systemClock } from "../clock/clock";
@@ -102,7 +103,10 @@ export const releaseAfterCancel = async (
 		// 解放の失敗で次の組の提案を止めない。解放はCronの(i)(runHeldSweep)が拾い直すが、
 		// 次の組の提案は拾い直されないため、ここで飛ばすと失われる
 		try {
-			await releaseHeld(db, now, result.releaseUserIds);
+			// 時間の予算を超えた分は candidate のまま残し、毎分Cronの解放に任せる(#45)
+			await releaseHeld(db, now, result.releaseUserIds, {
+				budgetMs: PIPELINE.RELEASE_AFTER_DELETE_BUDGET_MS,
+			});
 			opts?.onTiming?.("release", releaseStartedAt);
 		} catch (error) {
 			opts?.onReleaseFailed?.(error);

@@ -7,7 +7,7 @@ import type { IntentStatus, LatchStatus } from "@latch/shared";
 import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	intents,
 	latches,
@@ -22,6 +22,7 @@ import { closeLatch } from "../src/latches/close";
 import { proposeSet } from "../src/latches/propose";
 import { expireHeld, releaseHeld } from "../src/latches/release";
 import type { IntentRow } from "../src/pipeline/consumer";
+import { countD1RoundTrips } from "./d1-round-trips";
 
 const db = drizzle((env as unknown as WorkerEnv).DB);
 const NOW = new Date("2026-06-01T03:00:00Z");
@@ -829,5 +830,109 @@ describe("履歴の解放(未提示・システムの都合で閉じた提案は
 				NOW,
 			),
 		).toBe("proposed");
+	});
+});
+
+describe("保留の解放の一括化と時間の予算(#45・設計 2026-10-25 §5)", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	/** 利用者uの意思1件と、相手ごとに別の意思を持つ保留n件(score降順に並ぶよう配置) */
+	const setupManyHeld = async (n: number) => {
+		const u = await insertUser();
+		const mine = await insertIntent(u, "connection");
+		const held: string[] = [];
+		for (let i = 0; i < n; i++) {
+			const other = await insertIntent(await insertUser(), "connection");
+			held.push(await insertLatch(mine, other, { score: 0.99 - i * 0.01 }));
+		}
+		return { u, mine, held };
+	};
+
+	it("保留30件でも意思と参加者の行を走査の前にまとめて読み、上限に届いた参加者の照会を省く(往復が件数に比例しない)", async () => {
+		const { u, held } = await setupManyHeld(30);
+		await fillProposalNotifications(u, 6);
+		const counter = countD1RoundTrips((env as unknown as WorkerEnv).DB);
+		const counted = drizzle(counter.db);
+
+		expect(await releaseHeld(counted, NOW, [u])).toBe(0);
+		// 対象の読み出し1・意思1・参加者1・最初の提示の上限の照会2(同時) = 5。件数に比例しない
+		expect(counter.calls()).toBeLessThanOrEqual(6);
+		for (const id of held) {
+			expect((await latchOf(id))?.status).toBe("candidate");
+		}
+	});
+
+	it("通知上限に届いた参加者を含む保留は昇格せず、含まない保留は従来どおり昇格する", async () => {
+		const capped = await insertUser();
+		await fillProposalNotifications(capped, 6);
+		const free = await insertUser();
+		const cappedIntent = await insertIntent(capped, "connection");
+		const freeIntent = await insertIntent(free, "connection");
+		const others = [];
+		for (let i = 0; i < 4; i++) {
+			others.push(await insertIntent(await insertUser(), "connection"));
+		}
+		// 上限の利用者の保留(score 0.95・0.85)と、そうでない保留(0.9・0.8)を交互に並べる
+		const c1 = await insertLatch(cappedIntent, others[0] as IntentRow, {
+			score: 0.95,
+		});
+		const f1 = await insertLatch(freeIntent, others[1] as IntentRow, {
+			score: 0.9,
+		});
+		const c2 = await insertLatch(cappedIntent, others[2] as IntentRow, {
+			score: 0.85,
+		});
+		const f2 = await insertLatch(freeIntent, others[3] as IntentRow, {
+			score: 0.8,
+		});
+
+		expect(await releaseHeld(db, NOW, [capped, free])).toBe(2);
+		expect((await latchOf(c1))?.status).toBe("candidate");
+		expect((await latchOf(c2))?.status).toBe("candidate");
+		expect((await latchOf(f1))?.status).toBe("proposed");
+		expect((await latchOf(f2))?.status).toBe("proposed");
+	});
+
+	it("昇格で同時進行の上限(3件)に届いた意思の後続の保留は照会せずに残し、score降順の上位3件だけが昇格する", async () => {
+		const { u, held } = await setupManyHeld(10);
+		const counter = countD1RoundTrips((env as unknown as WorkerEnv).DB);
+		const counted = drizzle(counter.db);
+
+		expect(await releaseHeld(counted, NOW, [u])).toBe(3);
+		expect(
+			await Promise.all(held.map(async (id) => (await latchOf(id))?.status)),
+		).toEqual([
+			"proposed",
+			"proposed",
+			"proposed",
+			...Array.from({ length: 7 }, () => "candidate"),
+		]);
+		// 対象1・意思1・参加者1・昇格3件(照会2+書き込み1+読み直し1)・4件目の照会2 = 17。残り6件は往復なし
+		expect(counter.calls()).toBeLessThanOrEqual(18);
+	});
+
+	it("時間の予算を使い切ると残りの保留はcandidateのまま返し、release.budget_exhaustedに残りの件数を出す。後の解放(Cron)で昇格する", async () => {
+		const logSpy = vi.spyOn(console, "log");
+		const mine = await setupPair("connection");
+		const second = await setupPair("connection");
+		const userIds = [...mine.userIds, ...second.userIds];
+
+		expect(await releaseHeld(db, NOW, userIds, { budgetMs: 0 })).toBe(0);
+		expect((await latchOf(mine.latchId))?.status).toBe("candidate");
+		expect((await latchOf(second.latchId))?.status).toBe("candidate");
+		const lines = logSpy.mock.calls.map((c) => JSON.parse(String(c[0])));
+		expect(lines).toContainEqual({
+			level: "info",
+			event: "release.budget_exhausted",
+			layer: "release_held",
+			count: 2,
+		});
+
+		// 予算なし(毎分Cronの releaseHeld と同じ呼び方)で後から昇格する
+		expect(await releaseHeld(db, NOW)).toBeGreaterThanOrEqual(2);
+		expect((await latchOf(mine.latchId))?.status).toBe("proposed");
+		expect((await latchOf(second.latchId))?.status).toBe("proposed");
 	});
 });

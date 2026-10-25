@@ -132,6 +132,8 @@ describe("PIPELINE", () => {
 			RECENT_VECTOR_TTL_MS: 15 * 60_000,
 			// 評価で控えから補う行の上限(50件・#47)
 			RECENT_VECTOR_SUPPLEMENT_MAX: 50,
+			// 削除・内容の変更の後の保留の解放の時間の予算(20秒・#45)
+			RELEASE_AFTER_DELETE_BUDGET_MS: 20_000,
 		});
 	});
 

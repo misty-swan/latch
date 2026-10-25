@@ -282,6 +282,9 @@ export const PIPELINE = {
 	// 評価で控えから補う行の上限(50件・#47)。埋め込みの新しい順に読み、Layer 2 Candidate Retrievalの
 	// 照会の結果に無いものだけを類似度で混ぜて topK(TOP_K_RETRIEVAL)で切る
 	RECENT_VECTOR_SUPPLEMENT_MAX: 50,
+	// 意思の削除・内容の変更の応答の後の保留の解放(releaseAfterCancel)の時間の予算(20秒・#45)。
+	// 応答の後の処理の上限(30秒)に次の組の提案の余裕を残す。超えた分は candidate のまま毎分Cronの解放が拾う
+	RELEASE_AFTER_DELETE_BUDGET_MS: 20_000,
 } as const;
 
 /**

@@ -21,6 +21,21 @@ export const canPresent = async (
 	intentIds: string[],
 	now: Date,
 ): Promise<boolean> => {
+	const blockers = await presentBlockers(db, userIds, intentIds, now);
+	return blockers.userIds.length === 0 && blockers.intentIds.length === 0;
+};
+
+/**
+ * canPresent の判定の内訳: 上限に届いている利用者と意思を返す(どちらも空なら提示してよい)。
+ * 保留の解放(release.ts)は、上限に届いた利用者・意思を覚えて後続の保留の照会を省く(#45)。
+ * どちらの数も同じ走査の中の昇格では増える一方のため、覚えた結果は走査の終わりまで変わらない
+ */
+export const presentBlockers = async (
+	db: DrizzleD1Database,
+	userIds: string[],
+	intentIds: string[],
+	now: Date,
+): Promise<{ userIds: string[]; intentIds: string[] }> => {
 	// 2つの照会は互いに依存しないため同時に投げる(D1の直列の待ちを1段にする・#36)。
 	// 判定は従来どおり、どちらかが上限に達していれば保留
 	const [perUser, perIntent] = await Promise.all([
@@ -51,9 +66,12 @@ export const canPresent = async (
 				)
 			: Promise.resolve([]),
 	]);
-	if (perUser.some((r) => r.n >= LIMITS.NOTIFICATIONS_PER_DAY)) return false;
-	if (perIntent.some((r) => r.n >= LATCH.CONCURRENT_PER_INTENT)) {
-		return false;
-	}
-	return true;
+	return {
+		userIds: perUser
+			.filter((r) => r.n >= LIMITS.NOTIFICATIONS_PER_DAY)
+			.map((r) => r.userId),
+		intentIds: perIntent
+			.filter((r) => r.n >= LATCH.CONCURRENT_PER_INTENT)
+			.map((r) => r.intent_id),
+	};
 };
