@@ -1,9 +1,9 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.33
+- 文書バージョン: v0.34
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.33更新: 2026-10-25)
+- 作成日: 2026-10-17(v0.34更新: 2026-10-25)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
@@ -36,6 +36,7 @@
 - v0.31の変更点: 前提文書欄の同期のみの改版(不具合の修正工程(第3回)の最終点検の直し(2026-10-24)に伴う04の改版への追従)。内容の変更はない
 - v0.32の変更点: 前提文書欄の同期のみの改版(不具合の修正工程(第3回・issue #39)のオーナー決定5(2026-10-24)に伴う04・06の改版への追従)。内容の変更はない
 - v0.33の変更点: 前提文書欄の同期のみの改版(不具合の修正工程(第3回)の後の測り直しと、工程を区切るオーナー決定(2026-10-25・12 §2の決定記録(不具合の修正工程(第3回)))に伴う02・04の改版への追従)。内容の変更はない
+- v0.34の変更点: 不具合の修正工程(第4回・issue #47・2026-10-25オーナー決定案2b・12 §2の決定記録(不具合の修正工程(第4回)))に伴い、§2.1のテーブル一覧と§2.2へ直近のベクトルの控えの表recent_vectors(intent_id・embedded_at・vector・マイグレーション0009と戻す手順・控えの寿命15分と評価での補い・失敗の扱い)を、§2.4の索引の一覧へ(embedded_at)を、§2.5の削除時の扱いへ控えの行を加えた。D1の表は24個になった。前提文書欄の版数は変わらない
 - 前提文書: 01 要件定義書 v0.23 / 02 スコープ・受け入れ条件合意書 v0.21 / 04 アーキテクチャ設計書 v0.33
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
@@ -60,7 +61,7 @@
 |---|---|---|
 | アカウント/認証 | users / refresh_families | ユーザー・リフレッシュトークン族(回転式) |
 | Intent | intents / match_events | 意思本体・イベントキュー投入記録 |
-| マッチング | match_candidates / group_candidates / proposal_history | 評価の途中結果・同一ペア排除(恒久) |
+| マッチング | match_candidates / group_candidates / proposal_history / recent_vectors | 評価の途中結果・同一ペア排除(恒久)・直近に埋め込んだ意思のベクトルの控え(15分) |
 | LATCH/チャット | latches / latch_members / latch_responses / latch_status_events / messages / chat_reads / latch_feedback | 提案と成立・参加者・回答・状態遷移・チャット・既読・申告 |
 | 安全 | blocks / reports | ブロック・通報 |
 | 通知 | notifications / push_subscriptions | アプリ内通知・Web Push購読 |
@@ -156,6 +157,17 @@ INDEX(source_intent_id) / INDEX(status, created_at)   # マイグレーション
 ```
 
 **match_eventsの索引(不具合の修正工程(第2回)で確定)。** INDEX(source_intent_id)は意思の削除APIの子の行の削除(§2.5)・反映確認とmetadata整合の修復の照会(06 §2)に、INDEX(status, created_at)はCronの未処理・反映待ち・pending残留の掃査に使う(多くの意思を保存した後に削除APIが全件走査で遅くなった不具合・issue #16の修正)。マイグレーション0008で追加し、戻す手順(migrations_rollback/0008)を対で持つ(12 §4・11 §3。索引の追加だけで列とデータは変わらないため、適用前の確認は要らない。戻してもデータは失われないが、削除APIとCronの掃査が全件走査に戻って遅くなる)。
+
+**recent_vectors**(直近のベクトルの控え・不具合の修正工程(第4回)で確定・issue #47)
+
+```yaml
+intent_id:    TEXT(26)(PK・FK intents.id・ON DELETE CASCADE)
+embedded_at:  integer   # 埋め込みの時刻(intents.embedded_atと同じ値)
+vector:       blob      # float32の並び(リトルエンディアン。bge-m3は1,024次元で約4KB)
+INDEX(embedded_at)      # マイグレーション0009
+```
+
+Layer 2 Candidate Retrievalの照会(Vectorize)が照会ごとに数十秒から数分古い状態を返し、相手の反映確認が済んだ後でも相手を見落とすことがあるため、第1段(バックフィルも同じ本体を通る)が新しいベクトルをD1にも控える(同じintent_idは上書き。06 §2・§3)。評価はVectorizeの照会の結果に、控えから類似度の高い順に最大50件(`PIPELINE.RECENT_VECTOR_SUPPLEMENT_MAX`)を補う。補うのは、同じform・status=activeで、控えのembedded_atがintents.embedded_atと一致する(=現在の版の)行に限る。控えの寿命は埋め込みから15分(`PIPELINE.RECENT_VECTOR_TTL_MS`)で、期限を過ぎた行は毎分Cronの保持期間の削除が消す。意思の削除は外部キーのCASCADEで控えも消す(§2.5)。書き込みと読み出しの失敗は第1段・評価の失敗にせず、ログ(pipeline.recent_vector.failed)だけを出して補い無しで進む。マイグレーション0009で追加し、戻す手順(migrations_rollback/0009)を対で持つ(12 §4・11 §3。新しい表の追加だけで既存の表は変わらないため、適用前の確認は要らない。戻すと控えが失われ補いが無くなるが、意思とVectorizeのベクトルは残る。表を使う版のWorkerを先に戻してから適用する)。D1の表の数は24になった。
 
 **match_candidates**(1対1評価・30日定期削除)
 
@@ -309,6 +321,7 @@ latches:      (status, response_deadline) ← 回答期限切れ走査 / (status
 latch_status_events: (latch_id)
 reports:      (reporter, latch_id, reportee, target, status) ← 通報者内の統合の照会(F7a)
 match_events: (source_intent_id) ← 削除APIの子の削除・反映確認の照会 / (status, created_at) ← Cronの掃査(マイグレーション0008)
+recent_vectors: (embedded_at) ← 期限切れの控えの削除(マイグレーション0009)
 ```
 
 latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表である(latches本体はintent_idsのみ保持)。
@@ -319,6 +332,7 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 |---|---|---|
 | intents本文・構造化データ・埋め込み | 削除 + Vectorize該当ベクトル削除 | 本人の全Intentに同じ |
 | match/group_candidates | 当該Intentを含む行を削除 | 同左 |
+| recent_vectors | 当該Intentの控えを削除(外部キーのCASCADE) | 同左 |
 | match_events | 当該Intentの行を削除(payloadにはraw_text・座標・識別子を格納しない) | 本人の全Intentに同じ |
 | latches・latch_members | 進行中の提案はcancelled | 退会者が参加するproposed/partial_acceptは即時cancelled。matchedは残置し表示名は「つながっていた相手」(終了の原因は画面に区別して見せない・01 §10・2026-10-19オーナー裁定)・チャットは全参加者読み取り専用 |
 | proposal_history | 残す(同一ペア排除のため・01 §8)。削除で取り消した進行中の提案のために確保した行は解放する(§2.2) | 本人を含む行を削除 |

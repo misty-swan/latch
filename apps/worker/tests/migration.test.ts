@@ -11,7 +11,7 @@ import rollback0009Sql from "../migrations_rollback/0009_rollback.sql?raw";
 
 /**
  * マイグレーション適用結果の検証。
- * テーブル集合の正本は docs/05 §2.1(23テーブル)・§2.2(定義)・§2.4(索引)。
+ * テーブル集合の正本は docs/05 §2.1(24テーブル)・§2.2(定義)・§2.4(索引)。
  */
 
 /**
@@ -30,7 +30,7 @@ function toStatements(sql: string): string[] {
 		.filter((statement) => statement.length > 0);
 }
 
-/** docs/05 §2.1の23テーブル */
+/** docs/05 §2.1の24テーブル */
 const TABLES = [
 	"users",
 	"refresh_families",
@@ -55,16 +55,17 @@ const TABLES = [
 	"calibration_records",
 	"usage_counters",
 	"geofeatures",
+	"recent_vectors",
 ] as const;
 
-it("マイグレーション適用後、docs/05 §2.1の23テーブル全てが存在する", async () => {
+it("マイグレーション適用後、docs/05 §2.1の24テーブル全てが存在する", async () => {
 	const placeholders = TABLES.map(() => "?").join(", ");
 	const row = await env.DB.prepare(
 		`SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name IN (${placeholders})`,
 	)
 		.bind(...TABLES)
 		.first<{ n: number }>();
-	expect(row?.n).toBe(23);
+	expect(row?.n).toBe(24);
 });
 
 it("主要UNIQUE INDEXが存在し、想定の列の上に張られている", async () => {
