@@ -20,7 +20,7 @@ import {
 import type { Env as WorkerEnv } from "../src/env";
 import { closeLatch } from "../src/latches/close";
 import { proposeSet } from "../src/latches/propose";
-import { expireHeld, releaseHeld } from "../src/latches/release";
+import { expireHeld, promoteHeld, releaseHeld } from "../src/latches/release";
 import type { IntentRow } from "../src/pipeline/consumer";
 import { countD1RoundTrips } from "./d1-round-trips";
 
@@ -858,7 +858,7 @@ describe("保留の解放の一括化と時間の予算(#45・設計 2026-10-25 
 
 		expect(await releaseHeld(counted, NOW, [u])).toBe(0);
 		// 対象の読み出し1・意思1・参加者1・最初の提示の上限の照会2(同時) = 5。件数に比例しない
-		expect(counter.calls()).toBeLessThanOrEqual(6);
+		expect(counter.calls()).toBe(5);
 		for (const id of held) {
 			expect((await latchOf(id))?.status).toBe("candidate");
 		}
@@ -910,7 +910,7 @@ describe("保留の解放の一括化と時間の予算(#45・設計 2026-10-25 
 			...Array.from({ length: 7 }, () => "candidate"),
 		]);
 		// 対象1・意思1・参加者1・昇格3件(照会2+書き込み1+読み直し1)・4件目の照会2 = 17。残り6件は往復なし
-		expect(counter.calls()).toBeLessThanOrEqual(18);
+		expect(counter.calls()).toBe(17);
 	});
 
 	it("時間の予算を使い切ると残りの保留はcandidateのまま返し、release.budget_exhaustedに残りの件数を出す。後の解放(Cron)で昇格する", async () => {
@@ -934,5 +934,46 @@ describe("保留の解放の一括化と時間の予算(#45・設計 2026-10-25 
 		expect(await releaseHeld(db, NOW)).toBeGreaterThanOrEqual(2);
 		expect((await latchOf(mine.latchId))?.status).toBe("proposed");
 		expect((await latchOf(second.latchId))?.status).toBe("proposed");
+	});
+});
+
+describe("昇格の時点の参加Intentの状態の確認(#45・走査の前に読んだ行が古くなった場合)", () => {
+	it.each<IntentStatus | "missing">(["paused", "matched", "missing"])(
+		"まとめて読んだ後に参加Intentが%sになった保留は昇格せずcandidateのまま(通知・状態の記録も作らない)",
+		async (state) => {
+			const { b, latchId, userIds } = await setupPair("connection");
+			// 走査の前に読んだ行(古い値)を手元に持つ
+			const stale = await latchOf(latchId);
+			if (stale === undefined) throw new Error("latch not found");
+			// その後に別の要求が意思の状態を変えた(または削除した)
+			if (state === "missing") {
+				await db.delete(intents).where(eq(intents.id, b.id));
+			} else {
+				await db
+					.update(intents)
+					.set({ status: state })
+					.where(eq(intents.id, b.id));
+			}
+
+			expect(await promoteHeld(db, stale, userIds, later(24 * HOUR), NOW)).toBe(
+				false,
+			);
+			const row = await latchOf(latchId);
+			expect(row?.status).toBe("candidate");
+			expect(row?.proposedAt).toBeNull();
+			expect(await notificationsOf(latchId)).toHaveLength(0);
+			expect(await eventsOf(latchId)).toHaveLength(0);
+		},
+	);
+
+	it("参加Intentがすべてactiveなら従来どおり昇格する", async () => {
+		const { latchId, userIds } = await setupPair("connection");
+		const row = await latchOf(latchId);
+		if (row === undefined) throw new Error("latch not found");
+		expect(await promoteHeld(db, row, userIds, later(24 * HOUR), NOW)).toBe(
+			true,
+		);
+		expect((await latchOf(latchId))?.status).toBe("proposed");
+		expect(await notificationsOf(latchId)).toHaveLength(2);
 	});
 });

@@ -117,8 +117,15 @@ export const expireHeld = async (
 	return closed;
 };
 
-/** candidate → proposed の昇格を1バッチで書く。昇格できたらtrue */
-const promote = async (
+/**
+ * candidate → proposed の昇格を1バッチで書く。昇格できたらtrue。
+ * 参加Intentの状態は走査の前にまとめて読んだ値で判断しているため(#45)、その後に別の要求が
+ * 一時停止・成立・削除した意思を含む保留を昇格させないよう、UPDATEの条件で参加Intentが
+ * 今すべて active であることを確かめる(不在の意思は数に入らないため件数の一致で弾く)。
+ * 弾いた保留は candidate のまま残り、後の解放(閉じる・保留のまま残す)の判断に任せる。
+ * 試験から古い行を渡して呼ぶため公開する
+ */
+export const promoteHeld = async (
 	db: DrizzleD1Database,
 	latch: LatchRow,
 	userIds: string[],
@@ -126,6 +133,11 @@ const promote = async (
 	now: Date,
 ): Promise<boolean> => {
 	const nowMs = now.getTime();
+	const intentIds = [...new Set(latch.intentIds)];
+	const allActive = sql`(SELECT COUNT(*) FROM intents WHERE id IN (${sql.join(
+		intentIds.map((id) => sql`${id}`),
+		sql`, `,
+	)}) AND status = 'active') = ${intentIds.length}`;
 	const promoted = sql`EXISTS (SELECT 1 FROM latches WHERE id = ${latch.id} AND status = 'proposed' AND proposed_at = ${nowMs} AND updated_at = ${nowMs})`;
 	await db.batch([
 		db
@@ -136,7 +148,13 @@ const promote = async (
 				responseDeadline: deadline,
 				updatedAt: now,
 			})
-			.where(and(eq(latches.id, latch.id), eq(latches.status, "candidate"))),
+			.where(
+				and(
+					eq(latches.id, latch.id),
+					eq(latches.status, "candidate"),
+					allActive,
+				),
+			),
 		db
 			.insert(latchStatusEvents)
 			.select(
@@ -382,7 +400,7 @@ const releaseOne = async (
 		targetAt,
 		minExpiry(intentRows),
 	);
-	return promote(db, latch, memberIds, deadline, now);
+	return promoteHeld(db, latch, memberIds, deadline, now);
 };
 
 /**
