@@ -11,6 +11,7 @@
 import { expect, test } from "@playwright/test";
 import {
 	composeAndRead,
+	expireLeftoverE2eIntents,
 	fetchIntentsViaApi,
 	jstLocalInputPlusHours,
 	placeAndBackToHome,
@@ -18,6 +19,16 @@ import {
 	signInAndRegister,
 	underAgeBirthDate,
 } from "./helpers";
+
+// 前のテストが預けた意思が残っていると、新しい意思と提案が作られ「預けている」が崩れる。
+// 他のspecと同じく、各テストの前後で残りの意思を期限切れにする(#37)
+test.beforeEach(() => {
+	expireLeftoverE2eIntents();
+});
+
+test.afterEach(() => {
+	expireLeftoverE2eIntents();
+});
 
 test("1. welcome→サインイン→登録→同意→compose→homeの空状態", async ({
 	page,
@@ -35,8 +46,9 @@ test("2. つながりを預ける: 読み解き→主題編集・期限30日→p
 	page,
 }) => {
 	await signInAndRegister(page);
+	// 先頭の__jev_low__はstub Jevを低値にし提案を作らせない目印(test 4と同じ理由)
 	const words =
-		"イラストを描く人と、月1くらいで雑に絵を見せ合える関係になれたら嬉しい。";
+		"__jev_low__ イラストを描く人と、月1くらいで雑に絵を見せ合える関係になれたら嬉しい。";
 	await composeAndRead(page, words);
 	// 時刻語・日付語が無い文章はつながりとして読み解かれる(07 §3)
 	await expect(
@@ -45,7 +57,9 @@ test("2. つながりを預ける: 読み解き→主題編集・期限30日→p
 
 	// 主題を行内編集する(Enterで確定)
 	await page.getByRole("button", { name: "主題を直す" }).click();
-	await page.locator('input[aria-label="主題"]').fill("絵を見せ合える仲間");
+	await page
+		.locator('input[aria-label="主題"]')
+		.fill("__jev_low__ 絵を見せ合える仲間");
 	await page.keyboard.press("Enter");
 	await expect(
 		page.locator(".fact__val", { hasText: "絵を見せ合える仲間" }),
@@ -65,8 +79,9 @@ test("3. 機会を預ける: 日時・予算を入力して保存(機会ラベ�
 	page,
 }) => {
 	await signInAndRegister(page);
+	// 先頭の__jev_low__はstub Jevを低値にし提案を作らせない目印(test 4と同じ理由)
 	const words =
-		"明日の19時ごろに、ランニング仲間と5km走りたい。予算は3000円くらい。";
+		"__jev_low__ 明日の19時ごろに、ランニング仲間と5km走りたい。予算は3000円くらい。";
 	await composeAndRead(page, words);
 	// 時刻語(19時)があるため機会として読み解かれる(07 §3)
 	await expect(
