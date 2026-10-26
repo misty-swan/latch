@@ -338,17 +338,19 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 | match/group_candidates | 当該Intentを含む行を削除 | 同左 |
 | recent_vectors | 当該Intentの控えを削除(外部キーのCASCADE) | 同左 |
 | match_events | 当該Intentの行を削除(payloadにはraw_text・座標・識別子を格納しない) | 本人の全Intentに同じ |
-| latches・latch_members | 進行中の提案はcancelled | 退会者が参加するproposed/partial_acceptは即時cancelled。matchedは残置し表示名は「つながっていた相手」(終了の原因は画面に区別して見せない・01 §10・2026-10-19オーナー裁定)・チャットは全参加者読み取り専用 |
+| latches・latch_members | 進行中の提案はcancelled | 退会者が参加する進行中の提案(candidate・proposed・partial_accept)は即時cancelled(システムの都合の取り消しとして提案履歴を消費しない)。matchedからは退会者が参加取り消し(leave)と同じ処理で抜ける(1対1はLATCH全体をcancelledにしてチャットを双方読み取り専用にし、グループは退会者だけが抜け、残りが必要人数の下限を割れば全体をcancelled・2026-10-26オーナー決定(F9・LAT-94)。離脱・ブロックと区別できないようにする・01 §10)。completed・成立後のcancelledは変えない。行は残し、表示名は「つながっていた相手」(終了の原因は画面に区別して見せない・01 §10・2026-10-19オーナー裁定) |
 | proposal_history | 残す(同一ペア排除のため・01 §8)。削除で取り消した進行中の提案のために確保した行は解放する(§2.2) | 本人を含む行を削除 |
 | messages | 残す | 残す(表示名は「つながっていた相手」。本人からの削除要求には該当行の削除で応じる) |
 | latch_responses / latch_feedback | 残す(集計値のみ利用) | 同左ののちcalibration_recordsへ匿名集約 |
 | calibration_records | — | latch_idをnull化+粒度低下(時刻日付丸め・地域市区町村)のうえ anonymized=true |
 | notifications / sessions / survey_responses | 当該Intent由来の通知を削除(intent_idが一致するintent_expiredの行を削除・F7b実装確定。LATCHの通知は当該LATCHの取り消しに従う) | 削除(surveyを集計目的で残す場合はID系を除去) |
-| usage_counters | — | 本人keyの行を削除 |
+| usage_counters | — | 本人key(user_idと本人のIntentのid)の行を削除 |
 | blocks / reports | 残す | 残す(安全のための証跡。最後の活動から1年で削除) |
 | push_subscriptions / refresh_families | — | 削除・失効(発行済みJWTのjtiをKV失効リストへ登録) |
 | R2アイコン | — | icon_key解除+R2オブジェクト削除 |
 | users行 | — | status=deleted + 表示名/プロフィール/アイコンを消去 |
+
+**退会の実行順序(F9実装確定・LAT-94)。** DELETE /v1/users/meは、Intent削除と同じく取り消せない外部の削除を先に行う。(1)本人の全Intentのベクトル(Vectorize)と(2)R2のアイコンを消し、どちらかが失敗したらD1に触れず500 INTERNALで中断する(users行はactiveのまま残り、再試行で完結する)。(3)本人が参加する進行中の提案を閉じ(他のペアの提案履歴を戻すため、提案履歴の削除より前に行う)、(4)matchedのLATCHから参加取り消しと同じ処理で抜ける。(5)子の行(1対1・グループの候補・match_events・通知)・本人の全Intent・本人を含む提案履歴・購読・sessions・survey_responses・usage_countersの削除と、refresh_familiesの失効・users行のstatus=deleted(表示名とひとことは空文字・icon_keyはnull。行とauth列は再登録で使い直すため残す)を1回のバッチ(1つの取引)で書く。(6)(3)の後に並行した評価が作った進行中の提案を拾い直して閉じる(Intent行が消えた後は作られない)。保留の解放・次の組の提案・Web Pushの送り出しは応答の後(waitUntil)に回し、退会者が抜けたLATCHのチャットの接続へはclosedを知らせる(§3.4)。要求に使ったアクセストークンのjtiはKVの失効リストへ入れる。他の端末の発行済みJWTはjtiを保存していないため列挙できず、リフレッシュ族の失効で更新できなくなる(残り寿命は最大1時間・権限が関わる操作はusers.statusの再検証で拒む・§2.3)。messages・latch_responses・latch_feedback・blocks・reports・latches・latch_membersは残す。calibration_recordsへの匿名集約は、calibration_recordsを作る処理の実装と同時に行う(F9時点で未実装・LAT-108)
 
 **Intent削除の実行順序(F3実装確定)。** Vectorizeの該当ベクトルの削除を先に実行し、これが失敗した場合はD1に触れず500 INTERNALで中断する(クライアントの再試行で完結する)。この順序により「Intent行が消えたならベクトルも消えている」ことを削除APIの側で保証する。ベクトルの削除は期限+7日の遅延ではなく**無条件の即時削除**である。**D1の削除(不具合の修正工程(第2回)で確定)。** 子の行(1対1・グループの候補・match_events・intent_expiredの通知)と本体の削除は1回のバッチ(1つの取引)で行い、途中で失敗しても子だけが消えた状態を残さない(子の行が本体を外部キーで参照するため本体を最後に置く)。グループ候補は、dedup_key(「ID@version」のカンマ結合)の文字列の一致で本人の意思を含む行のidを先に絞ってから消す(表全体のintent_idsを展開する走査をやめる。D1の束縛の上限のため1文50件ずつに分ける・issue #16)。各段の所要時間はログintents.delete.timing(layer=vector・d1)に出し、ベクトルの削除の失敗のerror_codeは例外の分類名にする(06 §7)。**削除の後の書き戻し(不具合の修正工程(第2回)で確定)。** 削除の前に読み取りを済ませた第1段・Cronのバックフィルと修復・状態の同期が、削除の後にベクトルを書き戻すと孤立したベクトルが残る(issue #20)。ベクトルを書く経路はupsertの直前に意思の行を読み直して行が無ければ書かず、それでも残ったベクトルは他の評価のLayer 1で行の無いhitとして見つけて消す(06 §2の孤立したベクトルの自己修復)。
 
@@ -441,6 +443,8 @@ GET/POST /v1/users/me/survey               # 体感アンケート(01 §7・完�
 **POST /v1/users** — 201 `{user: UserDTO, access_token, refresh_token, expires_in}`(sub付きJWTへの付け替えと新規リフレッシュ族・04 §4)。18歳未満は422 UNDER_AGE・既に登録済み(同一(provider, subject)のactive行)は400 VALIDATION_FAILED。
 
 **GET・PATCH /v1/users/me** — 200 UserDTO(`{id, display_name, bio, has_icon}`)。行無し・status=deleted(退会済み)は一律404 NOT_FOUND(存在を露見させない)。
+
+**DELETE /v1/users/me(退会・F9実装確定・LAT-94)** — 本文 `{provider, idp_token}`(POST /v1/auth/tokenと同じ形)。クライアントは退会の直前にIdPで再ログインし、得たIDトークンを添える。サーバーはトークンを検証し、(provider, subject)が本人のusers行と一致し、発行(iat)から10分以内のときだけ§2.5の削除処理を行う。成功は204(本文なし)。本文の形の誤りは400 VALIDATION_FAILED、再認証の失敗(検証の失敗・別のアカウント・古いトークン・iat無し)は区別せず403 FORBIDDEN(401はクライアントがセッション切れとして再ログインへ倒すため使わない。自己リソースへの操作権限の欠如として§3.1のFORBIDDENに当たる)、行無し・退会済みは404 NOT_FOUND、外部の削除(ベクトル・アイコン)の失敗は500 INTERNAL(D1は未変更・再試行できる)。10分の窓は、端末に残った古いIdPトークンの使い回しを塞ぐための技術的な裁量で確定した値。成立後のLATCHの表示(LatchDTOのmembers・NotificationDTOのdisplay_names・GET /v1/blocks)では、退会した参加者を表示名「つながっていた相手」・bioは空文字・has_icon=falseとする
 
 **POST・DELETE /v1/users/me/icon** — 201 UserDTO / 204(冪等)。**GET /v1/users/{user_id}/icon** — 200(未認証・Cache-Control: private, max-age=3600)。ユーザー不在・deleted・アイコン無しは区別せず404。
 
