@@ -4,6 +4,7 @@
  * - requireRegistered: 登録済みユーザーのトークン(subあり)必須
  * - requirePreRegistration: 登録前トークン(idpProvider/idpSubjectあり・sub無し)必須
  * 各ミドルウェアは自己完結(requireAuthの検証+固有の検査)とし、next()は1回だけ呼ぶ。
+ * 認証の成功の直後に1ユーザーあたり60req/分を確かめ、超えたら429(docs/04 §5・http/rate-limit.ts)。
  * エラー応答はdocs/05 §3.1の共通形状(errorJson)のみ。期限切れのみTOKEN_EXPIRED、
  * それ以外の失敗は一律UNAUTHORIZED
  */
@@ -11,6 +12,7 @@
 import type { MiddlewareHandler } from "hono";
 import { type Env, jwtSecret } from "../env";
 import { type ErrorResult, errorJson } from "../http/errors";
+import { checkRequestRateLimit } from "../http/rate-limit";
 import { type AccessClaims, AccessTokenError, verifyAccessToken } from "./jwt";
 
 /** Honoのジェネリクス。検証済みクレームをVariablesのauthに載せる */
@@ -100,6 +102,10 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 		return c.json(result.result.body, result.result.status);
 	}
 	c.set("auth", result.claims);
+	const limited = await checkRequestRateLimit(c, result.claims);
+	if (limited !== null) {
+		return limited;
+	}
 	await next();
 };
 
@@ -118,6 +124,10 @@ export const requireRegistered: MiddlewareHandler<AppEnv> = async (c, next) => {
 			"この操作には登録済みユーザーのアクセストークンが必要です",
 		);
 		return c.json(r.body, r.status);
+	}
+	const limited = await checkRequestRateLimit(c, result.claims);
+	if (limited !== null) {
+		return limited;
 	}
 	await next();
 };
@@ -146,6 +156,10 @@ export const requirePreRegistration: MiddlewareHandler<AppEnv> = async (
 			"この操作には登録前のアクセストークンが必要です",
 		);
 		return c.json(r.body, r.status);
+	}
+	const limited = await checkRequestRateLimit(c, result.claims);
+	if (limited !== null) {
+		return limited;
 	}
 	await next();
 };

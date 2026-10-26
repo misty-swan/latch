@@ -244,6 +244,8 @@ pnpm --filter worker exec wrangler d1 execute DB --env staging --remote --file m
 
 負荷試験は、たくさんの利用者が同時に使ったときの応答の速さを測る試験である(02 §4 #33・F8b設計 §3)。k6という負荷をかけるプログラムで、このPCからstagingへ大量のリクエスト(サーバーへの依頼)を送る。スクリプトは`tools/load/`にある。
 
+負荷試験の利用者は、レート制限(1人あたり1分に60回・作成1日20件・更新1時間6回・04 §5)を受けない。stagingの設定(wrangler.jsoncの`LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX=load-`)が、名前(subject)が`load-`で始まる利用者だけを外すためである。包み(run.mjs)が作る利用者はすべて`load-`で始まるので、手順に足すことは無い。自分で別の名前の利用者を作って負荷をかけると、1分に60回を超えた分が429(使いすぎ)で断られる。
+
 ### 7.1 k6の入れ方
 
 k6は単体で動くプログラムで、pnpmの依存パッケージには入れない。次のどちらかで入れる。

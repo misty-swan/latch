@@ -34,6 +34,7 @@ import { intentPath } from "../../routes/paths";
 import { ScreenGrain } from "../shared";
 import { daysUntil } from "./IntentDetail";
 import "./intent.css";
+import { rateLimitMessage } from "../../api/rate-limit";
 
 const VERSION_CONFLICT_MESSAGE =
 	"ほかの画面で変更されました。最新の内容を読み直しました。";
@@ -188,7 +189,10 @@ function Editor({
 					void client.invalidateQueries({ queryKey: intentQueryKey(id) });
 					return;
 				}
-				if (reasons.length > 0) {
+				const limited = rateLimitMessage(error);
+				if (limited !== null) {
+					setMessages([limited]);
+				} else if (reasons.length > 0) {
 					setMessages(reasons.map((r) => REASON_MESSAGES[r] ?? r));
 				} else if (isOfflineError(error)) {
 					setMessages([OFFLINE_MESSAGES.generic]);

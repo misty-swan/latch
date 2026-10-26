@@ -200,6 +200,34 @@ describe("IntentEdit", () => {
 		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 
+	it("429(更新6回/時間)は理由ごとの案内を出す(05 §3.1)", async () => {
+		patchResponse = () =>
+			json(
+				{
+					error: {
+						code: "RATE_LIMITED",
+						message: "x",
+						details: { reason: "intent_updates_per_hour" },
+					},
+				},
+				429,
+			);
+		open();
+		await editTopic();
+		fireEvent.click(screen.getByRole("button", { name: "直して預ける" }));
+		fireEvent.click(
+			(await screen.findByRole("dialog")).querySelector(
+				".btn--primary",
+			) as HTMLButtonElement,
+		);
+		expect(
+			await screen.findByText(
+				"意思の書き直しは1時間に6回までです。時間をおいて、もう一度お試しください。",
+			),
+		).toBeTruthy();
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
 	it("version_conflictは案内を出して単一取得をやり直す", async () => {
 		patchResponse = () =>
 			json(

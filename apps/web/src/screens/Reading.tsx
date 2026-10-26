@@ -13,6 +13,7 @@ import type { ParseIntentResponse } from "@latch/shared";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { apiFetch } from "../api/client";
+import { rateLimitMessage } from "../api/rate-limit";
 import {
 	readComposeState,
 	readPendingCompose,
@@ -71,6 +72,12 @@ export function Reading() {
 						replace: true,
 						state: { toast: OFFLINE_MESSAGES.parse },
 					});
+					return;
+				}
+				// 429(レート制限)も読み解けなかったわけではないので入力欄へ戻して案内する(05 §3.1)
+				const limited = rateLimitMessage(error);
+				if (limited !== null) {
+					navigate(PATHS.compose, { replace: true, state: { toast: limited } });
 					return;
 				}
 				// 422 PARSE_FAILEDをはじめ読み解けなかった場合はparse-failedへ

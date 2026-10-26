@@ -39,6 +39,13 @@ export interface Env {
 	PIPELINE_AX: AnalyticsEngineDataset;
 	/** チャットルームのDurable Object(成立LATCHごとに1DO・F6a設計 §1)。Workerのルートからのみ到達する */
 	CHAT_DO: DurableObjectNamespace;
+	/** 1ユーザーあたり60req/分のWorkers Rate Limitingバインディング(docs/04 §5・http/rate-limit.ts) */
+	API_RATE_LIMITER: RateLimit;
+	/**
+	 * レート制限を外す試験用の利用者のidp_subjectの接頭辞(カンマ区切り・docs/10 §5)。
+	 * stagingは負荷試験のload-、手元のE2Eは.dev.varsのe2e-。prodでは設定自体を起動ガードが拒否する
+	 */
+	LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX?: string;
 	LATCH_LLM_MODE: string;
 	/** Embeddingの動作モード(既定stub・llm/embedding.ts)。Parser/JevのLATCH_LLM_MODEとは独立に切り替える(07 §2) */
 	LATCH_EMBEDDING_MODE?: string;
@@ -146,6 +153,9 @@ export const vapidKeysOf = (env: Env): VapidKeys => {
  * - prodでテスト鍵(LATCH_TEST_IDP_JWKS・LATCH_TEST_IDP_PRIVATE_JWKS)が残存 →
  *   例外(テスト鍵でprodを起動させない。秘密鍵はdevサインイン用のF2'計画Task 2)
  * - prodでJWT_SECRETが未設定・32字未満 → 例外
+ * - prodでLATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIXが設定されている → 例外(ENV_UNSAFE_RATE_LIMIT_RELAX・
+ *   試験用の利用者の緩和をprodへ持ち込まない・docs/10 §5)・API_RATE_LIMITERの欠落 → 例外
+ *   (ENV_MISSING_RATE_LIMITER)
  * - prodでLATCH_PUSH_MODEがreal以外 → 例外(ENV_UNSAFE_PUSH)・VAPID_*の欠落 → 例外
  *   (ENV_MISSING_VAPID)・VAPID公開鍵がテスト鍵 → 例外(ENV_UNSAFE_TEST_KEY)(F7b設計 §5.5)
  * - stagingでACCESS_AUD・ACCESS_TEAM_DOMAINの欠落 → 例外(ENV_MISSING_ACCESS・#11)
@@ -189,6 +199,17 @@ export const assertEnvSafety = (env: Env): void => {
 	if (env.TEST_QUEUES_DISABLED !== undefined) {
 		throw new Error(
 			"ENV_UNSAFE_TEST_QUEUE_GUARD: prod環境でTEST_QUEUES_DISABLEDが設定されている(docs/10 §2)",
+		);
+	}
+	if (env.LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX !== undefined) {
+		throw new Error(
+			"ENV_UNSAFE_RATE_LIMIT_RELAX: prod環境でレート制限の緩和(LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX)が設定されている(docs/10 §5)",
+		);
+	}
+	// prodの環境の区画(F10)でバインディングを書き漏らすと60req/分が効かないため起動を拒否する
+	if ((env.API_RATE_LIMITER as RateLimit | undefined) === undefined) {
+		throw new Error(
+			"ENV_MISSING_RATE_LIMITER: prod環境ではAPI_RATE_LIMITERバインディングが必須(docs/04 §5)",
 		);
 	}
 	if (env.JWT_SECRET === undefined || env.JWT_SECRET.length < 32) {

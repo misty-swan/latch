@@ -26,6 +26,11 @@ interface Section {
 	analytics_engine_datasets?: { binding: string; dataset: string }[];
 	durable_objects?: { bindings: { name: string }[] };
 	ai?: { binding: string };
+	ratelimits?: {
+		name: string;
+		namespace_id: string;
+		simple: { limit: number; period: number };
+	}[];
 	vars?: Record<string, string>;
 	triggers?: { crons: string[] };
 	workers_dev?: boolean;
@@ -44,6 +49,7 @@ const bindingNames = (s: Section) => ({
 	producers: s.queues?.producers?.map((b) => b.binding).sort(),
 	ae: s.analytics_engine_datasets?.map((b) => b.binding).sort(),
 	do: s.durable_objects?.bindings.map((b) => b.name).sort(),
+	ratelimits: s.ratelimits?.map((b) => b.name).sort(),
 });
 
 describe("wrangler.jsonc の env.staging", () => {
@@ -64,7 +70,20 @@ describe("wrangler.jsonc の env.staging", () => {
 			LATCH_LLM_MODE: "real",
 			LATCH_PUSH_MODE: "stub",
 			LATCH_INLINE_PIPELINE: "on",
+			LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX: "load-",
 		});
+	});
+
+	it("60req/分のバインディングが両方にあり、namespace_idが環境ごとに別(docs/04 §5)", () => {
+		const simple = { limit: 60, period: 60 };
+		expect(top.ratelimits).toEqual([
+			{ name: "API_RATE_LIMITER", namespace_id: "1001", simple },
+		]);
+		expect(staging.ratelimits).toEqual([
+			{ name: "API_RATE_LIMITER", namespace_id: "1002", simple },
+		]);
+		// トップレベル(手元・prodの元)には緩和を置かない(docs/10 §5)
+		expect(top.vars?.LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX).toBeUndefined();
 	});
 
 	it("応答の後の第1段・第2段(LATCH_INLINE_PIPELINE)はトップレベルもstagingもon(#30)", () => {

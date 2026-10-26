@@ -6,6 +6,7 @@
 import type { ReportCreateRequest } from "@latch/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError, apiFetch } from "../api/client";
+import { rateLimitMessage } from "../api/rate-limit";
 import { CONNECTIONS_QUERY_KEY, messagesQueryKey } from "../chat/queries";
 import { latchQueryKey } from "../latches/queries";
 import { BLOCKS_QUERY_KEY } from "../me/queries";
@@ -57,4 +58,5 @@ export const useBlock = (
 export const safetyErrorText = (error: unknown): string =>
 	error instanceof ApiError && error.code === "NOT_FOUND"
 		? "この操作はできませんでした。"
-		: "送れませんでした。時間をおいて、もう一度お試しください。";
+		: (rateLimitMessage(error) ??
+			"送れませんでした。時間をおいて、もう一度お試しください。");

@@ -9,6 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
 import { ApiError } from "../../api/client";
+import { rateLimitMessage } from "../../api/rate-limit";
 import {
 	latchQueryKey,
 	useLatchQuery,
@@ -68,6 +69,8 @@ const isNotFound = (error: unknown): boolean =>
 /** 送信失敗の一文。締め切られた提案か・それ以外(通信失敗等)かで分ける */
 const noticeFor = (error: unknown): string => {
 	if (isOfflineError(error)) return OFFLINE_MESSAGES.generic;
+	const limited = rateLimitMessage(error);
+	if (limited !== null) return limited;
 	const reasons = error instanceof ApiError ? error.details.reasons : undefined;
 	if (
 		Array.isArray(reasons) &&

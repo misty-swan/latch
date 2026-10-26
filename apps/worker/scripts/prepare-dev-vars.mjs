@@ -12,6 +12,8 @@
  * - VAPID_PUBLIC_KEY・VAPID_PRIVATE_KEY・VAPID_SUBJECT: コミット済みテスト用VAPID鍵
  *   (tests/fixtures/test-vapid.json・F7b設計 §5.5)。prodではassertEnvSafetyが
  *   テスト公開鍵を拒否する
+ * - LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX: E2Eの利用者(subjectの接頭辞e2e-)だけレート制限を
+ *   外す(docs/10 §5)。prodではassertEnvSafetyが設定自体を拒否する
  * 生成は決定的(同じ入力から常に同じ内容)で、実行のたびに上書きする。
  * .dev.varsはgitignore済みの生成物として扱う
  */
@@ -41,6 +43,7 @@ const content = [
 	`VAPID_PUBLIC_KEY=${testVapid.publicKey}`,
 	`VAPID_PRIVATE_KEY='${JSON.stringify(testVapid.privateJwk)}'`,
 	`VAPID_SUBJECT=${vapidSubject}`,
+	"LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX=e2e-",
 	"",
 ].join("\n");
 

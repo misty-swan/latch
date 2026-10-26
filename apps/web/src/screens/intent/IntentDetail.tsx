@@ -43,6 +43,7 @@ import { GlyphPaths } from "../Home";
 import { RouteToast, useRouteToast } from "../RouteToast";
 import { ScreenGrain } from "../shared";
 import "./intent.css";
+import { rateLimitMessage } from "../../api/rate-limit";
 
 const DAY_MS = 24 * 3_600_000;
 const TOAST_MS = 2400;
@@ -289,9 +290,10 @@ function Detail({ intent, now }: { intent: IntentDTO; now: Date }) {
 			return;
 		}
 		setNotice(
-			isOfflineError(error)
-				? OFFLINE_MESSAGES.generic
-				: "うまくいきませんでした。もう一度お試しください。",
+			rateLimitMessage(error) ??
+				(isOfflineError(error)
+					? OFFLINE_MESSAGES.generic
+					: "うまくいきませんでした。もう一度お試しください。"),
 		);
 	};
 
