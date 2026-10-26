@@ -123,8 +123,10 @@ export function LatchLoadFailed({ onRetry }: { onRetry(): void }) {
 	);
 }
 
-export function LatchScreen() {
-	const { id = "" } = useParams();
+/** latchIdを渡すと、URLではなくそのLATCHを描く(PCの右の提案の部屋・LAT-14) */
+export function LatchScreen({ latchId }: { latchId?: string } = {}) {
+	const params = useParams();
+	const id = latchId ?? params.id ?? "";
 	const client = useQueryClient();
 	// 定期取得の要否は直前に取れた状態で決める(回答待ちの間だけ30秒ごと)
 	const cached = client.getQueryData<LatchDTO>(latchQueryKey(id));

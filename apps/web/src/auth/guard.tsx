@@ -13,7 +13,8 @@ import { Navigate } from "react-router";
 import { PATHS } from "../routes/paths";
 import { authSession } from "./session";
 
-const signedIn = () => authSession.accessToken !== null || authSession.offline;
+export const signedIn = () =>
+	authSession.accessToken !== null || authSession.offline;
 
 export function StartRoute() {
 	return <Navigate to={signedIn() ? PATHS.home : PATHS.welcome} replace />;

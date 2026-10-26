@@ -35,5 +35,8 @@ export default defineConfig({
 	},
 	use: {
 		baseURL: `http://localhost:${e2ePort}`,
+		// 既定はiPhoneの大きさ(各specはスマホの画面を前提に書いている)。PCの幅(LAT-14の外枠)は
+		// desktop-layout.spec.tsが大きさを指定して確かめる
+		viewport: { width: 390, height: 844 },
 	},
 });

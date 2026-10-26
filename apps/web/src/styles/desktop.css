@@ -1,0 +1,288 @@
+/*
+ * PC向けの画面の追加分スタイル(LAT-14・docs/superpowers/specs/2026-10-26-lat14-desktop-design.md)。
+ * 見た目の基準は prototype/project/Desktop.dc.html。latch.css(改変禁止)の部品と変数をそのまま使い、
+ * ここには外枠(DesktopFrame)とPCだけの並べ方を置く。幅の区切りは src/desktop/media.ts と同じ
+ */
+
+/* 820px以下では外枠の要素を無いものとして扱い、スマホの見た目を変えない */
+.desk,
+.desk__main,
+.desk__list,
+.desk__room {
+	display: contents;
+}
+
+@media (min-width: 821px) {
+	html,
+	body {
+		background: var(--paper);
+	}
+	.desk {
+		--desk-col: 480px;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		height: 100dvh;
+		overflow: hidden;
+	}
+	/* 列ごとにトースト(position: fixed)の置き場を閉じる */
+	.desk__main,
+	.desk__list,
+	.desk__room {
+		display: block;
+		position: relative;
+		min-width: 0;
+		height: 100dvh;
+		contain: layout;
+	}
+	/* 中央の列: 画面の地と質感は列の幅いっぱいに敷き、中身だけを列の中央に寄せる */
+	.desk__main .screen {
+		padding-inline: max(0px, (100% - var(--desk-col)) / 2);
+	}
+	.desk__main .tabbar {
+		left: max(0px, (100% - var(--desk-col)) / 2);
+		right: max(0px, (100% - var(--desk-col)) / 2);
+	}
+	.desk .sheet {
+		width: 100%;
+		max-width: var(--desk-col);
+		margin-inline: auto;
+	}
+}
+
+@media (min-width: 1024px) {
+	.desk--nav {
+		--desk-col: 688px;
+		grid-template-columns: 256px minmax(0, 1fr);
+	}
+	.desk--nav.desk--room {
+		grid-template-columns: 256px minmax(0, 1fr) 520px;
+	}
+	.desk--nav.desk--list {
+		grid-template-columns: 256px 400px minmax(0, 1fr);
+	}
+	.desk--landing {
+		--desk-col: 100%;
+	}
+	/* 左のナビにロゴがあるので、列の上部バーのロゴは見せない(場所は保つ) */
+	.desk--nav .desk__main .topbar .brand,
+	.desk--nav .desk__list .topbar .brand {
+		visibility: hidden;
+	}
+	.desk--list .desk__list {
+		box-shadow: 1px 0 0 var(--line);
+		z-index: 1;
+	}
+	/* 右の部屋では「閉じる」は使わない(預けている画面の上にいるため) */
+	.desk__room .topbar__side:not(.topbar__side--end) {
+		visibility: hidden;
+	}
+	.desk__room > .screen,
+	.desk__room > * > .screen {
+		box-shadow: -1px 0 0 rgba(0, 0, 0, 0.2);
+	}
+}
+
+/* ---------- 左のナビ(Desktop.dc.html の nav) ---------- */
+/* .screen自身はcontent-boxのため、内側の余白を高さに含める */
+.desk-nav {
+	box-sizing: border-box;
+	height: 100dvh;
+	padding: 32px 20px 28px;
+	box-shadow: 1px 0 0 var(--line);
+	z-index: 1;
+}
+.desk-nav > :not(.grain) {
+	position: relative;
+	z-index: 1;
+}
+.desk-nav .brand {
+	align-self: flex-start;
+	padding: 0 12px;
+}
+.desk-nav__put {
+	justify-self: stretch;
+	justify-content: center;
+	margin-top: 36px;
+	box-shadow: 0 16px 30px -18px rgba(16, 22, 36, 0.8);
+}
+.desk-nav__put[aria-current="page"] {
+	box-shadow:
+		0 0 0 3px var(--paper),
+		0 0 0 4.5px var(--ink);
+}
+.desk-nav__put:focus-visible,
+.desk-nav__link:focus-visible,
+.desk-nav__me:focus-visible {
+	outline: 2px solid var(--ink);
+	outline-offset: 3px;
+}
+.desk-nav__links {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin-top: 28px;
+}
+.desk-nav__link {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	min-height: 48px;
+	padding: 0 14px;
+	border-radius: 14px;
+	color: var(--ink-2);
+	font-size: 15px;
+	letter-spacing: 0.04em;
+	transition: background-color var(--d-fast) var(--e-out);
+}
+.desk-nav__link:hover {
+	background: color-mix(in srgb, var(--paper-2) 60%, transparent);
+}
+.desk-nav__link[aria-current="page"] {
+	background: var(--paper-2);
+	color: var(--ink);
+	font-weight: 500;
+}
+.desk-nav__dot {
+	margin-left: auto;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--lamp);
+	box-shadow: 0 0 10px 2px var(--glow-a);
+}
+.desk-nav__spacer {
+	flex: 1;
+}
+.desk-nav__me {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	min-height: 56px;
+	padding: 0 12px;
+	border-radius: 14px;
+	color: var(--ink);
+}
+.desk-nav__me[aria-current="page"] {
+	background: var(--paper-2);
+}
+.desk-nav__name {
+	overflow: hidden;
+	font-size: 15px;
+	font-weight: 500;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* ---------- 右の提案の部屋(Desktop.dc.html の aside) ---------- */
+.desk-room--quiet {
+	box-sizing: border-box;
+	height: 100dvh;
+	padding: 32px 44px 36px;
+}
+.desk-room--quiet > :not(.grain) {
+	position: relative;
+	z-index: 1;
+}
+.desk-room__stage {
+	flex: 1;
+	display: grid;
+	place-items: center;
+}
+.desk-room__title {
+	color: var(--ink-2);
+}
+/* 到着カードの「右に表示中」 */
+.arrival__aside {
+	color: var(--lamp-ink);
+	white-space: nowrap;
+}
+
+/* ---------- ようこそ(PCの2列) ---------- */
+.welcome-desk {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) clamp(420px, 36vw, 520px);
+	height: 100dvh;
+}
+.welcome-desk > section {
+	position: relative;
+	z-index: 1;
+	min-height: 0;
+}
+.welcome-desk__art {
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	padding: 40px 56px;
+}
+.welcome-desk__art .brand {
+	align-self: flex-start;
+	padding: 0;
+}
+.welcome-desk__vessel {
+	left: -260px;
+	bottom: -380px;
+	width: 760px;
+	height: 760px;
+}
+.welcome-desk__stage {
+	position: relative;
+	flex: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 96px;
+}
+.welcome-desk__stage .latch {
+	--size: 360px;
+	--gap: 30px;
+}
+.welcome-desk__panel {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	overflow-y: auto;
+	padding: 40px 64px;
+	box-shadow: -1px 0 0 var(--line);
+	background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+.welcome-desk__title {
+	margin-top: 14px;
+	font-size: 36px;
+}
+.welcome-desk__steps {
+	display: flex;
+	flex-direction: column;
+	gap: 18px;
+	margin-top: 32px;
+}
+.welcome-desk__steps li {
+	display: grid;
+	grid-template-columns: 40px minmax(0, 1fr);
+	column-gap: 14px;
+	align-items: center;
+}
+.welcome-desk__actions {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	margin-top: 40px;
+}
+.welcome-desk__links {
+	display: flex;
+	justify-content: center;
+	gap: 18px;
+	margin-top: 28px;
+}
+/* 1024〜1279pxでは半円と縦書きを詰める(左の列が狭いため) */
+@media (max-width: 1279px) {
+	.welcome-desk__stage {
+		gap: 48px;
+	}
+	.welcome-desk__stage .latch {
+		--size: 260px;
+		--gap: 22px;
+	}
+	.welcome-desk__panel {
+		padding: 40px 48px;
+	}
+}

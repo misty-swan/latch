@@ -40,3 +40,14 @@ for (const name of ["localStorage", "sessionStorage"] as const) {
 		writable: true,
 	});
 }
+
+// happy-domの既定の画面の幅(1024px)はPC向けの外枠(LAT-14)の幅に当たる。画面の単体試験は
+// スマホの見た目を確かめるものなので、iPhoneの大きさにそろえる(PCの幅はweb E2Eで確かめる)。
+// nodeの環境(push-sw.test.tsなど)にはwindowが無い
+if (typeof window !== "undefined") {
+	(
+		window as unknown as {
+			happyDOM?: { setViewport(size: { width: number; height: number }): void };
+		}
+	).happyDOM?.setViewport({ width: 390, height: 844 });
+}

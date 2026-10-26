@@ -3,11 +3,13 @@
  * - welcome/intro/signin・規約ページ(terms/privacy)・ヘルプ(help)は未認証で見られる画面・それ以外はRequireAuthで保護する
  *   (未認証のまま入った場合はwelcomeへ送り返す)
  * - "/"は起動の入口(StartRoute)。どの道順にも当たらないURL(古いstart_urlの/index.htmlなど)は"/"へ送る(LAT-115)
+ * - 全画面をPC向けの外枠(DesktopFrame)で包む(LAT-14)
  * ルート定義はappRoutesとして出し・単体試験はcreateMemoryRouter(appRoutes)で使う
  */
 
 import { createBrowserRouter, Navigate } from "react-router";
 import { RequireAuth, StartRoute } from "./auth/guard";
+import { DesktopFrame } from "./desktop/DesktopFrame";
 import { PATHS } from "./routes/paths";
 import { Compose } from "./screens/Compose";
 import { Confirm } from "./screens/Confirm";
@@ -37,7 +39,7 @@ import { SignIn } from "./screens/SignIn";
 import { Report } from "./screens/safety/Report";
 import { Welcome } from "./screens/Welcome";
 
-export const appRoutes = [
+const screenRoutes = [
 	{ path: "/", element: <StartRoute /> },
 	{ path: PATHS.welcome, element: <Welcome /> },
 	{ path: PATHS.intro, element: <Intro /> },
@@ -216,6 +218,11 @@ export const appRoutes = [
 		),
 	},
 	{ path: "*", element: <Navigate to="/" replace /> },
+];
+
+// 全画面をPC向けの外枠で包む(スマホの幅では何も足さない・LAT-14)
+export const appRoutes = [
+	{ element: <DesktopFrame />, children: screenRoutes },
 ];
 
 export const createAppRouter = () => createBrowserRouter(appRoutes);
