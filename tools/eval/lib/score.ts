@@ -282,6 +282,10 @@ export type PrecisionAt = {
 	precision: number | null;
 	predictedPositive: number;
 	truePositive: number;
+	/** 正解yesの組のうち閾値を超えた割合(見逃しの少なさ)。採点できた正解yesの組が無ければnull */
+	recall: number | null;
+	/** 採点できた正解yesの組の数(失敗を除く) */
+	actualPositive: number;
 	/** 採点できた組の数(失敗を除く) */
 	n: number;
 	failedCalls: number;
@@ -292,10 +296,10 @@ export type PrecisionAt = {
  * ゴールドセットの組はHard Constraintを前提にしないためh=1とする。
  * layer5.tsはD1の部品を読み込むためNodeの採点から直接importせず、式と定数(@latch/shared)を揃える
  */
-const latchScore = (axes: JevAxes): number =>
+export const latchScore = (axes: JevAxes): number =>
 	Math.min(axes.would_a_accept_b, axes.would_b_accept_a) * LATCH.CALIBRATION_C;
 
-/** Offline Precision@閾値(docs/09 §4)。参考値で合否には使わない。超えるの判定はLayer 5と同じ「>」 */
+/** Offline Precision@閾値とRecall@閾値(docs/09 §4)。参考値で合否には使わない。超えるの判定はLayer 5と同じ「>」 */
 export const precisionAt = (
 	pairs: JevPair[],
 	outcomes: JevOutcome[],
@@ -307,6 +311,7 @@ export const precisionAt = (
 	let n = 0;
 	let predictedPositive = 0;
 	let truePositive = 0;
+	let actualPositive = 0;
 	let failedCalls = 0;
 	pairs.forEach((pair, i) => {
 		const o = outcomes[i] as JevOutcome;
@@ -315,6 +320,7 @@ export const precisionAt = (
 			return;
 		}
 		n++;
+		if (pair.match === "yes") actualPositive++;
 		if (latchScore(o.axes) > threshold) {
 			predictedPositive++;
 			if (pair.match === "yes") truePositive++;
@@ -326,6 +332,8 @@ export const precisionAt = (
 			predictedPositive === 0 ? null : truePositive / predictedPositive,
 		predictedPositive,
 		truePositive,
+		recall: actualPositive === 0 ? null : truePositive / actualPositive,
+		actualPositive,
 		n,
 		failedCalls,
 	};

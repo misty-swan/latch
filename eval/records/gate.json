@@ -1,5 +1,5 @@
 {
-  "ranAt": "2026-10-24T08:21:40.682Z",
+  "ranAt": "2026-10-26T07:37:02.872Z",
   "passed": true,
   "failures": [],
   "scores": {
@@ -15,9 +15,9 @@
         "rate": 1
       },
       "category": {
-        "correct": 51,
+        "correct": 50,
         "n": 53,
-        "rate": 0.9622641509433962
+        "rate": 0.9433962264150944
       },
       "time_start": {
         "correct": 96,
@@ -25,9 +25,9 @@
         "rate": 0.9696969696969697
       },
       "participants": {
-        "correct": 11,
+        "correct": 10,
         "n": 11,
-        "rate": 1
+        "rate": 0.9090909090909091
       },
       "budget": {
         "correct": 25,
@@ -49,6 +49,10 @@
       },
       "failedCalls": 0,
       "failures": [
+        {
+          "id": "conn-018",
+          "field": "category"
+        },
         {
           "id": "conn-021",
           "field": "category"
@@ -72,19 +76,23 @@
         {
           "id": "bnd-016",
           "field": "geo_warning"
+        },
+        {
+          "id": "bnd-025",
+          "field": "participants"
         }
       ]
     },
     "jev": {
       "primary": {
-        "median": 0.030000000000000027,
+        "median": 0.03,
         "n": 329,
         "failedCalls": 0,
         "totalCalls": 94,
         "failedPairs": []
       },
       "fallback": {
-        "median": 0.030000000000000027,
+        "median": 0.020000000000000018,
         "n": 329,
         "failedCalls": 0,
         "totalCalls": 94,
@@ -96,29 +104,33 @@
     "precisionAt060": {
       "primary": {
         "threshold": 0.6,
-        "precision": 0.8235294117647058,
-        "predictedPositive": 17,
-        "truePositive": 14,
+        "precision": 0.88,
+        "predictedPositive": 25,
+        "truePositive": 22,
+        "recall": 1,
+        "actualPositive": 22,
         "n": 47,
         "failedCalls": 0
       },
       "fallback": {
         "threshold": 0.6,
-        "precision": 0.7777777777777778,
-        "predictedPositive": 27,
-        "truePositive": 21,
+        "precision": 0.8461538461538461,
+        "predictedPositive": 26,
+        "truePositive": 22,
+        "recall": 1,
+        "actualPositive": 22,
         "n": 47,
         "failedCalls": 0
       }
     },
     "latencyP95Ms": {
-      "parser": 2403.009071999999,
-      "jevPrimary": 195.26372999999876,
-      "jevFallback": 1898.463284999998
+      "parser": 2634.7256650000054,
+      "jevPrimary": 354.43641200000275,
+      "jevFallback": 1905.1090909999912
     },
     "inputTokensMean": {
       "parser": 2739.5982905982905,
-      "jevFallback": 1496.276595744681
+      "jevFallback": 1925.276595744681
     }
   },
   "models": {
@@ -134,7 +146,7 @@
     "approvedByOwner": "2026-10-24"
   },
   "fingerprint": {
-    "apps/worker/src/llm/real/prompts.ts": "e94fffea753442f2b34b3afb5f5baf569640206204e6033e8705e831bd275ac6",
+    "apps/worker/src/llm/real/prompts.ts": "611841a354c7b5746774f4f3737ce8e18bcd088839301756d80acd412aa1c5ca",
     "apps/worker/src/llm/real/anthropic.ts": "1b457c5ff39777b6abae3a954318dca5fa426b3078c15569af940304f94e8013",
     "apps/worker/src/llm/real/parser.ts": "008383420feb50630d5764a86187ea4e6488dec4672ae247ce134baf695a33a3",
     "apps/worker/src/llm/real/jev-typesafe.ts": "e90d1a920654c8d43c659f5a4d098caf010b2492e0210476049867b7c5e313d7",
@@ -146,5 +158,5 @@
     "eval/goldset/parser.yaml": "0a1559e0534deb7db89c40913e79c95e524e22c0a042eb82af610825b91b9f04",
     "eval/goldset/jev-pairs.yaml": "9b6130b36e461c53f40a2f24bedbfed65fd2fa28b48d37c9088a8db2cd1aa6a0"
   },
-  "fingerprintArtifacts": "015c3d7f13c519b44118154363a0acb53ccdb45e5e939d4898048c85f0bdcdc0"
+  "fingerprintArtifacts": "07bb366fa266eaea83210fc01aa17c1a2b5af5314c9dda1cbcb81d3e87253b5e"
 }

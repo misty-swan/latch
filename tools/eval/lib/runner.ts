@@ -331,6 +331,7 @@ export const formatSummary = (r: GateRecord): string => {
 		`  予備Anthropic: ${numText(j.fallback.median)}(失敗 ${j.fallback.failedCalls}/${j.fallback.totalCalls})`,
 		"参考値:",
 		`  Precision@0.60: 第一候補 ${numText(r.reference.precisionAt060.primary.precision)}・予備 ${numText(r.reference.precisionAt060.fallback.precision)}`,
+		`  Recall@0.60: 第一候補 ${numText(r.reference.precisionAt060.primary.recall)}・予備 ${numText(r.reference.precisionAt060.fallback.recall)}`,
 		`  応答時間p95(ミリ秒): Parser ${numText(r.reference.latencyP95Ms.parser, 0)}・Jev第一候補 ${numText(r.reference.latencyP95Ms.jevPrimary, 0)}・Jev予備 ${numText(r.reference.latencyP95Ms.jevFallback, 0)}`,
 		`モデル: Anthropic ${r.models.anthropic}・TypeSafe ${r.models.typesafe_requested}(応答 ${r.models.typesafe_answered.join(", ") || "なし"})`,
 	];

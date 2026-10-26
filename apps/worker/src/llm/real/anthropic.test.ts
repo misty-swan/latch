@@ -7,6 +7,7 @@ import {
 	JEV_ANTHROPIC_SYSTEM_PROMPT,
 	JEV_OUTPUT_SCHEMA,
 	JEV_QUESTIONS,
+	JEV_READING_GUIDE,
 	PARSER_OUTPUT_SCHEMA,
 	PARSER_SYSTEM_PROMPT,
 	TYPESAFE_MODEL,
@@ -269,5 +270,16 @@ describe("指示文とモデル名(設計書§0.4・§4.1・§5)", () => {
 			[...JEV_AXES].sort(),
 		);
 		expect(JEV_OUTPUT_SCHEMA.additionalProperties).toBe(false);
+	});
+
+	it("意思の読み方は第一候補の各軸の問いの前と、予備のsystem文に1回だけ置く(LAT-109)", () => {
+		for (const axis of JEV_AXES) {
+			expect(
+				JEV_QUESTIONS[axis].instructions.startsWith(JEV_READING_GUIDE),
+			).toBe(true);
+		}
+		expect(JEV_ANTHROPIC_SYSTEM_PROMPT.split(JEV_READING_GUIDE)).toHaveLength(
+			2,
+		);
 	});
 });
