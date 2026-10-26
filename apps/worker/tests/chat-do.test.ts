@@ -1,9 +1,16 @@
 /**
  * ChatRoomDOの統合試験(F6a設計 §1・§2.4・§3.4)。
  * LATCH・membersは直接INSERTで配置し、DOへはenv.CHAT_DOのstubで直接/connectする
- * (ルートのチケット検証はchat-api側の試験が担う)
+ * (ルートのチケット検証はchat-api側の試験が担う)。
+ * DOの再起動(docs/10 §6の縮退試験)はabortAllDurableObjects(強制の再起動)と
+ * evictDurableObject(退避)で作る
  */
-import { env } from "cloudflare:test";
+import {
+	abortAllDurableObjects,
+	env,
+	evictDurableObject,
+	runInDurableObject,
+} from "cloudflare:test";
 import type { ChatServerFrame, MessageDTO } from "@latch/shared";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -485,5 +492,82 @@ describe("notify(ルート→DOの内部呼び出し)", () => {
 		expect(await nextFrame(cb)).toEqual({ type: "closed" });
 		expect(await cb.closed).toBe(1000);
 		expect(ca.count()).toBe(0);
+	});
+});
+
+describe("DOの再起動(縮退試験・docs/10 §6)", () => {
+	it("強制の再起動(abort)で接続は切れ、履歴はD1から読め、つなぎ直すと送受信できる", async () => {
+		const { id, members } = await setup();
+		const [a, b] = members;
+		const oldJti = ulid();
+		const first = await connectRaw(id, a, oldJti);
+		expect(first.status).toBe(101);
+		if (first.webSocket === null) throw new Error("webSocketが無い");
+		const ca = accept(first.webSocket);
+		const cb = await connect(id, b);
+		sendFrame(ca, "再起動の前1", "c1");
+		await nextFrame(cb);
+		sendFrame(ca, "再起動の前2", "c2");
+		await nextFrame(cb);
+
+		// DOのメモリ上の状態(接続・送信の直列化・IDの採番)を捨てる。保存したデータは残る
+		await abortAllDurableObjects();
+		await Promise.all([ca.closed, cb.closed]);
+
+		// 履歴の正はD1にあり、再起動の前の発言がそのまま読める
+		const before = await listMessages(db, id, null);
+		expect(before.items.map((m) => m.body)).toEqual([
+			"再起動の前1",
+			"再起動の前2",
+		]);
+		// 使用済みのチケットの記録はDOの保存領域にあり、再起動の後も使い回せない
+		expect((await connectRaw(id, a, oldJti)).status).toBe(401);
+		// 新しいチケットでつなぎ直すと、送受信が続けられる
+		const ca2 = await connect(id, a);
+		const cb2 = await connect(id, b);
+		sendFrame(cb2, "再起動の後", "c3");
+		const fa = await nextFrame(ca2);
+		expect(fa).toMatchObject({ type: "message", body: "再起動の後" });
+		await nextFrame(cb2);
+		// IDの採番がやり直しになっても、再起動の後の発言は前の発言より後ろに並ぶ
+		const after = await listMessages(db, id, null);
+		expect(after.items.map((m) => m.body)).toEqual([
+			"再起動の前1",
+			"再起動の前2",
+			"再起動の後",
+		]);
+		if (fa.type === "message") {
+			expect(fa.id > (before.items[1]?.id ?? "")).toBe(true);
+		}
+	});
+
+	it("退避(evict)では接続は休止して残り、起こされた後も送信が相手に届く", async () => {
+		const { id, members } = await setup();
+		const [a, b] = members;
+		const ca = await connect(id, a);
+		const cb = await connect(id, b);
+
+		const instanceOf = () =>
+			runInDurableObject(stubOf(id), (instance: unknown) => instance);
+		const beforeEvict = await instanceOf();
+
+		await evictDurableObject(stubOf(id));
+
+		// 休止をまたいだ接続の情報(利用者・LATCH)は接続に残した情報から読み直される
+		sendFrame(ca, "退避の後", "c1");
+		expect(await nextFrame(ca)).toMatchObject({
+			type: "message",
+			body: "退避の後",
+			user_id: a,
+			client_id: "c1",
+		});
+		expect(await nextFrame(cb)).toMatchObject({
+			type: "message",
+			body: "退避の後",
+			client_id: null,
+		});
+		expect(await countOf(id)).toBe(1);
+		// 起こされたのは別の実体(メモリ上の状態は作り直されている)
+		expect(await instanceOf()).not.toBe(beforeEvict);
 	});
 });
