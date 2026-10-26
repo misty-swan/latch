@@ -10,6 +10,7 @@
  * - (e) 埋め込みバックフィルとベクトルmetadata整合の修復
  * - (g) 未評価回収(キュー消失の安全網)
  * - (h) つながりIntentの1回きり遅延再評価
+ * - (k) Jevの保留(予算・circuit breaker・予備も失敗)が残った意思の判定し直し(LAT-105)
  * - 保持期間: match_candidates・group_candidatesの30日削除と
  *   usage_countersの90日削除(docs/05 §2.6)
  * - (i) 回答期限切れ(expired化・yesの無効化・参加者の保留解放)と保留の期限切れ・解放
@@ -41,7 +42,12 @@ import {
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
 import { runCalibrationSweep } from "../calibration/records";
-import { type Clock, jstDayKey, jstMonthKey } from "../clock/clock";
+import {
+	type Clock,
+	jstDayKey,
+	jstDayStart,
+	jstMonthKey,
+} from "../clock/clock";
 import {
 	groupCandidates,
 	intents,
@@ -54,6 +60,7 @@ import {
 } from "../db/schema";
 import type { Env } from "../env";
 import { MS_PER_DAY } from "../intents/expiry";
+import { isBreakerOpen } from "../jev/breaker";
 import { closeLatch } from "../latches/close";
 import { completeDueLatches } from "../latches/complete";
 import { proposeNextGroupAfterClose } from "../latches/next-group";
@@ -644,6 +651,88 @@ const runDelayedReevalSweep = async (
 };
 
 /**
+ * (k) Jevの保留の判定し直し(docs/06 §2(k)・LAT-105)。評価でJevの保留が残った
+ * (jev_held_atあり=jev_resultの無い候補を残した)activeの意思を、circuit breakerが閉じていれば
+ * 評価し直す。判定し直しは評価本体をそのまま呼ぶため、予算・枠(K_j=8)・breakerの規則と
+ * jev_resultの再利用はそのまま効き、印は評価が書き直す(保留が無くなれば消える)。
+ * 連打を防ぐため次を満たす意思だけを、保留の古い順にCRON_BATCH_LIMIT(500)件まで拾う:
+ * - 30分の再評価抑制を過ぎている(抑制の例外にしない・同じ意思を30分に1回まで)
+ * - 予算(budget)の保留は保留したJSTの日付が変わった後(予算は日付で戻るため。1か月の上限は
+ *   日付ごとに1回試して再び保留になる)
+ * - breakerの保留はbreakerが閉じていること(当回の開始時に確かめる)
+ * - 失敗(failed)の保留は連続回数がJEV_HELD_FAILED_RETRY_MAX(3)回まで(同じ組が失敗し続けても
+ *   Jevを呼び続けない。上限を超えた組は相手側の評価・本人の更新を待つ)
+ * 走査の途中でbreakerが開いたら当回を打ち切る(障害中に評価を空回りさせない)
+ */
+const runJevHeldSweep = async (
+	env: Env,
+	clock: Clock,
+	metricsBudget: MetricsBudget,
+): Promise<void> => {
+	if (await isBreakerOpen(env.PIPELINE_KV, clock.now())) {
+		return;
+	}
+	const db = drizzle(env.DB);
+	const now = clock.now();
+	const rows = await db
+		.select({ id: intents.id })
+		.from(intents)
+		.where(
+			and(
+				eq(intents.status, "active"),
+				isNotNull(intents.jevHeldAt),
+				isNotNull(intents.embeddedAt),
+				or(
+					isNull(intents.lastEvaluatedAt),
+					lte(
+						intents.lastEvaluatedAt,
+						new Date(now.getTime() - PIPELINE.REEVALUATION_SUPPRESSION_MS),
+					),
+				),
+				or(
+					eq(intents.jevHeldReason, "breaker"),
+					and(
+						eq(intents.jevHeldReason, "failed"),
+						lte(intents.jevHeldCount, LATCH.JEV_HELD_FAILED_RETRY_MAX),
+					),
+					and(
+						eq(intents.jevHeldReason, "budget"),
+						lt(intents.jevHeldAt, jstDayStart(now)),
+					),
+				),
+			),
+		)
+		.orderBy(asc(intents.jevHeldAt), asc(intents.id))
+		.limit(PIPELINE.CRON_BATCH_LIMIT);
+	let reevaluated = 0;
+	for (const row of rows) {
+		if (await isBreakerOpen(env.PIPELINE_KV, clock.now())) {
+			// count=打ち切り時点までの当回の判定し直しの件数
+			logger.warn("cron.jev_held.aborted", { count: reevaluated });
+			break;
+		}
+		try {
+			const result = await evaluateIntent(env, row.id, clock, {
+				origin: "cron_jev_held",
+				metricsBudget,
+			});
+			if (result !== null) {
+				reevaluated += 1;
+			}
+		} catch (error) {
+			logger.warn("cron.item.failed", {
+				layer: "cron_jev_held",
+				intent_id: row.id,
+				error_code: errorCodeOf(error),
+			});
+		}
+	}
+	if (reevaluated > 0) {
+		logger.info("cron.jev_held.reevaluated", { count: reevaluated });
+	}
+};
+
+/**
  * 保持期間削除(docs/05 §2.6)。1対1候補は評価確定から30日
  * (updated_at≤now−30日)・グループ候補は生成から30日(created_at≤now−30日)で
  * 削除する(01 §21)。usage_countersはperiodの日付がnowのJST日付より90日
@@ -974,6 +1063,10 @@ export const runScheduledPipeline = async (
 	);
 	await runIsolated("delayed", () =>
 		runDelayedReevalSweep(env, clock, metricsBudget),
+	);
+	// 保留の判定し直しは(a)(b)(g)(h)の後に置く(同じ実行で先に評価された意思は抑制で拾わない)
+	await runIsolated("jev_held", () =>
+		runJevHeldSweep(env, clock, metricsBudget),
 	);
 	await runIsolated("retention", () => runRetentionSweep(env, clock));
 	// 回答期限切れで閉じたLATCHのid。走査が途中で失敗しても、閉じた分は次集合の提案へ渡す

@@ -127,6 +127,9 @@ const insertIntent = async (userId: string): Promise<string> => {
 		lastEvaluatedAt: null,
 		vectorDeletedAt: null,
 		delayedReevalAt: null,
+		jevHeldAt: null,
+		jevHeldReason: null,
+		jevHeldCount: 0,
 		createdAt: now,
 		updatedAt: now,
 	});

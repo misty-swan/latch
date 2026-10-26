@@ -52,6 +52,9 @@ export type NotificationLevel = "proposals_only" | "muted";
 export type MatchEventStatus = "pending" | "processed" | "failed" | "dead";
 /** 1対1評価候補の状態 */
 export type MatchCandidateStatus = "candidate" | "proposed" | "closed";
+
+/** 評価で残ったJevの保留の理由(docs/06 §2(k)・§5)。上限で枠に収まらなかった分(cap)は含めない */
+export type JevHeldKind = "budget" | "breaker" | "failed";
 /** グループ評価候補の状態 */
 export type GroupCandidateStatus = "candidate" | "proposed" | "closed";
 /** 提案履歴の結果。matched/rejectedが恒久排除・deferred/expiredは機会Intentの条件付き再提案の参照に使う(docs/01 §8) */
@@ -184,6 +187,15 @@ export const intents = sqliteTable(
 		vectorDeletedAt: integer("vector_deleted_at", { mode: "timestamp_ms" }),
 		/** active化後10分の1回きり遅延再評価の実行済み記録(docs/06 §2(h)) */
 		delayedReevalAt: integer("delayed_reeval_at", { mode: "timestamp_ms" }),
+		/**
+		 * 評価でJevの保留(予算・circuit breaker・失敗)が残った時刻。保留の無い評価でnullへ戻す
+		 * (Cronの保留の判定し直し・docs/06 §2(k)・LAT-105)
+		 */
+		jevHeldAt: integer("jev_held_at", { mode: "timestamp_ms" }),
+		/** 保留の理由(budget > breaker > failed の順で1つ)。jev_held_atと同時に書く */
+		jevHeldReason: text("jev_held_reason").$type<JevHeldKind>(),
+		/** 失敗(failed)の保留で終わった評価の連続回数。failed以外の保留・保留の無い評価で0へ戻す */
+		jevHeldCount: integer("jev_held_count").notNull().default(0),
 		createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 		updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 	},
@@ -194,6 +206,8 @@ export const intents = sqliteTable(
 		index("intents_status_starts_at_idx").on(t.status, t.startsAt),
 		// 期限バッチ
 		index("intents_status_expires_at_idx").on(t.status, t.expiresAt),
+		// 保留の判定し直し(docs/06 §2(k))
+		index("intents_status_jev_held_at_idx").on(t.status, t.jevHeldAt),
 	],
 );
 

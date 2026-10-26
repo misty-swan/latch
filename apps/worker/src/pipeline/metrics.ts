@@ -22,6 +22,7 @@ export type EvaluateOrigin =
 	| "vector_reflection"
 	| "cron_backfill"
 	| "cron_delayed"
+	| "cron_jev_held"
 	| "cron_other";
 
 /** writeStage2Metricsの入力(第2段の計測値) */

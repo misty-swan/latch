@@ -87,6 +87,9 @@ const insertIntent = async (userId: string, form: Form): Promise<IntentRow> => {
 		lastEvaluatedAt: null,
 		vectorDeletedAt: null,
 		delayedReevalAt: null,
+		jevHeldAt: null,
+		jevHeldReason: null,
+		jevHeldCount: 0,
 		createdAt: ago(24 * HOUR),
 		updatedAt: ago(24 * HOUR),
 	};

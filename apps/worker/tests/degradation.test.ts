@@ -226,6 +226,9 @@ const intentFixture = (
 	lastEvaluatedAt: null,
 	vectorDeletedAt: null,
 	delayedReevalAt: null,
+	jevHeldAt: null,
+	jevHeldReason: null,
+	jevHeldCount: 0,
 	createdAt: FIXED_NOW,
 	updatedAt: FIXED_NOW,
 	...overrides,
@@ -233,18 +236,27 @@ const intentFixture = (
 
 /**
  * 利用者と意思の行を入れる。embedded=trueなら埋め込み済み(stubベクトルをupsertし
- * embedded_atを書く・第1段の後の状態)にする
+ * embedded_atを書く・第1段の後の状態)にする。old=trueなら前の日に評価と遅延再評価を
+ * 終えた古い意思にする(Cronの未評価の回収(g)・遅延再評価(h)では拾われない)
  */
 const seedIntent = async (
-	options: { embedded: boolean } = { embedded: true },
+	options: { embedded: boolean; old?: boolean } = { embedded: true },
 ): Promise<typeof intents.$inferSelect> => {
 	const userId = ulid();
 	await insertUserRow(userId);
+	const dayBefore = new Date(BASE - MS_PER_DAY);
 	const row = intentFixture({
 		id: ulid(),
 		userId,
 		embeddedAt: options.embedded ? FIXED_NOW : null,
 		embeddingModel: options.embedded ? "stub" : null,
+		...(options.old === true
+			? {
+					embeddedAt: dayBefore,
+					lastEvaluatedAt: dayBefore,
+					delayedReevalAt: dayBefore,
+				}
+			: {}),
 	});
 	await db.insert(intents).values(row);
 	if (options.embedded) {
@@ -369,12 +381,14 @@ describe("Jevの全断(docs/10 §6・docs/06 §5)", () => {
 		};
 	};
 
-	it("提案化は止まり候補は保留で残り、10連続失敗でcircuit breakerが開いて以後はJevを呼ばない。30分後に閉じると次の評価で提案が出る", async () => {
-		// 同じ主題のつながり7件(別々の利用者)。どの意思から見ても相手は6件
+	it("提案化は止まり候補は保留で残り、10連続失敗でcircuit breakerが開いて以後はJevを呼ばない。30分後に閉じると毎分Cronが保留を判定し直して提案が出る", async () => {
+		// 同じ主題の古いつながり7件(別々の利用者・前の日に評価と遅延再評価を終えたもの)。
+		// どの意思から見ても相手は6件
 		const rows = [];
-		for (let i = 0; i < 7; i += 1) rows.push(await seedIntent());
-		const [a, b1, b2, b3] = rows as [
-			(typeof rows)[number],
+		for (let i = 0; i < 7; i += 1) {
+			rows.push(await seedIntent({ embedded: true, old: true }));
+		}
+		const [a, b1, b2] = rows as [
 			(typeof rows)[number],
 			(typeof rows)[number],
 			(typeof rows)[number],
@@ -427,22 +441,47 @@ describe("Jevの全断(docs/10 §6・docs/06 §5)", () => {
 		expect(down.calls).toEqual(before);
 		expect(await db.select().from(latches)).toHaveLength(0);
 
-		// 開いてから30分が過ぎるとbreakerは閉じる。Jevが戻った後の次の評価(相手側の
-		// 新しい評価)では、保留だった組にJevが呼ばれて提案が出る。保留を復旧後に自ら
-		// 判定し直す仕組みはまだ無い(修正工程で作る・LAT-105)
-		const r4 = await evaluateIntent(
+		// 保留した3件には保留の印が付く(aは予備も失敗(8件でbreakerは開く前)・b1とb2はbreaker)
+		expect((await intentRowOf(a.id))?.jevHeldReason).toBe("failed");
+		expect((await intentRowOf(a.id))?.jevHeldCount).toBe(1);
+		expect((await intentRowOf(b1.id))?.jevHeldReason).toBe("breaker");
+		expect((await intentRowOf(b2.id))?.jevHeldReason).toBe("breaker");
+
+		// 開いている間の毎分Cronは判定し直さない
+		await runScheduledPipeline(testEnv, at(3 * MIN));
+		expect((await intentRowOf(a.id))?.lastEvaluatedAt).toEqual(FIXED_NOW);
+		expect(await db.select().from(latches)).toHaveLength(0);
+
+		// 開いてから30分が過ぎるとbreakerは閉じる。本人の更新も相手側の新しい評価も無いまま、
+		// 次の毎分Cron(保留の判定し直し(k)・LAT-105)が保留した3件を評価し直し、Jevが戻った
+		// 後の判定で提案が出る(Cronの評価は既定のstubのJevを使う)
+		const recovered = new Date(BASE + 2 * MIN + LATCH.BREAKER_OPEN_MS);
+		await runScheduledPipeline(testEnv, fixedClock(recovered));
+		for (const held of [a, b1, b2]) {
+			const row = await intentRowOf(held.id);
+			expect(row?.lastEvaluatedAt).toEqual(recovered);
+			expect(row?.jevHeldAt).toBeNull();
+			// 通知の上限(1Intent同時進行3件)を超えた分は保留のLATCHになる(docs/06 §4)
+			const proposed = (await latchesOfUser(held.userId)).filter(
+				(l) => l.status === "proposed",
+			);
+			expect(proposed.length).toBeGreaterThan(0);
+		}
+		// 判定し直しにも予算とJevの枠(1回の評価で8回)がそのまま効く(1Intent1日40回の内側)
+		const counters = await db
+			.select()
+			.from(usageCounters)
+			.where(eq(usageCounters.scope, "jev_intent"));
+		const countOf = (id: string) =>
+			counters.find((c) => c.key === id)?.count ?? 0;
+		expect(countOf(a.id)).toBeLessThanOrEqual(2 * LATCH.JEV_CALLS_PER_EVENT);
+		expect(countOf(b1.id)).toBeLessThanOrEqual(6 + LATCH.JEV_CALLS_PER_EVENT);
+		// 判定し直しの後の毎分Cronは同じ意思を重ねて評価しない(印が消え、30分の抑制も効く)
+		await runScheduledPipeline(
 			testEnv,
-			b3.id,
-			at(MIN + LATCH.BREAKER_OPEN_MS + MIN),
+			fixedClock(new Date(recovered.getTime() + MIN)),
 		);
-		expect(r4?.jevCalls).toBeGreaterThan(0);
-		expect(r4?.jevHeld.breaker).toBe(0);
-		expect(r4?.proposed).toBeGreaterThan(0);
-		// 通知の上限(1Intent同時進行3件)を超えた分は保留のLATCHになる(docs/06 §4)
-		const forB3 = await latchesOfUser(b3.userId);
-		expect(forB3.filter((l) => l.status === "proposed")).toHaveLength(
-			r4?.proposed ?? -1,
-		);
+		expect((await intentRowOf(a.id))?.lastEvaluatedAt).toEqual(recovered);
 	});
 
 	it("circuit breakerが開いている間も、Parser(構造化)とEmbedding(第1段)は止まらず意思の登録は進む", async () => {

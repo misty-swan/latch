@@ -40,6 +40,7 @@ import {
 import type { Env as WorkerEnv } from "../src/env";
 import worker from "../src/index";
 import { MS_PER_DAY } from "../src/intents/expiry";
+import { BREAKER_KEY, recordJevOutcomes } from "../src/jev/breaker";
 import { stubEmbedding } from "../src/llm/stub/embedding";
 import { handleQueueBatch } from "../src/pipeline/consumer";
 import {
@@ -47,6 +48,7 @@ import {
 	runPushSweep,
 	runScheduledPipeline,
 } from "../src/pipeline/cron";
+import { evaluateIntent } from "../src/pipeline/evaluate";
 import { buildNormalizedText } from "../src/pipeline/normalize";
 import {
 	holdMemoryVectorWrites,
@@ -128,6 +130,9 @@ const intentFixture = (
 	lastEvaluatedAt: null,
 	vectorDeletedAt: null,
 	delayedReevalAt: null,
+	jevHeldAt: null,
+	jevHeldReason: null,
+	jevHeldCount: 0,
 	createdAt: FIXED_NOW,
 	updatedAt: FIXED_NOW,
 	...overrides,
@@ -633,6 +638,9 @@ describe("直接呼び出し(runScheduledPipeline+fixedClock)", () => {
 			// 埋め込みの直後に評価済み(通常の状態)。30分抑制の内側でも評価する(#10)
 			lastEvaluatedAt: new Date(BASE - 10 * MIN),
 			delayedReevalAt: null,
+			jevHeldAt: null,
+			jevHeldReason: null,
+			jevHeldCount: 0,
 		});
 		await insertIntentRow(target);
 		await upsertVector(target);
@@ -1960,5 +1968,279 @@ describe("F7b: Intent期限切れのアプリ内通知とPushの回収(F7b設計
 		expect(await stateOf(fresh)).toBe("pending");
 		expect(await stateOf(mid)).toBe("sent");
 		expect(await stateOf(old)).toBe("failed");
+	});
+});
+
+describe("(k) Jevの保留の判定し直し(docs/06 §2(k)・§5・LAT-105)", () => {
+	beforeEach(async () => {
+		await testEnv.PIPELINE_KV.delete(BREAKER_KEY);
+	});
+
+	/** 評価済みの古いつながり(遅延再評価も済み)。Cronの(g)(h)では拾われない */
+	const evaluatedLongAgo = {
+		embeddedAt: new Date(BASE - MS_PER_DAY),
+		embeddingModel: "stub",
+		lastEvaluatedAt: new Date(BASE - HOUR),
+		delayedReevalAt: new Date(BASE - MS_PER_DAY),
+		// 人数を2に固定してグループを組ませない(1対1の提案だけを見る)
+		participantsMax: 2,
+	} as const;
+
+	/**
+	 * 保留の印を持つ意思と、その相手(印なし)・jev_resultの無い候補行を入れる。
+	 * 印の既定はbreakerの保留(1時間前)
+	 */
+	const seedHeldPair = async (
+		overrides: Partial<typeof intents.$inferSelect> = {},
+	) => {
+		const userA = ulid();
+		const userB = ulid();
+		await insertUserRow(userA);
+		await insertUserRow(userB);
+		const held = intentFixture({
+			id: ulid(),
+			userId: userA,
+			...evaluatedLongAgo,
+			jevHeldAt: new Date(BASE - HOUR),
+			jevHeldReason: "breaker",
+			...overrides,
+		});
+		const other = intentFixture({
+			id: ulid(),
+			userId: userB,
+			...evaluatedLongAgo,
+		});
+		await insertIntentRow(held);
+		await insertIntentRow(other);
+		await upsertVector(held);
+		await upsertVector(other);
+		await insertCandidate(held.id, other.id, "candidate");
+		return { held, other };
+	};
+
+	const latchCount = async () => (await db.select().from(latches)).length;
+
+	it("breakerの保留: 閉じていれば評価し直して提案まで進み、jev_resultを保存して印を消す", async () => {
+		const { held, other } = await seedHeldPair();
+		await runScheduledPipeline(testEnv, directClock);
+		const row = await rowOf(held.id);
+		expect(row?.lastEvaluatedAt).toEqual(FIXED_NOW);
+		expect(row?.jevHeldAt).toBeNull();
+		expect(row?.jevHeldReason).toBeNull();
+		expect(row?.jevHeldCount).toBe(0);
+		const [candidate] = await candidateOfPair(held.id, other.id);
+		expect(candidate?.jevResult).not.toBeNull();
+		expect(candidate?.status).toBe("proposed");
+		expect(await latchCount()).toBe(1);
+		// 予算は判定し直した意思(起点)に計上する(docs/06 §6)
+		const [counter] = await db
+			.select()
+			.from(usageCounters)
+			.where(
+				and(
+					eq(usageCounters.scope, "jev_intent"),
+					eq(usageCounters.key, held.id),
+				),
+			);
+		expect(counter?.count).toBe(1);
+	});
+
+	it("breakerが開いている間は判定し直さない(印は残る)", async () => {
+		const { held } = await seedHeldPair();
+		await recordJevOutcomes(
+			testEnv.PIPELINE_KV,
+			Array.from({ length: LATCH.BREAKER_FAILURES }, () => false),
+			new Date(BASE - MIN),
+		);
+		await runScheduledPipeline(testEnv, directClock);
+		const row = await rowOf(held.id);
+		expect(row?.lastEvaluatedAt).toEqual(new Date(BASE - HOUR));
+		expect(row?.jevHeldReason).toBe("breaker");
+		expect(await latchCount()).toBe(0);
+	});
+
+	it("30分の再評価抑制の中は判定し直さず、30分ちょうどで対象になる", async () => {
+		const inside = await seedHeldPair({
+			lastEvaluatedAt: new Date(
+				BASE - PIPELINE.REEVALUATION_SUPPRESSION_MS + 1,
+			),
+		});
+		const boundary = await seedHeldPair({
+			lastEvaluatedAt: new Date(BASE - PIPELINE.REEVALUATION_SUPPRESSION_MS),
+		});
+		await runScheduledPipeline(testEnv, directClock);
+		expect((await rowOf(inside.held.id))?.jevHeldReason).toBe("breaker");
+		expect((await rowOf(boundary.held.id))?.lastEvaluatedAt).toEqual(FIXED_NOW);
+		expect((await rowOf(boundary.held.id))?.jevHeldAt).toBeNull();
+	});
+
+	it("予算の保留: 保留したJSTの日付のうちは判定し直さず、日付が変わった後に判定し直す", async () => {
+		// FIXED_NOWはJSTの2026-06-01 09:00。同じ日の08:00と、前の日の23:00に保留した意思
+		const sameDay = await seedHeldPair({
+			jevHeldAt: new Date(BASE - HOUR),
+			jevHeldReason: "budget",
+		});
+		const dayBefore = await seedHeldPair({
+			jevHeldAt: new Date(BASE - 10 * HOUR),
+			jevHeldReason: "budget",
+			lastEvaluatedAt: new Date(BASE - 10 * HOUR),
+		});
+		await runScheduledPipeline(testEnv, directClock);
+		const same = await rowOf(sameDay.held.id);
+		expect(same?.lastEvaluatedAt).toEqual(new Date(BASE - HOUR));
+		expect(same?.jevHeldReason).toBe("budget");
+		const before = await rowOf(dayBefore.held.id);
+		expect(before?.lastEvaluatedAt).toEqual(FIXED_NOW);
+		expect(before?.jevHeldAt).toBeNull();
+		// 判定し直した意思は同じ主題の他の意思すべてを相手に見つけるため、提案は1件以上
+		expect(await latchCount()).toBeGreaterThan(0);
+	});
+
+	it("予算の保留: 日付が変わっても予算が尽きたままなら、再び予算の保留になりその日は判定し直さない", async () => {
+		const { held } = await seedHeldPair({
+			jevHeldAt: new Date(BASE - 10 * HOUR),
+			jevHeldReason: "budget",
+		});
+		// 全体の1か月の上限に達している(日付が変わっても戻らない)
+		await db.insert(usageCounters).values({
+			scope: "jev_global_monthly",
+			key: "-",
+			period: jstMonthKey(FIXED_NOW),
+			count: LIMITS.JEV_GLOBAL_MONTHLY,
+		});
+		await runScheduledPipeline(testEnv, directClock);
+		const row = await rowOf(held.id);
+		expect(row?.lastEvaluatedAt).toEqual(FIXED_NOW);
+		expect(row?.jevHeldReason).toBe("budget");
+		expect(row?.jevHeldAt).toEqual(FIXED_NOW);
+		expect(await latchCount()).toBe(0);
+		// 30分後のCronでも同じ日のうちは判定し直さない
+		const later = fixedClock(
+			new Date(BASE + PIPELINE.REEVALUATION_SUPPRESSION_MS),
+		);
+		await runScheduledPipeline(testEnv, later);
+		expect((await rowOf(held.id))?.lastEvaluatedAt).toEqual(FIXED_NOW);
+	});
+
+	it(`失敗の保留: 連続${LATCH.JEV_HELD_FAILED_RETRY_MAX}回までは判定し直し、それを超えたら判定し直さない`, async () => {
+		const within = await seedHeldPair({
+			jevHeldReason: "failed",
+			jevHeldCount: LATCH.JEV_HELD_FAILED_RETRY_MAX,
+		});
+		const over = await seedHeldPair({
+			jevHeldReason: "failed",
+			jevHeldCount: LATCH.JEV_HELD_FAILED_RETRY_MAX + 1,
+		});
+		await runScheduledPipeline(testEnv, directClock);
+		expect((await rowOf(within.held.id))?.lastEvaluatedAt).toEqual(FIXED_NOW);
+		expect((await rowOf(within.held.id))?.jevHeldCount).toBe(0);
+		const row = await rowOf(over.held.id);
+		expect(row?.lastEvaluatedAt).toEqual(new Date(BASE - HOUR));
+		expect(row?.jevHeldReason).toBe("failed");
+	});
+
+	it("印の無い意思・active以外の意思は判定し直さない(jev_resultの無い候補が残っていても)", async () => {
+		const plain = await seedHeldPair({ jevHeldAt: null, jevHeldReason: null });
+		const paused = await seedHeldPair({ status: "paused" });
+		await runScheduledPipeline(testEnv, directClock);
+		expect((await rowOf(plain.held.id))?.lastEvaluatedAt).toEqual(
+			new Date(BASE - HOUR),
+		);
+		expect((await rowOf(paused.held.id))?.lastEvaluatedAt).toEqual(
+			new Date(BASE - HOUR),
+		);
+		expect(await latchCount()).toBe(0);
+	});
+
+	it("走査の途中でbreakerが開いたら当回を打ち切り、残りは次の実行に回す", async () => {
+		const first = await seedHeldPair({ jevHeldAt: new Date(BASE - 2 * HOUR) });
+		const second = await seedHeldPair({ jevHeldAt: new Date(BASE - HOUR) });
+		// 1件目の評価が終わった時点でbreakerが開いた状態を作る
+		let tripped = false;
+		const logs: Record<string, unknown>[] = [];
+		vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+			const entry = JSON.parse(String(line)) as Record<string, unknown>;
+			logs.push(entry);
+			if (entry.event === "pipeline.stage2.completed") {
+				tripped = true;
+			}
+		});
+		const kv = testEnv.PIPELINE_KV;
+		const realGet = kv.get.bind(kv);
+		vi.spyOn(kv, "get").mockImplementation(((key: string, type?: unknown) => {
+			if (key === BREAKER_KEY && tripped) {
+				return Promise.resolve({
+					failures: 0,
+					windowStartMs: BASE,
+					openUntilMs: BASE + LATCH.BREAKER_OPEN_MS,
+				});
+			}
+			return (realGet as (k: string, t?: unknown) => Promise<unknown>)(
+				key,
+				type,
+			);
+		}) as typeof kv.get);
+		await runScheduledPipeline(testEnv, directClock);
+		expect((await rowOf(first.held.id))?.lastEvaluatedAt).toEqual(FIXED_NOW);
+		expect((await rowOf(second.held.id))?.lastEvaluatedAt).toEqual(
+			new Date(BASE - HOUR),
+		);
+		expect(logs.filter((l) => l.event === "cron.jev_held.aborted")).toEqual([
+			{ level: "warn", event: "cron.jev_held.aborted", count: 1 },
+		]);
+	});
+
+	it("評価が印を書き直す: 失敗の保留は連続回数を数え、保留の無い評価で消す。上限の枠に収まらない分だけなら印を付けない", async () => {
+		const { held } = await seedHeldPair({
+			jevHeldAt: null,
+			jevHeldReason: null,
+		});
+		const failing = {
+			primary: async () => ({ ok: false, kind: "timeout" }) as const,
+			fallback: async () => ({ ok: false, kind: "timeout" }) as const,
+		};
+		await evaluateIntent(testEnv, held.id, directClock, { jev: failing });
+		let row = await rowOf(held.id);
+		expect(row?.jevHeldReason).toBe("failed");
+		expect(row?.jevHeldAt).toEqual(FIXED_NOW);
+		expect(row?.jevHeldCount).toBe(1);
+		const later = fixedClock(
+			new Date(BASE + PIPELINE.REEVALUATION_SUPPRESSION_MS),
+		);
+		await evaluateIntent(testEnv, held.id, later, { jev: failing });
+		row = await rowOf(held.id);
+		expect(row?.jevHeldCount).toBe(2);
+		expect(row?.jevHeldAt).toEqual(
+			new Date(BASE + PIPELINE.REEVALUATION_SUPPRESSION_MS),
+		);
+		// 既定(stub)のJevで成功すると印は消える
+		await evaluateIntent(
+			testEnv,
+			held.id,
+			fixedClock(new Date(BASE + 2 * PIPELINE.REEVALUATION_SUPPRESSION_MS)),
+		);
+		row = await rowOf(held.id);
+		expect(row?.jevHeldAt).toBeNull();
+		expect(row?.jevHeldReason).toBeNull();
+		expect(row?.jevHeldCount).toBe(0);
+	});
+
+	it("評価が印を書き直す: 予算が尽きて保留した評価は予算の印を付ける", async () => {
+		const { held } = await seedHeldPair({
+			jevHeldAt: null,
+			jevHeldReason: null,
+		});
+		await db.insert(usageCounters).values({
+			scope: "jev_intent",
+			key: held.id,
+			period: jstDayKey(FIXED_NOW),
+			count: LIMITS.JEV_PER_INTENT_PER_DAY,
+		});
+		const result = await evaluateIntent(testEnv, held.id, directClock);
+		expect(result?.jevHeld.budget).toBe(1);
+		const row = await rowOf(held.id);
+		expect(row?.jevHeldReason).toBe("budget");
+		expect(row?.jevHeldAt).toEqual(FIXED_NOW);
+		expect(row?.jevHeldCount).toBe(0);
 	});
 });

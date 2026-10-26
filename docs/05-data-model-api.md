@@ -140,6 +140,9 @@ embedding_model:    string | null   # 埋め込み済みモデル識別子(01 §
 embedded_at:        datetime | null
 last_evaluated_at:  datetime | null  # 30分再評価抑制(§2.6)。active Intentの意味フィールドの更新でnullへ戻す(§3.3・01冒頭の決定記録 2026-10-20)
 delayed_reeval_at:  datetime | null  # つながりIntentの1回きり遅延再評価(06 §2の(h))の実行済みマーカー(実行時に刻印)
+jev_held_at:        datetime | null  # 評価でJevの保留(予算・circuit breaker・予備も失敗)が残った時刻。保留の無い評価でnullへ戻す(06 §2の(k)・LAT-105・マイグレーション0011)
+jev_held_reason:    budget | breaker | failed | null  # 保留の理由(予算 > breaker > 失敗の順で1つ)
+jev_held_count:     integer  # 既定0。失敗の保留で終わった評価の連続回数(failed以外の保留・保留の無い評価で0へ戻す)
 vector_deleted_at:  datetime | null  # ベクトル削除実行記録(§2.6の2窓走査用)
 created_at / updated_at
 ```
@@ -322,7 +325,8 @@ INDEX(anonymized)
 
 ```text
 intents:      (user_id, status) / (status, form, category) /
-              (status, starts_at)  ← 機会Bucket走査 / (status, expires_at) ← 期限バッチ
+              (status, starts_at)  ← 機会Bucket走査 / (status, expires_at) ← 期限バッチ /
+              (status, jev_held_at)  ← Jevの保留の判定し直し(06 §2の(k)・マイグレーション0011)
 candidates:   UNIQUE組(前述)+ INDEX(intent_a_id), (intent_b_id)
 latches:      (user_id...)は user_ids のJSONでなく参照テーブルを避け、
               latch_members(latch_id, user_id)を副表として持つ — INDEX(user_id, latch_id)

@@ -12,13 +12,14 @@
  * 共通に行い、起点イベントpayloadへの反映は呼び出し側(consumer.ts)が行う
  */
 import { LATCH, PIPELINE } from "@latch/shared";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import { type Clock, systemClock } from "../clock/clock";
-import { intents, matchCandidates } from "../db/schema";
+import { intents, type JevHeldKind, matchCandidates } from "../db/schema";
 import type { Env } from "../env";
 import { newUlid } from "../ids";
+import { isBreakerOpen } from "../jev/breaker";
 import type { JevHeldReason } from "../jev/runner";
 import { blockedForProposal, proposeSet } from "../latches/propose";
 import type { JevFn } from "../llm/types";
@@ -207,6 +208,29 @@ const runBatch = async (
 		return;
 	}
 	await db.batch([first, ...rest]);
+};
+
+/**
+ * 評価で残ったJevの保留の印の理由(docs/06 §2(k)・LAT-105)。予算 > circuit breaker > 失敗の順に
+ * 1つを選び、保留が無ければnull。上限で枠に収まらなかった分(cap)は障害が無くても残るため数えない。
+ * 失敗だけが残り、評価の間にbreakerが開いたとき(障害の広がり)はbreakerとして扱い、
+ * 失敗の判定し直しの回数(JEV_HELD_FAILED_RETRY_MAX)を使わせない
+ */
+const jevHeldKindOf = async (
+	env: Env,
+	held: Record<JevHeldReason, number>,
+	now: Date,
+): Promise<JevHeldKind | null> => {
+	if (held.budget > 0) {
+		return "budget";
+	}
+	if (held.breaker > 0) {
+		return "breaker";
+	}
+	if (held.failed > 0) {
+		return (await isBreakerOpen(env.PIPELINE_KV, now)) ? "breaker" : "failed";
+	}
+	return null;
 };
 
 /** スコア降順・同点はULID昇順(docs/06 §3の同点の規律)の比較関数 */
@@ -696,12 +720,20 @@ export const evaluateIntent = async (
 	timer.emit("group", groupMs);
 
 	// 30分再評価抑制の起点を更新する(docs/05 §2.6)。提案が無いときのLの保存は
-	// この更新の前に並べて同じバッチ(1往復)で送る(#36)
+	// この更新の前に並べて同じバッチ(1往復)で送る(#36)。同じ文でJevの保留の印を
+	// 書き直す(保留が無ければ消す・失敗の保留は連続回数を数える・docs/06 §2(k))
+	const heldKind = await jevHeldKindOf(env, l4.run.held, clock.now());
 	await runBatch(db, [
 		...deferredScoreWrites,
 		db
 			.update(intents)
-			.set({ lastEvaluatedAt: now })
+			.set({
+				lastEvaluatedAt: now,
+				jevHeldAt: heldKind === null ? null : now,
+				jevHeldReason: heldKind,
+				jevHeldCount:
+					heldKind === "failed" ? sql`${intents.jevHeldCount} + 1` : 0,
+			})
 			.where(eq(intents.id, intentId)),
 	]);
 

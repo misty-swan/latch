@@ -149,7 +149,7 @@ stagingの値(F8b実装確定): `LATCH_ENV=staging`(VectorStoreはVectorize)・`
 
 | 注入 | 期待 | 状態(2026-10-26・F9) | 証拠の試験 |
 |---|---|---|---|
-| Jev APIの全断(timeout固定) | 提案化停止・候補は保留・circuit breaker開放・Parser/Embeddingは継続 | 証明済み。ただし保留した候補を復旧後に自ら判定し直す仕組みは無い(つながりIntentは10分後の遅延再評価の後、本人の更新か相手側の新しい評価まで提案されない)。復旧後に判定し直す仕組みを修正工程で作る(LAT-105・2026-10-26決定) | worker `tests/degradation.test.ts`「Jevの全断」2件(第一候補も予備も常にtimeout。提案0件・候補はcandidateのまま・通算10件の失敗でbreakerが開き以後はJevを呼ばない・30分後に閉じると次の評価で提案が出る・開いている間もPOST /v1/intents/parseと第1段は成功する)・`jev-runner.test.ts`・`jev-breaker.test.ts` |
+| Jev APIの全断(timeout固定) | 提案化停止・候補は保留・circuit breaker開放・Parser/Embeddingは継続 | 証明済み。保留した候補は、breakerが閉じた後の毎分Cronの保留の判定し直し(06 §2の(k)・LAT-105)が評価し直し、本人の更新や相手側の新しい評価を待たずに提案まで進む | worker `tests/degradation.test.ts`「Jevの全断」2件(第一候補も予備も常にtimeout。提案0件・候補はcandidateのまま・保留した意思に保留の印が付く・通算10件の失敗でbreakerが開き以後はJevを呼ばない・開いている間のCronは判定し直さない・30分後に閉じると古いつながりIntentの組が次の毎分Cronで提案まで進み、印が消え、重ねて評価しない・開いている間もPOST /v1/intents/parseと第1段は成功する)・`pipeline-cron.test.ts`の「(k) Jevの保留の判定し直し」(予算の保留は日付が変わった後・失敗の保留は連続3回まで・30分の抑制・途中でbreakerが開いたら打ち切り)・`jev-runner.test.ts`・`jev-breaker.test.ts` |
 | Embedding APIの全断 | キューのやり直し(10秒・30秒・60秒)を使い切るとDLQでdeadになり、Intent未登録のまま滞留→復旧後バックフィルで回収(06 §5) | 証明済み | worker `tests/degradation.test.ts`「Embeddingの全断とQueues消費の失敗」(Workers AIの代わりが常に例外。配信1〜4回目のやり直し・DLQでdead・全断中はバックフィルも失敗して検索に載らず相手の評価からも見えない・復旧後のCronで埋め込み・評価・提案)・`pipeline-consumer.test.ts`(段ごとの失敗)・`pipeline-cron.test.ts`(バックフィルの連続5件の失敗で打ち切り) |
 | Queues消費の失敗 | 再試行ののちDLQへ・prodへの影響なし | 証明済み | worker `tests/degradation.test.ts`(上と同じ試験で、やり直しの遅延・DLQのdead・警報のログpipeline.dlq.dead)・`pipeline-consumer.test.ts`(第2段の失敗はfailedにしてack)・`wrangler-envs.test.ts`(max_retries=3・DLQの指定・stagingは名前の後ろに-staging付きの別キューでprodと分かれる) |
 | DO再起動(チャット) | 履歴はD1から復元・接続再確立 | 証明済み | worker `chat-do.test.ts`「DOの再起動」2件(強制の再起動=abortAllDurableObjectsで接続が切れ、履歴はD1から読め、使用済みのチケットは再起動の後も使えず、新しいチケットでつなぎ直すと送受信でき、新しい発言は前の発言より後ろに並ぶ。退避=evictDurableObjectでは接続が休止して残り、起こされた後も送信が届く)・web `Chat.test.tsx`(つなぎ直した直後に最新頁を取り直し、切れていた間の相手の発言が出る)・`socket.test.ts`(1秒・2秒・4秒と待ち30秒で頭打ちのつなぎ直し) |
@@ -157,7 +157,7 @@ stagingの値(F8b実装確定): `LATCH_ENV=staging`(VectorStoreはVectorize)・`
 
 **障害の作り方(F9で確定)。** 本物の外部サービスを止めず、課金のあるAIも呼ばず、差し替え口で障害を作る。Jevは評価の差し替え口(evaluateIntentのoptions.jev・07 §5のJevFn)を常にtimeoutにし、EmbeddingはLATCH_EMBEDDING_MODE=realとWorkers AIの代わり(AI.runが常に例外)、D1はenv.DBを常に失敗するD1に差し替え、DOの再起動はvitest-pool-workersのabortAllDurableObjects・evictDurableObjectで作る。時刻はfixedClock(§3)で進める。すべてCIの`pnpm test`で毎回走るため、実行記録は試験そのものとし、docs/reports/には置かない(2026-10-26オーナー決定)。
 
-**残り(2026-10-26オーナー決定)。** Jevの障害・予算で保留された候補は、毎分Cronの走査でjev_resultの無い候補を持つactiveな意思をbreakerが閉じていれば評価し直す仕組みを、不具合の修正工程(第6回)で作る(LAT-105。オーナーから判断を任された決定。判定し直しで呼ぶJevは障害が無ければ呼んでいた分で、予算・枠・circuit breakerの規則はそのまま効く。正式な決定の記録は修正工程で06 §2・§5へ書く)。D1障害中にメッセージが捨てられる点は不具合LAT-104として修正工程で直し、本表の期待(復旧後にキューが消化)は変えない。
+**残り(2026-10-26オーナー決定)。** Jevの障害・予算で保留された候補を、毎分Cronの走査でjev_resultの無い候補を残したactiveな意思をbreakerが閉じていれば評価し直す仕組みは、不具合の修正工程(第6回)で作った(LAT-105。オーナーから判断を任された決定。判定し直しで呼ぶJevは障害が無ければ呼んでいた分で、予算・枠・circuit breakerの規則はそのまま効く。決定の記録と仕組みは06 §2の実装確定(不具合の修正工程(第6回))・§5)。D1障害中にメッセージが捨てられる点は不具合LAT-104として修正工程で直し、本表の期待(復旧後にキューが消化)は変えない。
 
 ## 7. 未決事項(本書ローカル)
 
