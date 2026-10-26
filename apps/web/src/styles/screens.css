@@ -9,6 +9,13 @@
 	min-height: 100dvh;
 }
 
+/* 遷移の後のトースト(RouteToast)は見えている範囲に固定する。latch.css の .toast は
+   .screen 基準のabsoluteのため、.screen が見えている範囲より長いとスクロールの先に
+   置かれる(LAT-110)。下端からの高さは RouteToast が下の操作を測って決める */
+.toast.toast--viewport {
+	position: fixed;
+}
+
 /* Registerのようにformでbody+footを包む画面のための土台(latch.cssの .screen と同じ縦積み) */
 .screen__form {
 	display: flex;

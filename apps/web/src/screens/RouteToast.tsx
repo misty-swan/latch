@@ -3,7 +3,7 @@
  * つながり一覧・預けている一覧・意思の詳細など、別画面から戻った直後に一言を出す画面で使う。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 
 /** トーストを出しておく時間(Shelved.tsxと同じ) */
@@ -30,9 +30,45 @@ export function useRouteToast(): string | null {
 	return toast;
 }
 
+/** 下の操作が見えていないときの下端からの位置(latch.css .toast の bottom と同じ) */
+const TOAST_BOTTOM = 120;
+/** 下の操作(フッターのボタン・タブバー)とトーストのあいだに空ける幅 */
+const TOAST_GAP = 16;
+
+/**
+ * トーストを置く高さ(見えている範囲の下端からの距離)を決める。
+ * latch.css の .toast は .screen の下端から120pxに置くため、.screen が見えている範囲より
+ * 長いとスクロールの先に置かれ、下の操作(フッターのボタン・タブバー)が高い画面では
+ * それと重なる(LAT-110)。見えている範囲に固定したうえで、見えている下の操作の上に置く
+ */
+function toastBottom(toast: HTMLElement): number {
+	const screenEl = toast.closest(".screen");
+	if (screenEl === null) return TOAST_BOTTOM;
+	const viewportHeight = window.innerHeight;
+	let bottom = TOAST_BOTTOM;
+	for (const el of screenEl.querySelectorAll(".screen__foot, .tabbar")) {
+		const rect = el.getBoundingClientRect();
+		if (rect.height === 0 || rect.top >= viewportHeight) continue;
+		bottom = Math.max(bottom, viewportHeight - rect.top + TOAST_GAP);
+	}
+	return bottom;
+}
+
 export function RouteToast({ text }: { text: string | null }) {
+	const ref = useRef<HTMLParagraphElement>(null);
+	const [bottom, setBottom] = useState<number | null>(null);
+	// 出す瞬間(描画の前)に一度だけ測る。出している約2.4秒のあいだは置き直さない
+	useLayoutEffect(() => {
+		if (text === null || ref.current === null) return;
+		setBottom(toastBottom(ref.current));
+	}, [text]);
 	return text === null ? null : (
-		<p className="toast" role="status">
+		<p
+			ref={ref}
+			className="toast toast--viewport"
+			role="status"
+			style={bottom === null ? undefined : { bottom }}
+		>
 			{text}
 		</p>
 	);
