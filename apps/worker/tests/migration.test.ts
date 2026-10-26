@@ -9,6 +9,7 @@ import rollback0007Sql from "../migrations_rollback/0007_rollback.sql?raw";
 import rollback0008Sql from "../migrations_rollback/0008_rollback.sql?raw";
 import rollback0009Sql from "../migrations_rollback/0009_rollback.sql?raw";
 import rollback0010Sql from "../migrations_rollback/0010_rollback.sql?raw";
+import rollback0011Sql from "../migrations_rollback/0011_rollback.sql?raw";
 
 /**
  * マイグレーション適用結果の検証。
@@ -448,4 +449,30 @@ it("戻しマイグレーション0010の適用で2列と3索引が消え、cali
 		"SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'calibration_records'",
 	).first<{ n: number }>();
 	expect(row?.n).toBe(1);
+});
+
+it("0011適用後、intentsに保留の印の3列(jev_held_at・jev_held_reason・jev_held_count=既定0)と索引がある(LAT-105・docs/06 §2(k))", async () => {
+	const columns = await columnsOf("intents");
+	const names = columns.map((c) => c.name);
+	expect(names).toContain("jev_held_at");
+	expect(names).toContain("jev_held_reason");
+	const count = columns.find((c) => c.name === "jev_held_count");
+	expect(count?.notnull).toBe(1);
+	expect(count?.dflt_value).toBe("0");
+	expect(await indexNamesOf("intents")).toContain(
+		"intents_status_jev_held_at_idx",
+	);
+});
+
+it("戻しマイグレーション0011の適用で3列と索引が消える(docs/11 §3の対マイグレーション)", async () => {
+	for (const statement of toStatements(rollback0011Sql)) {
+		await env.DB.prepare(statement).run();
+	}
+	const names = (await columnsOf("intents")).map((c) => c.name);
+	expect(names).not.toContain("jev_held_at");
+	expect(names).not.toContain("jev_held_reason");
+	expect(names).not.toContain("jev_held_count");
+	expect(await indexNamesOf("intents")).not.toContain(
+		"intents_status_jev_held_at_idx",
+	);
 });

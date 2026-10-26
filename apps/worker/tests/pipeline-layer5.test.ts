@@ -64,6 +64,9 @@ const insertIntent = async (id: string, userId: string) => {
 		lastEvaluatedAt: null,
 		vectorDeletedAt: null,
 		delayedReevalAt: null,
+		jevHeldAt: null,
+		jevHeldReason: null,
+		jevHeldCount: 0,
 		createdAt: NOW,
 		updatedAt: NOW,
 	});

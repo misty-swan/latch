@@ -329,6 +329,9 @@ export const LATCH = {
 	PENDING_STALE_MS: 10 * 60_000,
 	// バックフィルで連続失敗が何件で打ち切るか。docs/06 §4
 	BACKFILL_FAILURE_ABORT: 5,
+	// 失敗(予備も失敗)の保留をCronが判定し直す回数の上限(3回・Queuesのmax_retriesと同じ数)。
+	// 予算とcircuit breakerによる保留は回数に数えない。docs/06 §2(k)・LAT-105
+	JEV_HELD_FAILED_RETRY_MAX: 3,
 	// グループLATCH: 1イベントで扱う候補Poolの最大人数。docs/06 §3
 	GROUP_POOL_MAX: 15,
 	// グループLATCH: 集合の人数下限(3人)。docs/06 §3

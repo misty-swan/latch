@@ -63,7 +63,11 @@ const columnNames = columns.map((column) => `"${column.name}"`);
  * 作成の経路が指定しない列(drizzleのSQLiteの方言は既定値の無い未指定の列に引数でなく
  * null を出す)。列を足したらここも見直す
  */
-const UNSPECIFIED = new Set(["delayed_reeval_at"]);
+const UNSPECIFIED = new Set([
+	"delayed_reeval_at",
+	"jev_held_at",
+	"jev_held_reason",
+]);
 const placeholders = columns
 	.map((column) => (UNSPECIFIED.has(column.name) ? "null" : "?"))
 	.join(", ");

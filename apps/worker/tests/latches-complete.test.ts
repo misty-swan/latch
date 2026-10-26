@@ -94,6 +94,9 @@ const insertIntent = async (
 		lastEvaluatedAt: null,
 		vectorDeletedAt: null,
 		delayedReevalAt: null,
+		jevHeldAt: null,
+		jevHeldReason: null,
+		jevHeldCount: 0,
 		createdAt: ago(200 * DAY),
 		updatedAt: ago(200 * DAY),
 	};

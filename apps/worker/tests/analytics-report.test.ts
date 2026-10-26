@@ -106,6 +106,9 @@ const insertIntent = async (userId: string, form: Form): Promise<string> => {
 		lastEvaluatedAt: null,
 		vectorDeletedAt: null,
 		delayedReevalAt: null,
+		jevHeldAt: null,
+		jevHeldReason: null,
+		jevHeldCount: 0,
 		createdAt: at(1, 0),
 		updatedAt: at(1, 0),
 	};
