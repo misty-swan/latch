@@ -71,6 +71,13 @@
       "when": 1792889860359,
       "tag": "0009_recent_vectors",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1792988686150,
+      "tag": "0010_calibration_records",
+      "breakpoints": true
     }
   ]
 }

@@ -111,7 +111,7 @@
 
 **結果(2026-10-24)。** 合格(値は07 §6)。地域名をEmbedding入力に含めるかの比較(07 §4)は`pnpm eval:region`で行い、記録を`eval/records/region.json`に置いた(合否の対象ではない)
 
-**C係数とOffline Precisionの算出定義。** C係数の再計算は、四半期ごとにcalibration_recordsからECE・Brierを算出して行い、変更はOfflineゲート通過とA/B適用を条件とする(01 §24)。Offline Precision@0.60は、ゴールドセットに手ラベルしたYES/NO正解(§3の期待値に「この2つは提案として成立し得るか」の判定を加える)に対する、閾値0.60超過提案の正解率として定義する。精度ゲートでは参考値として記録し、合否には使わない(07 §6の表に無いため・LLM real接続で確定。2026-10-24の値はTypeSafe 0.824・Anthropic 0.840)。
+**C係数とOffline Precisionの算出定義。** C係数の再計算は、四半期ごとにcalibration_recordsからECE・Brierを算出して行い、変更はOfflineゲート通過とA/B適用を条件とする(01 §24)。算出は匿名化済みの行(anonymized=true)を使い、予測値をprediction.latch_score、正解をoutcome=both_yes(成立)とする。形式・人数・時間帯の内訳はformとcontextで分けられる(行の作り方は05 §2.2・F9実装確定・LAT-108。再計算の手段(集計のコマンド)は運用データがそろった後に作る)。Offline Precision@0.60は、ゴールドセットに手ラベルしたYES/NO正解(§3の期待値に「この2つは提案として成立し得るか」の判定を加える)に対する、閾値0.60超過提案の正解率として定義する。精度ゲートでは参考値として記録し、合否には使わない(07 §6の表に無いため・LLM real接続で確定。2026-10-24の値はTypeSafe 0.824・Anthropic 0.840)。
 
 ## 5. Online評価(A/B Test)
 

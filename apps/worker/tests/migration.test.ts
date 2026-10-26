@@ -8,6 +8,7 @@ import rollback0006Sql from "../migrations_rollback/0006_rollback.sql?raw";
 import rollback0007Sql from "../migrations_rollback/0007_rollback.sql?raw";
 import rollback0008Sql from "../migrations_rollback/0008_rollback.sql?raw";
 import rollback0009Sql from "../migrations_rollback/0009_rollback.sql?raw";
+import rollback0010Sql from "../migrations_rollback/0010_rollback.sql?raw";
 
 /**
  * マイグレーション適用結果の検証。
@@ -406,4 +407,45 @@ it("戻しマイグレーション0009の適用でrecent_vectorsの表と索引�
 		"SELECT count(*) AS n FROM sqlite_master WHERE name IN ('recent_vectors', 'recent_vectors_embedded_at_idx')",
 	).first<{ n: number }>();
 	expect(row?.n).toBe(0);
+});
+
+it("0010適用後、calibration_recordsにcontext列とlatch_idの一意索引・anonymizedの索引があり、latchesにcalibrated_at列と索引がある(LAT-108)", async () => {
+	expect((await columnsOf("calibration_records")).map((c) => c.name)).toContain(
+		"context",
+	);
+	const recordIndexes = await indexNamesOf("calibration_records");
+	expect(recordIndexes).toContain("calibration_records_latch_id_uniq");
+	expect(recordIndexes).toContain("calibration_records_anonymized_idx");
+	const unique = await env.DB.prepare(
+		"SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'calibration_records_latch_id_uniq'",
+	).first<{ sql: string }>();
+	expect(unique?.sql).toContain("UNIQUE");
+	expect((await columnsOf("latches")).map((c) => c.name)).toContain(
+		"calibrated_at",
+	);
+	expect(await indexNamesOf("latches")).toContain(
+		"latches_calibrated_at_status_idx",
+	);
+});
+
+it("戻しマイグレーション0010の適用で2列と3索引が消え、calibration_recordsの表は残る(docs/11 §3の対マイグレーション)", async () => {
+	for (const statement of toStatements(rollback0010Sql)) {
+		await env.DB.prepare(statement).run();
+	}
+	expect(
+		(await columnsOf("calibration_records")).map((c) => c.name),
+	).not.toContain("context");
+	expect((await columnsOf("latches")).map((c) => c.name)).not.toContain(
+		"calibrated_at",
+	);
+	const recordIndexes = await indexNamesOf("calibration_records");
+	expect(recordIndexes).not.toContain("calibration_records_latch_id_uniq");
+	expect(recordIndexes).not.toContain("calibration_records_anonymized_idx");
+	expect(await indexNamesOf("latches")).not.toContain(
+		"latches_calibrated_at_status_idx",
+	);
+	const row = await env.DB.prepare(
+		"SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'calibration_records'",
+	).first<{ n: number }>();
+	expect(row?.n).toBe(1);
 });

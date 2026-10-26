@@ -18,6 +18,8 @@
  * - pending残留の掃査(10分経過のpendingイベントをfailedへ・docs/06 §4)
  * - (d) matchedのLATCHのcompleted判定(つながり=最終メッセージから90日・機会=対象時刻から
  *   3時間・F5設計 §2)
+ * - (j) 正解データ: 閉じた提案のcalibration_recordsの作成と、観測を終えた行の確定・匿名化
+ *   (docs/05 §2.2・§2.5・calibration/records.ts)
  * 評価本体はevaluateIntent・第1段はrunEmbeddingStageを再利用し、Cronからは
  * 新たな起点イベントを発行しない(直接呼び出し・docs/06 §2)。
  */
@@ -38,6 +40,7 @@ import {
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
+import { runCalibrationSweep } from "../calibration/records";
 import { type Clock, jstDayKey, jstMonthKey } from "../clock/clock";
 import {
 	groupCandidates,
@@ -995,6 +998,14 @@ export const runScheduledPipeline = async (
 	await runIsolated("pending", () => runPendingSweep(env, clock));
 	await runIsolated("completion", async () => {
 		await completeDueLatches(drizzle(env.DB), clock.now());
+	});
+	// 正解データは閉じた提案の後に作る(この実行で閉じた・completedにした提案も拾う)
+	// 観測中の行の点検は照会が多いため毎時0分だけ行う(退会・Intent削除はその場で匿名化する)
+	await runIsolated("calibration", async () => {
+		const now = clock.now();
+		await runCalibrationSweep(drizzle(env.DB), now, {
+			checkLinked: now.getUTCMinutes() === 0,
+		});
 	});
 	// Pushの回収は外部への送信を含み時間がかかり得るので最後に置く(completed判定を遅らせない)
 	await runIsolated("push", () => runPushSweep(env, clock));

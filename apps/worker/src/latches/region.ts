@@ -28,10 +28,11 @@ const haversineM = (
 export const gridKeyOf = (lat: number, lng: number): string =>
 	`${Math.floor(lat * 100)}_${Math.floor(lng * 100)}`;
 
-export const lookupRegionName = async (
+/** 中心座標に最も近い地物(lookupRegionNameと市区町村の逆引きで共有) */
+const nearestFeature = async (
 	db: DrizzleD1Database,
 	center: { lat: number; lng: number },
-): Promise<string | null> => {
+): Promise<{ name: string; municipality: string } | null> => {
 	const cy = Math.floor(center.lat * 100);
 	const cx = Math.floor(center.lng * 100);
 	// 代表点=丸めたセルの中心
@@ -46,12 +47,28 @@ export const lookupRegionName = async (
 		.select()
 		.from(geofeatures)
 		.where(inArray(geofeatures.gridKey, keys));
-	let best: { name: string; id: string; d: number } | null = null;
+	let best: (typeof rows)[number] | null = null;
+	let bestD = 0;
 	for (const r of rows) {
 		const d = haversineM(rep, { lat: r.lat, lng: r.lng });
-		if (best === null || d < best.d || (d === best.d && r.id < best.id)) {
-			best = { name: r.name, id: r.id, d };
+		if (best === null || d < bestD || (d === bestD && r.id < best.id)) {
+			best = r;
+			bestD = d;
 		}
 	}
-	return best?.name ?? null;
+	return best === null
+		? null
+		: { name: best.name, municipality: best.municipality };
 };
+
+export const lookupRegionName = async (
+	db: DrizzleD1Database,
+	center: { lat: number; lng: number },
+): Promise<string | null> => (await nearestFeature(db, center))?.name ?? null;
+
+/** 地名と同じ逆引きで市区町村を返す(正解データの地域の粒度・docs/08 §7) */
+export const lookupMunicipality = async (
+	db: DrizzleD1Database,
+	center: { lat: number; lng: number },
+): Promise<string | null> =>
+	(await nearestFeature(db, center))?.municipality ?? null;

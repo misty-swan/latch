@@ -987,6 +987,7 @@ describe("DELETE /v1/intents/{id}(削除・docs/05 §3.1・§3.2)", () => {
 				"vector",
 				"open_latches",
 				"cancel",
+				"calibration",
 				"d1",
 			]);
 			for (const l of timings) {
@@ -1629,6 +1630,7 @@ describe("DELETE・PATCH /v1/intents/{id}: 進行中の提案の取り消し(doc
 			"vector",
 			"open_latches",
 			"cancel",
+			"calibration",
 			"d1",
 			"deleted",
 			"release",

@@ -8,14 +8,17 @@
  * (4) 本人が参加を続けるmatchedのLATCHから、参加取り消し(leave)と同じ処理で抜ける
  *     (1対1は双方読み取り専用・グループは本人だけが抜け、下限を割れば全体を取り消す。
  *     2026-10-26オーナー決定・離脱やブロックと区別できない・01 §10)
+ * (4b) 本人が参加した閉じた提案の正解データ(calibration_records)を、その時点までの観測で確定して
+ *     匿名化する(予測をmatch_candidatesから写すため(5)より前・docs/05 §2.5・LAT-108)
  * (5) D1の削除とusers行のstatus=deletedを1回のbatch(1つの取引)で書く
- * (6) (5)の直前までに作られた進行中の提案を拾い直して閉じる(並行した評価の取りこぼしの安全網)
+ * (6) (5)の直前までに作られた進行中の提案を拾い直して閉じ、その分の正解データも匿名化する
  * 残すもの: messages・latch_responses・latch_feedback・blocks・reports・latches・latch_members
  * (表示名は表示の側で「つながっていた相手」に置き換える・docs/05 §2.5)
  */
 
 import { and, eq, inArray, isNull, like, or } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { anonymizeLatches } from "../calibration/records";
 import {
 	groupCandidates,
 	intents,
@@ -38,7 +41,11 @@ import {
 	cancelOpenLatchesOnly,
 } from "../latches/cancel-open";
 import { leave } from "../latches/respond";
+import { createLogger } from "../logging/logger";
+import { errorCodeOf } from "../pipeline/errors";
 import { createVectorStore } from "../vectorstore";
+
+const logger = createLogger();
 
 /** 取り消しの対象になる進行中の状態(cancel-open.tsと同じ) */
 const OPEN_STATUSES = ["candidate", "proposed", "partial_accept"] as const;
@@ -90,6 +97,25 @@ const latchIdsOfMember = async (
 			),
 		);
 	return rows.map((r) => r.id);
+};
+
+/**
+ * 正解データの匿名集約。失敗しても退会は止めない(ログだけ出す。参加者が退会したLATCHの行は
+ * Cronの正解データの走査が観測の途中でも確定して匿名化する・calibration/records.ts)
+ */
+const anonymizeCalibration = async (
+	db: DrizzleD1Database,
+	latchIds: string[],
+	now: Date,
+): Promise<void> => {
+	if (latchIds.length === 0) return;
+	try {
+		await anonymizeLatches(db, latchIds, now);
+	} catch (error) {
+		logger.warn("users.withdraw.calibration_failed", {
+			error_code: errorCodeOf(error),
+		});
+	}
 };
 
 /** 2回の取り消しの結果を1つにまとめる(保留の解放の宛先は重複を除く) */
@@ -148,6 +174,15 @@ export const withdrawUser = async (
 		const left = await leave(db, id, userId, now);
 		if (left.ok) leftLatchIds.push(id);
 	}
+
+	// (4b) 正解データの匿名集約。離脱済みのLATCHも含め、本人が参加者だった全LATCHが対象
+	const memberLatchIds = (
+		await db
+			.select({ id: latchMembers.latchId })
+			.from(latchMembers)
+			.where(eq(latchMembers.userId, userId))
+	).map((r) => r.id);
+	await anonymizeCalibration(db, memberLatchIds, now);
 
 	// (5) D1の削除。子の行(候補・イベント・通知)を本体(intents)より先に置く(FK)。
 	// recent_vectorsはintentsの削除にCASCADEで従う
@@ -218,5 +253,7 @@ export const withdrawUser = async (
 	if (secondCancel.closedLatchIds.length > 0) {
 		await db.delete(notifications).where(eq(notifications.userId, userId));
 	}
+	// (6)で閉じた提案の正解データ(候補の行は(5)で消えたため予測のJevの軸は残らない)
+	await anonymizeCalibration(db, secondCancel.closedLatchIds, now);
 	return { cancelled: mergeCancel(firstCancel, secondCancel), leftLatchIds };
 };

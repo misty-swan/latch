@@ -474,10 +474,11 @@ export const proposeSet = async (
 	}
 
 	// 確保の後はすべて全ペアの確保(latch_id=新idの行の数=C(n,2))を条件とする。
-	// INSERT … SELECT の列順は各テーブル定義の列順(drizzleのinsert().select())
+	// INSERT … SELECT の列順は各テーブル定義の列順(drizzleのinsert().select())。
+	// completed_at・proposed_at・calibrated_at(正解データの作成済みの印)の後にcreated_at・updated_at
 	const insertLatch = db.insert(latches).select(
 		sql`SELECT ${latchId}, ${form}, ${JSON.stringify(members.map((m) => m.id))}, ${JSON.stringify(proposal)}, ${score}, ${status},
-			${deadline.getTime()}, ${expiresAt.getTime()}, ${nowMs}, NULL, ${present ? nowMs : null}, ${nowMs}, ${nowMs}
+			${deadline.getTime()}, ${expiresAt.getTime()}, ${nowMs}, NULL, ${present ? nowMs : null}, NULL, ${nowMs}, ${nowMs}
 			WHERE ${secured}`,
 	);
 	// 列数が変わるとSELECTの値の個数が合わなくなる: latch_members(latch_id, user_id, left_at, hidden_at)
