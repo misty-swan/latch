@@ -41,6 +41,7 @@ import { systemClock } from "../clock/clock";
 import {
 	intents,
 	latches,
+	latchStatusEvents,
 	matchCandidates,
 	matchEvents,
 	notifications,
@@ -508,6 +509,7 @@ devRoutes.get(
  * - response_deadline: latches.response_deadline
  * - history_updated_at: そのLATCHのproposal_history行(latch_id一致)のupdated_at
  * - intents_last_evaluated_at: 参加Intent全員のlast_evaluated_at
+ * - matched_at: 成立の状態記録(to_status=matched)のcreated_at(自己申告の受付開始を作る・F9)
  * 参加者に限定しない。存在しないLATCHは404。存在隠し404 → requireRegistered → 検証の順
  */
 devRoutes.post(
@@ -529,8 +531,12 @@ devRoutes.post(
 		if (latch === undefined) {
 			return notFound(c);
 		}
-		const { response_deadline, history_updated_at, intents_last_evaluated_at } =
-			parsed.data;
+		const {
+			response_deadline,
+			history_updated_at,
+			intents_last_evaluated_at,
+			matched_at,
+		} = parsed.data;
 		if (response_deadline !== undefined) {
 			await database
 				.update(latches)
@@ -549,6 +555,17 @@ devRoutes.post(
 				.update(intents)
 				.set({ lastEvaluatedAt: new Date(intents_last_evaluated_at) })
 				.where(inArray(intents.id, latch.intentIds));
+		}
+		if (matched_at !== undefined) {
+			await database
+				.update(latchStatusEvents)
+				.set({ createdAt: new Date(matched_at) })
+				.where(
+					and(
+						eq(latchStatusEvents.latchId, latch.id),
+						eq(latchStatusEvents.toStatus, "matched"),
+					),
+				);
 		}
 		return c.json({ ok: true }, 200);
 	},

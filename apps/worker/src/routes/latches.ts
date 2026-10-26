@@ -4,7 +4,7 @@
  *   成立(matched・completed・F5設計 §3)の一覧。id降順・cursor/limitはintents一覧と同方式。保留(candidate)は含めない
  * - GET /v1/latches/{id}: 単一取得。参加しない・存在しない・保留中(candidate)は一律404
  *   (成立後に個別に離脱した参加者は一覧・単一取得・各操作とも非参加と同じ扱い・F4b設計 §3.4)
- * - POST /{id}/response・/response/retract・/leave・/defer-reason: 成功は操作後のLatchDTO(200)。
+ * - POST /{id}/response・/response/retract・/leave・/defer-reason・/feedback: 成功は操作後のLatchDTO(200)。
  *   RespondFailureの写像: not_found→404・その他→400 VALIDATION_FAILED(details.reasons=[reason])
  * - DELETE /{id}: 表示から消す(F6a設計 §2.3)。成功は204・失敗の写像はRespondFailureと同じ
  * - /leave・DELETEの成功後はチャットの接続へclosedを知らせる(F6a設計 §2.4・最善努力)
@@ -15,6 +15,7 @@ import {
 	deferReasonRequestSchema,
 	type LatchDTO,
 	type LatchResponseValue,
+	latchFeedbackRequestSchema,
 	latchResponseRequestSchema,
 } from "@latch/shared";
 import {
@@ -45,6 +46,7 @@ import {
 } from "../db/schema";
 import type { Env } from "../env";
 import { errorJson } from "../http/errors";
+import { feedbackDue, submitFeedback } from "../latches/feedback";
 import { closedTargetsAfterLeave, hideLatch } from "../latches/hide";
 import {
 	leave,
@@ -187,12 +189,17 @@ const loadLatchDto = async (
 	const revealed = latch.status === "matched" || matchedAt !== null;
 	// 最終メッセージ・未読数はmembersと同じ成立後だけ(F6a設計 §3.2)
 	const chat = revealed ? await chatSummary(db, latchId, userId) : undefined;
+	// 自己申告の受付と本人の申告済みも成立後だけ(docs/05 §3.3)
+	const due = revealed
+		? await feedbackDue(db, latch, matchedAt, userId, systemClock.now())
+		: undefined;
 	return toLatchDto(latch, {
 		participantsCount: memberRows.length,
 		myResponse: (mine?.response ?? null) as LatchResponseValue | null,
 		myIntentId: myIntent?.id ?? null,
 		matchedAt,
 		chat,
+		feedbackDue: due,
 		members: revealed
 			? memberRows.filter((m) => m.user.id !== userId).map((m) => m.user)
 			: undefined,
@@ -419,6 +426,27 @@ latchRoutes.post("/:id/defer-reason", requireRegistered, async (c) => {
 		c.req.param("id"),
 		sub,
 		parsed.data.reason,
+	);
+	return respondResultToResponse(c, result, sub);
+});
+
+latchRoutes.post("/:id/feedback", requireRegistered, async (c) => {
+	const sub = c.var.auth.sub;
+	if (sub === undefined) {
+		const r = unauthorized();
+		return c.json(r.body, r.status);
+	}
+	const parsed = latchFeedbackRequestSchema.safeParse(await readJsonBody(c));
+	if (!parsed.success) {
+		const r = validationFailed();
+		return c.json(r.body, r.status);
+	}
+	const result = await submitFeedback(
+		dbOf(c.env),
+		c.req.param("id"),
+		sub,
+		parsed.data,
+		systemClock.now(),
 	);
 	return respondResultToResponse(c, result, sub);
 });

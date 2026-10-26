@@ -341,7 +341,19 @@ export const LATCH = {
 	CONNECTION_QUIET_MS: 90 * 24 * 60 * 60_000,
 	// 機会LATCHのcompleted: 対象時刻から3時間。docs/01 §8(2026-10-21オーナー裁定)
 	OCCASION_COMPLETE_AFTER_START_MS: 3 * 60 * 60_000,
+	// つながりの品質の自己申告を受け付け始める時点: 成立から7日。docs/01 §14
+	CONNECTION_FEEDBACK_AFTER_MS: 7 * 24 * 60 * 60_000,
 } as const;
+
+/**
+ * 正解データの自己申告の種別。attendance=機会LATCHの参加・connection_quality=つながりの品質。
+ * docs/01 §14・docs/05 §3.3
+ */
+export const LATCH_FEEDBACK_KINDS = [
+	"attendance",
+	"connection_quality",
+] as const;
+export type LatchFeedbackKind = (typeof LATCH_FEEDBACK_KINDS)[number];
 
 /** 見送り(defer)の理由。回答APIのreasonに使う。docs/05 §3 */
 export const DEFER_REASONS = [

@@ -24,6 +24,7 @@ import { TEST_IDP_AUDIENCE, TEST_IDP_ISSUER } from "../src/auth/idp";
 import {
 	intents,
 	latches,
+	latchStatusEvents,
 	matchCandidates,
 	matchEvents,
 	notifications,
@@ -687,6 +688,40 @@ describe("POST /v1/dev/latches/:id/backdate", () => {
 			.from(intents)
 			.where(eq(intents.id, other));
 		expect(untouched.lastEvaluatedAt).toBeNull();
+	});
+
+	it("matched_atは成立の状態記録(to_status=matched)の時刻だけを書き換える", async () => {
+		const a = await registerAccount("backdate-matched");
+		const latchId = await insertLatch([nextUlid(), nextUlid()]);
+		const now = new Date();
+		await db.insert(latchStatusEvents).values([
+			{
+				id: nextUlid(),
+				latchId,
+				fromStatus: "proposed",
+				toStatus: "partial_accept",
+				createdAt: now,
+			},
+			{
+				id: nextUlid(),
+				latchId,
+				fromStatus: "partial_accept",
+				toStatus: "matched",
+				createdAt: now,
+			},
+		]);
+		const past = "2020-01-01T00:00:00.000Z";
+		const res = await backdateRequest(latchId, { matched_at: past }, a.token);
+		expect(res.status).toBe(200);
+		const events = await db
+			.select()
+			.from(latchStatusEvents)
+			.where(eq(latchStatusEvents.latchId, latchId));
+		const byTo = Object.fromEntries(
+			events.map((e) => [e.toStatus, e.createdAt.toISOString()]),
+		);
+		expect(byTo.matched).toBe(past);
+		expect(byTo.partial_accept).toBe(now.toISOString());
 	});
 
 	it("不正入力(空・未知キー・非ISO)は400・存在しないLATCHは404", async () => {

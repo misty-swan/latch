@@ -18,6 +18,7 @@ import type {
 	CounterScope,
 	IntentForm,
 	IntentStatus,
+	LatchFeedbackKind,
 	LatchResponseValue,
 	LatchStatus,
 	MatchEventType,
@@ -60,8 +61,6 @@ export type ProposalOutcome =
 	| "rejected"
 	| "expired"
 	| "deferred";
-/** 正解データ申告の種別(docs/01 §14) */
-export type LatchFeedbackKind = "attendance" | "connection_quality";
 /** 通報の理由 */
 export type ReportReason = "spam" | "harassment" | "inappropriate" | "other";
 /** 通報の対象(F7a設計 §3.2) */
