@@ -90,6 +90,11 @@ pnpm --filter web test:e2e                    # ブラウザE2E・既定ポー�
 LATCH_E2E_PORT=9001 pnpm --filter worker test:e2e    # ポート競合時の回避
 pnpm --filter worker exec playwright test e2e/pipeline.spec.ts   # 単一spec
 
+# stagingの通し試験(02 #34・10 §4・手順は docs/runbooks/staging.md 8章)。必ず包みから起動する(出力の宛先と通行証を伏せ、前後に試験用の利用者を退会させる)
+LATCH_E2E_PORT=9001 node apps/worker/scripts/staging-e2e.mjs --local   # 手元のwrangler dev(stub)への試運転(apps/web/distが必要)
+node apps/worker/scripts/staging-e2e.mjs        # stagingへ。LATCH_LOAD_BASE_URL と LATCH_ACCESS_CLIENT_ID/SECRET を環境変数で渡す(本物のAIを30回前後呼ぶ)
+node apps/worker/scripts/staging-e2e.mjs --cleanup-only   # 途中で止まった回の試験用の利用者の後始末だけ
+
 # ローカル開発
 pnpm --filter worker dev     # wrangler dev --local(全バインディングをエミュレータで実行)
 pnpm --filter web dev        # vite

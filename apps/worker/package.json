@@ -8,6 +8,7 @@
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
 		"test:e2e": "playwright test",
+		"test:staging-e2e": "node scripts/staging-e2e.mjs",
 		"provision:staging": "node scripts/provision-staging.mjs",
 		"secrets:staging": "node scripts/put-staging-secrets.mjs",
 		"deploy:staging": "node scripts/deploy-staging.mjs"

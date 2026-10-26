@@ -65,9 +65,9 @@ export default defineConfig(async () => {
 		],
 		test: {
 			setupFiles: ["./tests/apply-d1-migrations.ts"],
-			// e2e/はPlaywrightが担う(test:e2e)。既定のincludeは**/*.spec.tsまで
-			// 見るためcloudflareプールから外す
-			exclude: [...configDefaults.exclude, "e2e/**"],
+			// e2e/・staging-e2e/はPlaywrightが担う(test:e2e・test:staging-e2e)。既定のincludeは
+			// **/*.spec.tsまで見るためcloudflareプールから外す
+			exclude: [...configDefaults.exclude, "e2e/**", "staging-e2e/**"],
 		},
 	};
 });
