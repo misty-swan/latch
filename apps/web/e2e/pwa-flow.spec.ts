@@ -193,9 +193,13 @@ test("Service Workerの制御下では、オフラインでも保存済みの一
 			.filter({ hasText: "オフラインのため、いまは読み解けません。" }),
 	).toBeVisible();
 
-	// ホームへ戻ってオンラインに戻すと帯が消える
-	// (オフラインの画面遷移もService Workerが答える)
-	await page.goto("/home");
+	// ホームへ戻ってオンラインに戻すと帯が消える。
+	// 戻るのは画面内のリンクで行う(オフラインの画面の読み込みは上の"/"で確かめた)。chromiumの
+	// setOfflineは、オフライン中のpage.gotoの直後にリフレッシュの要求をサーバーへ通すことがあり、
+	// 応答を失った回転は猶予(docs/04 §4)で1回しか救えないため、読み込みを2回にすると
+	// 通信を戻したときのリフレッシュが401になってwelcomeへ戻る(LAT-117)
+	await page.getByRole("link", { name: "閉じる" }).click();
+	await expect(page).toHaveURL(/\/home$/);
 	await expect(page.getByText(OFFLINE_BANNER)).toBeVisible();
 	await context.setOffline(false);
 	await expect(page.getByText(OFFLINE_BANNER)).toHaveCount(0);
