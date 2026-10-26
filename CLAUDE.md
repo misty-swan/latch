@@ -97,6 +97,9 @@ pnpm --filter web dev        # vite
 pnpm eval:gate       # ゴールドセットでParser/Jevのrealを採点し eval/records/gate.json を書く(指示文・real実装・モデル名を変えたら採り直してコミット。CIは記録を照合する)
 pnpm eval:region     # 地域名をEmbedding入力に含める/含めないの比較(eval/records/region.json・Workers AIを呼ぶ)
 
+# Analytics諸量の集計(02 #35・定義は09 §2)。D1へ読み取りの問い合わせだけを送り、Markdownの表を出す
+pnpm analytics:report --persist-to apps/worker/.wrangler/e2e-state   # 手元のE2Eの状態に向ける(既定は手元のD1・--stagingでstaging)
+
 # D1マイグレーション(src/db/schema.ts を変更したら生成してコミット)
 pnpm --filter worker exec drizzle-kit generate
 pnpm --filter worker exec wrangler d1 migrations apply DB --local
