@@ -23,15 +23,12 @@ import { OfflineBanner } from "../../offline/OfflineBanner";
 import { useOnline } from "../../offline/online";
 import { chatPath, PATHS } from "../../routes/paths";
 import { Avatar, LatchArt } from "../latch/art";
-import { RouteToast, useRouteToast } from "../RouteToast";
+import { RouteToast, TOAST_MS, useRouteToast } from "../RouteToast";
 import { ScreenGrain } from "../shared";
 import { TabBar } from "../TabBar";
 import { TopbarActions } from "../TopbarActions";
 
 const TONES = ["b", "c", "d", "e"] as const;
-
-/** トーストを出しておく時間(RouteToastと同じ) */
-const TOAST_MS = 2400;
 
 /** トップバー。brandは預けている一覧へ・自分は表示のみ(Homeと同じ扱い) */
 function ConnectionsTopbar() {

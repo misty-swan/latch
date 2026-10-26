@@ -14,9 +14,10 @@
 	height: 100dvh;
 }
 
-/* 遷移の後のトースト(RouteToast)は見えている範囲に固定する。latch.css の .toast は
-   .screen 基準のabsoluteのため、.screen が見えている範囲より長いとスクロールの先に
-   置かれる(LAT-110)。下端からの高さは RouteToast が下の操作を測って決める */
+/* トースト(RouteToast・遷移の後と、見送った画面・チャットなど画面の中の一言)は見えている
+   範囲に固定する。latch.css の .toast は .screen 基準のabsoluteのため、.screen が見えている
+   範囲より長いとスクロールの先に置かれる(LAT-110)。下端からの高さは RouteToast が下の操作を
+   測って決める(LAT-112) */
 .toast.toast--viewport {
 	position: fixed;
 }

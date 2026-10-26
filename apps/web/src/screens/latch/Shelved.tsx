@@ -12,6 +12,7 @@ import {
 	shouldShowDeferNote,
 } from "../../latches/deferNote";
 import { PATHS } from "../../routes/paths";
+import { RouteToast, TOAST_MS } from "../RouteToast";
 import { ScreenGrain } from "../shared";
 import { DomeRest, Tategaki } from "./art";
 
@@ -21,9 +22,6 @@ const REASONS: { value: DeferReason; label: string }[] = [
 	{ value: "just_not_now", label: "なんとなく、今回は" },
 	{ value: "other", label: "その他" },
 ];
-
-/** トーストを出しておく時間(prototype toast()) */
-const TOAST_MS = 2400;
 
 type ShelvedProps = {
 	form: IntentForm;
@@ -140,11 +138,9 @@ export function Shelved({ form, onSaveReason }: ShelvedProps) {
 					</button>
 				) : null}
 			</div>
-			{toast ? (
-				<p className="toast" role="status">
-					ありがとうございます。相手には伝わりません。
-				</p>
-			) : null}
+			<RouteToast
+				text={toast ? "ありがとうございます。相手には伝わりません。" : null}
+			/>
 			{sheet ? (
 				<>
 					<div

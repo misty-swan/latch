@@ -33,6 +33,7 @@ import { isOfflineError, OFFLINE_MESSAGES } from "../../offline/errors";
 import { latchPath, PATHS, reportPath } from "../../routes/paths";
 import { Avatar, LatchArt } from "../latch/art";
 import { LatchLoadFailed } from "../latch/LatchScreen";
+import { RouteToast, TOAST_MS } from "../RouteToast";
 import { ScreenGrain } from "../shared";
 import "./chat.css";
 import { ChatMenu } from "./ChatMenu";
@@ -40,8 +41,6 @@ import { Composer } from "./Composer";
 import { MessageList, type PendingMessage } from "./MessageList";
 
 const TONES = ["b", "c", "d", "e"] as const;
-/** トーストを出しておく時間(Shelved.tsxと同じ) */
-const TOAST_MS = 2400;
 const isRedirectError = (error: unknown): boolean => {
 	if (!(error instanceof ApiError)) return false;
 	if (error.code === "NOT_FOUND") return true;
@@ -499,11 +498,7 @@ function ChatView({
 			) : (
 				<Composer onSend={send} />
 			)}
-			{toast !== null ? (
-				<p className="toast" role="status">
-					{toast}
-				</p>
-			) : null}
+			<RouteToast text={toast} />
 			{menuOpen ? (
 				<ChatMenu
 					latch={latch}
