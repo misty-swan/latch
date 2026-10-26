@@ -2,12 +2,15 @@
  * 3つの流れ(ボード: Intro1/2/3.dc.html の移植)。
  * ボード3枚を1画面のステップ状態として再現する(戻る/次へでステップを往復し・
  * 1の戻るはwelcome・スキップと3のはじめるはsigninへ進む)。文言・クラス名はボードどおり
+ * PCの幅(1024px以上)では、左に各ステップの絵・右に文言と導線の2列で描く(LAT-118)
  */
 
 import { type CSSProperties, useState } from "react";
 import { Link, useSearchParams } from "react-router";
+import { useDesktop } from "../desktop/context";
+import { OnboardScreen } from "../desktop/OnboardScreen";
 import { PATHS } from "../routes/paths";
-import { ScreenGrain } from "./shared";
+import { LatchMark } from "./shared";
 
 /** 各ステップのキャッチコピー(ボードのt-eyebrow・h1・t-bodyの順) */
 const STEP_COPY: ReadonlyArray<{
@@ -39,18 +42,35 @@ const BackIcon = () => (
 	</svg>
 );
 
+/** PCの2列の左に置く各ステップの絵(スマホの本文の絵を大きくしたもの・LAT-118)。大きさはdesktop.cssで決める */
+function DeskStepArt({ step }: { step: 1 | 2 | 3 }) {
+	if (step === 1) {
+		return (
+			<div className="dome-rest" aria-hidden="true">
+				<span className="dome" />
+				<span className="shelf" />
+			</div>
+		);
+	}
+	return <LatchMark state={step === 2 ? "waiting" : "arrived"} />;
+}
+
 export function Intro() {
 	// サインイン画面の戻る(ボードではIntro3へ)を再現するため・?step=で初期ステップを取る
 	const [searchParams] = useSearchParams();
 	const initialStep = searchParams.get("step") === "3" ? 3 : 1;
 	const [step, setStep] = useState<1 | 2 | 3>(initialStep);
+	const { landing } = useDesktop();
 	const copy = STEP_COPY[step - 1];
 	const goNext = () => setStep((s) => (s === 1 ? 2 : 3));
 	const goBack = () => setStep((s) => (s === 3 ? 2 : 1));
 
 	return (
-		<div className={`screen intro intro--${step}`}>
-			<ScreenGrain />
+		<OnboardScreen
+			className={`intro intro--${step}`}
+			label="3つの流れ"
+			art={<DeskStepArt step={step} />}
+		>
 			<header className="topbar">
 				<div className="topbar__side">
 					{step === 1 ? (
@@ -78,33 +98,35 @@ export function Intro() {
 				</div>
 			</header>
 			<div className="screen__body">
-				<div
-					className="intro__art"
-					style={{ height: 330, display: "grid", placeItems: "center" }}
-				>
-					{step === 1 ? (
-						<div
-							className="dome-rest"
-							style={{ "--size": "168px", marginTop: 120 } as CSSProperties}
-							aria-hidden="true"
-						>
-							<span className="dome" />
-							<span className="shelf" />
-						</div>
-					) : (
-						<div
-							className={`latch ${step === 2 ? "is-waiting" : "is-arrived"}`}
-							style={{ "--size": "200px", "--gap": "18px" } as CSSProperties}
-							aria-hidden="true"
-						>
-							<span className="latch__light" />
-							<span className="latch__mine" />
-							<span className="latch__theirs">
-								<span className="latch__ink" />
-							</span>
-						</div>
-					)}
-				</div>
+				{landing ? null : (
+					<div
+						className="intro__art"
+						style={{ height: 330, display: "grid", placeItems: "center" }}
+					>
+						{step === 1 ? (
+							<div
+								className="dome-rest"
+								style={{ "--size": "168px", marginTop: 120 } as CSSProperties}
+								aria-hidden="true"
+							>
+								<span className="dome" />
+								<span className="shelf" />
+							</div>
+						) : (
+							<div
+								className={`latch ${step === 2 ? "is-waiting" : "is-arrived"}`}
+								style={{ "--size": "200px", "--gap": "18px" } as CSSProperties}
+								aria-hidden="true"
+							>
+								<span className="latch__light" />
+								<span className="latch__mine" />
+								<span className="latch__theirs">
+									<span className="latch__ink" />
+								</span>
+							</div>
+						)}
+					</div>
+				)}
 				<div className="pad">
 					<p className="t-eyebrow rise">{copy.eyebrow}</p>
 					<h1
@@ -141,6 +163,6 @@ export function Intro() {
 					</Link>
 				)}
 			</div>
-		</div>
+		</OnboardScreen>
 	);
 }

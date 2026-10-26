@@ -6,6 +6,7 @@
  * - 送信はPOST /v1/users(docs/05 §3.2)。成功応答でsub付きJWTへ付け替え・consentへ進む
  * - 422 UNDER_AGE(18歳未満)ではボードUnderAge.dc.htmlどおりの表示へ切り替える
  * 文言・構造・クラス名はボードどおり。エラー表示とAPI接続の細部だけ実装の裁量
+ * PCの幅(1024px以上)では、ようこそと同じ2列の右の列に描く(LAT-118)
  */
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -16,8 +17,8 @@ import { Link, useNavigate } from "react-router";
 import { z } from "zod";
 import { ApiError, apiFetch } from "../api/client";
 import { authSession } from "../auth/session";
+import { OnboardScreen } from "../desktop/OnboardScreen";
 import { PATHS } from "../routes/paths";
-import { ScreenGrain } from "./shared";
 
 /** POST /v1/usersの応答(docs/05 §3.2: sub付きJWTへの付け替えと新規リフレッシュ族) */
 interface RegisterResponse {
@@ -99,8 +100,7 @@ export function Register() {
 
 	if (underAge) {
 		return (
-			<div className="screen">
-				<ScreenGrain />
+			<OnboardScreen label="年齢の確認">
 				<header className="topbar">
 					<div className="topbar__side">
 						<button
@@ -155,13 +155,12 @@ export function Register() {
 						閉じる
 					</button>
 				</div>
-			</div>
+			</OnboardScreen>
 		);
 	}
 
 	return (
-		<div className="screen">
-			<ScreenGrain />
+		<OnboardScreen label="登録">
 			<header className="topbar">
 				<div className="topbar__side">
 					<Link className="icon-btn" to={PATHS.signin} aria-label="戻る">
@@ -245,6 +244,6 @@ export function Register() {
 					</button>
 				</div>
 			</form>
-		</div>
+		</OnboardScreen>
 	);
 }

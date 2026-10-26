@@ -7,7 +7,7 @@ import { useCallback, useSyncExternalStore } from "react";
 
 /** スマホの見た目のまま中央の列に寄せる幅(試作の外枠 shell.css が端末の枠を外す820pxの次) */
 export const WIDE_QUERY = "(min-width: 821px)";
-/** 左のナビを出す幅 */
+/** 左のナビを出す幅。ようこそとはじめる流れはこの幅から2列で描く */
 export const DESK_QUERY = "(min-width: 1024px)";
 /** 右の提案の部屋を出す幅 */
 export const ROOM_QUERY = "(min-width: 1280px)";

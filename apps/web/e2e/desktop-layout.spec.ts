@@ -2,7 +2,7 @@
  * PC向けの画面のブラウザE2E(LAT-14・PC向けの画面の設計)。PCの大きさ(1280×800)で、
  * 画面が横いっぱいに伸びず、prototype/project/Desktop.dc.html と承認済みのPC向けのデザインどおりに
  * 出ることを確かめる。
- * - ログイン前: ようこそはPCの2列、サインインはスマホの見た目のまま中央の列(幅480px)
+ * - ログイン前: ようこそとはじめる流れ(intro・サインイン・登録・同意)はPCの2列(LAT-118)
  * - ログイン後: 左のナビ+中央の列(幅688px)。スマホの下部タブと右上の入口は出さない
  * - 預けている: 右に提案の部屋。提案が無ければ消灯、届けば灯りがともり、部屋の中で参加できる
  * - チャット: 左につながりの一覧を並べる
@@ -20,7 +20,9 @@ import {
 
 const DESKTOP = { width: 1280, height: 800 };
 /** 中央の列の幅(desktop.cssの--desk-col) */
-const COLUMN = { nav: 688, narrow: 480 };
+const COLUMN = { nav: 688 };
+/** はじめる流れの右の列の幅の上限(desktop.cssの.welcome-desk) */
+const ONBOARD_PANEL_MAX = 520;
 
 test.beforeEach(() => {
 	expireLeftoverE2eIntents();
@@ -75,7 +77,27 @@ const expectColumn = async (
 	);
 };
 
-test("ログイン前: ようこそはPCの2列で、サインインは中央の列に収まる", async ({
+/**
+ * はじめる流れの画面がPCの2列で描かれている: 左に絵の列、右の端に名前付きの右の列(幅520px以下)があり、
+ * 中身はスマホの見た目のまま中央の列に寄せない
+ */
+const expectOnboardPanel = async (page: Page, label: string): Promise<void> => {
+	const panel = page.getByRole("region", { name: label });
+	await expect(panel).toBeVisible();
+	await expect(page.locator(".desk--narrow")).toHaveCount(0);
+	await expect(page.locator(".welcome-desk__art")).toBeVisible();
+	const m = await panel.evaluate((el) => ({
+		box: el.getBoundingClientRect().toJSON() as DOMRect,
+		width: window.innerWidth,
+	}));
+	expect(Math.round(m.box.width), "右の列の幅").toBeLessThanOrEqual(
+		ONBOARD_PANEL_MAX,
+	);
+	expect(Math.round(m.box.right), "右の列は画面の右端").toBe(m.width);
+	await expectNoPageScroll(page);
+};
+
+test("ログイン前: ようこそとはじめる流れ(intro・サインイン・登録・同意)はPCの2列で描く", async ({
 	page,
 }) => {
 	await page.setViewportSize(DESKTOP);
@@ -91,11 +113,56 @@ test("ログイン前: ようこそはPCの2列で、サインインは中央の
 	await expectNoPageScroll(page);
 	await shot(page, "01-welcome");
 
-	await page.getByRole("link", { name: "アカウントをお持ちの方" }).click();
+	// 3つの流れ: 左に各ステップの絵、右に文言と導線
+	await page.getByRole("link", { name: "はじめる" }).click();
+	await expect(page).toHaveURL(/\/intro$/);
+	await expectOnboardPanel(page, "3つの流れ");
+	await expect(page.locator(".welcome-desk__art .dome-rest")).toBeVisible();
+	await expect(page.locator(".onboard-desk__panel .intro__art")).toHaveCount(0);
+	await shot(page, "02a-intro");
+	await page.getByRole("button", { name: "次へ" }).click();
+	await expect(
+		page.locator(".welcome-desk__art .latch.is-waiting"),
+	).toBeVisible();
+	await page.getByRole("button", { name: "次へ" }).click();
+	await expect(
+		page.locator(".welcome-desk__art .latch.is-arrived"),
+	).toBeVisible();
+	await expect(page.getByRole("link", { name: "はじめる" })).toBeInViewport();
+
+	// サインイン
+	await page.getByRole("link", { name: "はじめる" }).click();
 	await expect(page).toHaveURL(/\/signin$/);
-	await expectColumn(page, ".desk__main", COLUMN.narrow);
-	await expectNoPageScroll(page);
+	await expectOnboardPanel(page, "アカウント");
+	await expect(
+		page.getByRole("button", { name: "Googleで続ける" }),
+	).toBeInViewport();
 	await shot(page, "02-signin");
+	await page.getByRole("button", { name: "Googleで続ける" }).click();
+	await page.locator("#dev-name").fill(`e2e-web-${crypto.randomUUID()}`);
+	await page.getByRole("button", { name: "テストではじめる" }).click();
+
+	// 登録(ログイン後でも左のナビは出さない)
+	await expect(page).toHaveURL(/\/register$/);
+	await expectOnboardPanel(page, "登録");
+	await expect(page.getByRole("navigation", { name: "メイン" })).toHaveCount(0);
+	await page.locator("#r-name").fill("E2Eはじまり");
+	await page.locator("#r-birth").fill("2000-01-01");
+	await expect(page.getByRole("button", { name: "次へ" })).toBeInViewport();
+	await shot(page, "02b-register");
+	await page.getByRole("button", { name: "次へ" }).click();
+
+	// 同意(収まらない高さでは右の列の中で送る)
+	await expect(page).toHaveURL(/\/consent$/);
+	await expectOnboardPanel(page, "外部送信の同意");
+	await expect(page.getByRole("navigation", { name: "メイン" })).toHaveCount(0);
+	await shot(page, "02c-consent");
+	await page.getByRole("button", { name: "同意して進む" }).click();
+
+	// 同意の後(置く)は左のナビ+中央の列
+	await expect(page.locator("#c-text")).toBeVisible();
+	await expect(page.getByRole("navigation", { name: "メイン" })).toBeVisible();
+	await expectColumn(page, ".desk__main", COLUMN.nav);
 });
 
 test("ログイン後: 左のナビ・中央の列・消灯した提案の部屋が出て、ナビで画面を移れる", async ({

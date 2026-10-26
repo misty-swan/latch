@@ -5,14 +5,15 @@
  *   テストサインイン(名前入力→POST /v1/dev/idp-token→POST /v1/auth/token)に繋がる
  *   (docs/04 §4のテスト鍵・F2'計画Task 2のdev専用エンドポイント)
  * 文言・構造・クラス名はボードどおり。dev専用UIの細部だけ実装の裁量
+ * PCの幅(1024px以上)では、ようこそと同じ2列の右の列に描く(LAT-118)
  */
 
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ApiError, apiFetch } from "../api/client";
 import { authSession } from "../auth/session";
+import { OnboardScreen } from "../desktop/OnboardScreen";
 import { PATHS } from "../routes/paths";
-import { ScreenGrain } from "./shared";
 
 /** POST /v1/auth/tokenの応答(docs/05 §3.2・worker/routes/auth.tsの実装に一致) */
 interface AuthTokenResponse {
@@ -76,8 +77,7 @@ export function SignIn() {
 	};
 
 	return (
-		<div className="screen">
-			<ScreenGrain />
+		<OnboardScreen label="アカウント">
 			<header className="topbar">
 				<div className="topbar__side">
 					{/* ボードどおり戻り先はIntro3(?step=で初期ステップを指定) */}
@@ -177,6 +177,6 @@ export function SignIn() {
 					に同意したことになります。
 				</p>
 			</div>
-		</div>
+		</OnboardScreen>
 	);
 }

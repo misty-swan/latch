@@ -2,7 +2,8 @@
  * PC向けの外枠(LAT-14・PC向けの画面の設計 §1・§2)。ルートの全画面を包むレイアウトのルート。
  * - 820px以下: 何も足さない(包みの要素は display: contents で、スマホの見た目と挙動はそのまま)
  * - 821px以上: 画面をスマホの見た目のまま中央の列(幅480px)に寄せる(ログイン前の画面・タブレット)
- * - 1024px以上かつログイン後: 左のナビ+中央の列(幅688px)。ようこそ画面はPCの2列で描く
+ * - 1024px以上かつログイン後: 左のナビ+中央の列(幅688px)
+ * - 1024px以上のようこそとはじめる流れ(intro・サインイン・登録・同意): PCの2列で描く(LAT-118)
  * - 1280px以上: 「預けている」の右に提案の部屋を出し、チャットの左につながりの一覧を並べる
  * 中央の列(Outlet)は常に同じ位置に置き、幅が変わっても画面の状態(書きかけの文など)を保つ
  */
@@ -17,7 +18,7 @@ import { DeskNav, type DeskSection } from "./DeskNav";
 import { HomeRoom } from "./HomeRoom";
 import { DESK_QUERY, ROOM_QUERY, useMediaQuery, WIDE_QUERY } from "./media";
 
-/** ログイン後でも左のナビを出さない画面(はじめる流れの途中) */
+/** 左のナビを出さず、PCの幅では2列で描く画面(ようこそとはじめる流れ・LAT-118) */
 const NAVLESS: ReadonlySet<string> = new Set([
 	PATHS.welcome,
 	PATHS.intro,
@@ -59,8 +60,8 @@ export function DesktopFrame() {
 	const roomWide = useMediaQuery(ROOM_QUERY);
 	const { pathname } = useLocation();
 
-	const landing = desk && pathname === PATHS.welcome;
-	const nav = desk && !NAVLESS.has(pathname) && signedIn();
+	const landing = desk && NAVLESS.has(pathname);
+	const nav = desk && !landing && signedIn();
 	const room = nav && roomWide && pathname === PATHS.home;
 	const list = nav && roomWide && matchPath(PATHS.chat, pathname) !== null;
 	// 右の部屋が選んだ提案(到着カードの「右に表示中」に使う)。部屋を閉じると部屋がnullに戻す
