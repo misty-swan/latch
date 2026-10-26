@@ -205,6 +205,8 @@ API源流レート制限・Jev予算(1Intentあたり1日40回・1ユーザー�
 
 各層の通過件数(Vectorize取得→L1通過→L2確定→L3通過→Jev実行→提案化)と**Layer 1の除外理由別内訳**・Jev回数/latency/費用・LATCH Score分布・提示数・回答率・保留→expired率・**Embedding未完・未評価の滞留件数**・DLQ件数を、イベント単位で記録する。02の#35(Analytics)・#7(総当たり禁止の観察)・#11〜#13/#26(非生成の証明)の証拠はこの計測が担う。
 
+**#35の集計(F9で確定・LAT-82)。** 02 #35の6つの数値は、D1の記録(match_eventsのpayload・usage_counters・match_candidates・latches・latch_responses・latch_status_events・messages)への読み取りの問い合わせで出す(集計のコマンド`pnpm analytics:report`・数え方は09 §2)。毎分Cronが評価本体を直接呼ぶ評価はpayloadへ書かれず(下記)、削除した意思のmatch_eventsの行は消える(05 §2.5)ため、D1の候補数はこれらを含まない。全量はAnalytics Engineのdata pointにある(09 §2のオーナー決定)
+
 **実装確定(F3)。** 第2段(評価)の結果は、起点イベント(embedding_completed)の行のmatch_events.payloadへ記録する。記録するのは層通過件数(retrieval_count / l1_pass / l1_exclusions(Layer 1の除外理由別内訳) / l3_pass)と処理済み判定の理由(抑制・対象外はskipped理由・旧versionはstale_version)であり、raw_text・座標は格納しない(05 §2.5)。あわせてAnalytics Engine(dataset=latch_metrics・バインディング=PIPELINE_AX)へ層通過のdata pointをイベント単位で書き、処理結果は許可リストの構造化ログ(04 §4)に出力する。バインド未設定の環境(単体試験等)では送信を省略し例外を出さない。
 
 **実装確定(不具合の修正工程(第4回)・issue #47)。** payload(retrieval_count=Layer 2 Candidate Retrievalの照会が返した件数は従来から記録)へ、控えから補った件数(supplement_count)を加える。評価の完了のログpipeline.stage2.completedにも、retrieval_count(補いを含まず、自idの除外の前)とsupplement_countを出す。ログの許可リスト(08 §6)へ同名の2項目を足した。段ごとの所要時間のログ(pipeline.stage2.timing)には、控えの読み込みの残りの待ちの段supplementが加わる。Analytics Engineのdoublesには入れない(数値の上限・下記)。負荷試験で、補いが初期判定につながった件数を確かめるために使う。

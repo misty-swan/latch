@@ -11,7 +11,8 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
     "eval:gate": "pnpm --filter eval exec tsx gate.ts",
-    "eval:region": "pnpm --filter eval exec tsx region.ts"
+    "eval:region": "pnpm --filter eval exec tsx region.ts",
+		"analytics:report": "node apps/worker/scripts/analytics-report.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
