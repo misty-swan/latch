@@ -2,11 +2,12 @@
  * ルーティング(docs/04 §3.2: React Router library mode)。
  * - welcome/intro/signin・規約ページ(terms/privacy)・ヘルプ(help)は未認証で見られる画面・それ以外はRequireAuthで保護する
  *   (未認証のまま入った場合はwelcomeへ送り返す)
+ * - "/"は起動の入口(StartRoute)。どの道順にも当たらないURL(古いstart_urlの/index.htmlなど)は"/"へ送る(LAT-115)
  * ルート定義はappRoutesとして出し・単体試験はcreateMemoryRouter(appRoutes)で使う
  */
 
 import { createBrowserRouter, Navigate } from "react-router";
-import { RequireAuth } from "./auth/guard";
+import { RequireAuth, StartRoute } from "./auth/guard";
 import { PATHS } from "./routes/paths";
 import { Compose } from "./screens/Compose";
 import { Confirm } from "./screens/Confirm";
@@ -37,7 +38,7 @@ import { Report } from "./screens/safety/Report";
 import { Welcome } from "./screens/Welcome";
 
 export const appRoutes = [
-	{ path: "/", element: <Navigate to={PATHS.welcome} replace /> },
+	{ path: "/", element: <StartRoute /> },
 	{ path: PATHS.welcome, element: <Welcome /> },
 	{ path: PATHS.intro, element: <Intro /> },
 	{ path: PATHS.signin, element: <SignIn /> },
@@ -214,6 +215,7 @@ export const appRoutes = [
 			</RequireAuth>
 		),
 	},
+	{ path: "*", element: <Navigate to="/" replace /> },
 ];
 
 export const createAppRouter = () => createBrowserRouter(appRoutes);

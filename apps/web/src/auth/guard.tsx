@@ -4,6 +4,8 @@
  * 判定はメモリ上のトークンと、オフライン中のセッション(F8a 設計書 §2.2)
  * (起動ゲートAuthGateの後なので復元は完了済み)。オフライン中は端末に保存した内容で
  * 保護画面を描画する
+ * StartRouteは起動の入口("/"・manifestのstart_url)。ホーム画面のアプリを開き直したときに
+ * ログイン済みならhomeへ、それ以外はwelcomeへ送る(LAT-115)
  */
 
 import type { ReactNode } from "react";
@@ -11,8 +13,14 @@ import { Navigate } from "react-router";
 import { PATHS } from "../routes/paths";
 import { authSession } from "./session";
 
+const signedIn = () => authSession.accessToken !== null || authSession.offline;
+
+export function StartRoute() {
+	return <Navigate to={signedIn() ? PATHS.home : PATHS.welcome} replace />;
+}
+
 export function RequireAuth({ children }: { children: ReactNode }) {
-	if (authSession.accessToken === null && !authSession.offline) {
+	if (!signedIn()) {
 		return <Navigate to={PATHS.welcome} replace />;
 	}
 	return <>{children}</>;

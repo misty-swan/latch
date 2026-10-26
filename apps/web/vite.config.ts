@@ -15,7 +15,8 @@ export const pwaManifest: Partial<ManifestOptions> = {
 	short_name: "LATCH",
 	description: "繋がりたいことを、置いておけばいい。",
 	lang: "ja",
-	start_url: "./index.html",
+	// アプリを開き直したときの入口。"/"がログインの有無でhomeかwelcomeへ送る(LAT-115)
+	start_url: "./",
 	display: "standalone",
 	background_color: "#EEF0F2",
 	theme_color: "#EEF0F2",

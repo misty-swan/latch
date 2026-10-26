@@ -93,4 +93,37 @@ describe("App", () => {
 		).toBeTruthy();
 		expect(router.state.location.pathname).toBe(PATHS.home);
 	});
+
+	// ホーム画面のアプリを開き直すとstart_url("/")から始まる。古いstart_url(/index.html)や
+	// 知らないURLで開いても止まらない(LAT-115)
+	it.each(["/", "/index.html", "/no-such-page"])(
+		"未認証で%sを開くとwelcomeを表示する",
+		async (entry) => {
+			const router = createMemoryRouter(appRoutes, { initialEntries: [entry] });
+
+			render(<App router={router} />);
+
+			expect(
+				await screen.findByRole("link", { name: "はじめる" }),
+			).toBeTruthy();
+			expect(router.state.location.pathname).toBe(PATHS.welcome);
+		},
+	);
+
+	it.each(["/", "/index.html"])(
+		"認証済みで%sを開くとhomeを表示する",
+		async (entry) => {
+			authSession.setTokens("access-1", "refresh-1");
+			const router = createMemoryRouter(appRoutes, { initialEntries: [entry] });
+
+			render(<App router={router} />);
+
+			expect(
+				await screen.findByRole("heading", {
+					name: "まだ、何も置いていません。",
+				}),
+			).toBeTruthy();
+			expect(router.state.location.pathname).toBe(PATHS.home);
+		},
+	);
 });

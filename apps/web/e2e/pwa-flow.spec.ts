@@ -173,6 +173,13 @@ test("Service Workerの制御下では、オフラインでも保存済みの一
 	await expect(page.getByText(OFFLINE_BANNER)).toBeVisible();
 	await expect(page.locator(".intent", { hasText: words })).toBeVisible();
 
+	// ホーム画面のアプリを閉じて開き直したときと同じく、オフラインのままstart_urlから開いても
+	// homeへ進み、帯と一覧が出る(02 #32の項目6・LAT-115)
+	await page.goto("/");
+	await expect(page).toHaveURL(/\/home$/);
+	await expect(page.getByText(OFFLINE_BANNER)).toBeVisible();
+	await expect(page.locator(".intent", { hasText: words })).toBeVisible();
+
 	// 置く→読み解くと、通信できないので入力欄へ戻って案内が出る
 	await page.getByRole("link", { name: "置く" }).click();
 	await page
@@ -237,7 +244,8 @@ test("ホーム画面追加の要件(manifestとアイコン)を満たす", asyn
 	};
 	expect(manifest.name).toBe("LATCH");
 	expect(manifest.display).toBe("standalone");
-	expect(manifest.start_url).toBeTruthy();
+	// "/"はログインの有無でhomeかwelcomeへ送る。/index.htmlはどの道順にも当たらない(LAT-115)
+	expect(manifest.start_url).toBe("./");
 	const icons = manifest.icons ?? [];
 	expect(icons.map((icon) => icon.src).sort()).toEqual([
 		"icon-192.png",
