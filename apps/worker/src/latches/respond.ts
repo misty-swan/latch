@@ -27,7 +27,8 @@ export type RespondFailure =
 	| "invalid_status"
 	| "deadline_passed"
 	| "already_responded"
-	| "not_deferred";
+	| "not_deferred"
+	| "kind_mismatch";
 export type RespondResult =
 	| { ok: true; latchId: string }
 	| { ok: false; reason: RespondFailure };
@@ -58,7 +59,7 @@ const closedReason = (latch: LatchRow, now: Date): RespondFailure | null => {
  * 参加者から見たLATCHと自分の回答。不在・非参加・離脱済み・表示から消した本人・保留(candidate)はnull
  * (一律404・docs/05 §3.1・離脱者は非参加と同じ扱い・F4b設計 §3.4・hidden_atも同じ扱い・F6a設計 §2.3)
  */
-const loadForMember = async (
+export const loadForMember = async (
 	db: DrizzleD1Database,
 	latchId: string,
 	userId: string,

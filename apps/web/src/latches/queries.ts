@@ -3,7 +3,11 @@
  * 送信系は成功時に応答のLatchDTOを個別キャッシュへ反映し・一覧とIntent一覧を無効化する。
  */
 
-import type { DeferReason, LatchDTO } from "@latch/shared";
+import type {
+	DeferReason,
+	LatchDTO,
+	LatchFeedbackRequest,
+} from "@latch/shared";
 import {
 	type QueryClient,
 	useMutation,
@@ -115,3 +119,23 @@ export const useRetractMutation = (id: string) =>
 /** 見送りの理由 */
 export const useDeferReasonMutation = (id: string) =>
 	usePost<DeferReason>(id, "/defer-reason", (reason) => ({ reason }));
+
+/**
+ * 正解データの自己申告(docs/05 §3.3)。スキップは値のnullで送る。
+ * 対象のLATCHは送るときに渡す(一覧の問いは送った直後に隠れて部品が外れるため、
+ * 送信をその部品に持たせない)。失敗(申告済み・受付外を含む)は一覧を取り直してサーバーに合わせる
+ */
+export const useFeedbackMutation = () => {
+	const client = useQueryClient();
+	return useMutation({
+		mutationFn: ({ id, body }: { id: string; body: LatchFeedbackRequest }) =>
+			apiFetch<LatchDTO>(`/latches/${id}/feedback`, {
+				method: "POST",
+				json: body,
+			}),
+		onSuccess: (data, { id }) => applyResult(client, id, data),
+		onError: () => {
+			void client.invalidateQueries({ queryKey: LATCHES_QUERY_KEY });
+		},
+	});
+};

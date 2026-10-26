@@ -186,6 +186,7 @@ describe("LATCH(提案化の定数・docs/06 §5〜§7)", () => {
 			JEV_ONE_ON_ONE_MIN: 4,
 			CONNECTION_QUIET_MS: 90 * 24 * 60 * 60_000,
 			OCCASION_COMPLETE_AFTER_START_MS: 3 * 60 * 60_000,
+			CONNECTION_FEEDBACK_AFTER_MS: 7 * 24 * 60 * 60_000,
 		});
 	});
 });

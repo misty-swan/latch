@@ -18,6 +18,7 @@ import {
 	intentFormSchema,
 	isoDateTimeSchema,
 	latchDtoSchema,
+	latchFeedbackRequestSchema,
 	logoutRequestSchema,
 	markReadRequestSchema,
 	messageBodySchema,
@@ -793,6 +794,57 @@ describe("通知のスキーマ(F7b設計)", () => {
 				endpoint: url(1),
 				extra: 1,
 			}).success,
+		).toBe(false);
+	});
+});
+
+describe("latchFeedbackRequestSchema(docs/05 §3.3)", () => {
+	const ok = (v: unknown) => latchFeedbackRequestSchema.safeParse(v).success;
+	it("つながりの品質は1〜5の整数かnull(スキップ)", () => {
+		for (const score of [1, 5, null]) {
+			expect(ok({ kind: "connection_quality", value: { score } })).toBe(true);
+		}
+		for (const score of [0, 6, 2.5, "3"]) {
+			expect(ok({ kind: "connection_quality", value: { score } })).toBe(false);
+		}
+	});
+	it("参加は論理値かnull(スキップ)", () => {
+		for (const attended of [true, false, null]) {
+			expect(ok({ kind: "attendance", value: { attended } })).toBe(true);
+		}
+		expect(ok({ kind: "attendance", value: { attended: "yes" } })).toBe(false);
+		// 種別と値の形の取り違え
+		expect(ok({ kind: "attendance", value: { score: 3 } })).toBe(false);
+	});
+	it("未知のkind・余分なキーは通さない", () => {
+		expect(ok({ kind: "other", value: {} })).toBe(false);
+		expect(
+			ok({ kind: "connection_quality", value: { score: 3 }, extra: 1 }),
+		).toBe(false);
+		expect(
+			ok({ kind: "connection_quality", value: { score: 3, note: "x" } }),
+		).toBe(false);
+	});
+	it("LatchDTOのfeedback_dueは種別・null・キーなしを通す", () => {
+		const base = {
+			id: "01J00000000000000000000000",
+			form: "connection",
+			status: "matched",
+			response_deadline: "2026-10-26T00:00:00.000Z",
+			participants_count: 2,
+			my_response: "yes",
+			score: 0.9,
+			my_intent_id: null,
+			matched_at: "2026-10-19T00:00:00.000Z",
+		};
+		expect(latchDtoSchema.safeParse(base).success).toBe(true);
+		for (const feedback_due of ["connection_quality", "attendance", null]) {
+			expect(latchDtoSchema.safeParse({ ...base, feedback_due }).success).toBe(
+				true,
+			);
+		}
+		expect(
+			latchDtoSchema.safeParse({ ...base, feedback_due: "x" }).success,
 		).toBe(false);
 	});
 });

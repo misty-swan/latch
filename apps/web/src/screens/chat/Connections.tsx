@@ -1,19 +1,23 @@
 /**
  * つながり一覧(/connections・F6b設計 §1.2)。prototype/app/app.jsの
- * screens.connections・ConnectionsEmpty.dc.htmlの移植。アンケート・アプリ内通知は後続フェーズ。
+ * screens.connections・ConnectionsEmpty.dc.htmlの移植。上部の5段階の問いは
+ * つながりの品質の自己申告(docs/01 §14・docs/05 §3.3・F9)で、feedback_dueが
+ * connection_qualityの先頭の1件だけをたずねる(Connections.dc.html)。
  */
 
 import type { LatchDTO } from "@latch/shared";
 import { useIsRestoring } from "@tanstack/react-query";
-import { Fragment } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link } from "react-router";
 import {
 	connectionName,
 	connectionSubtitle,
+	ENDED_PARTNER_NAME,
 	formatAgo,
 	isEndedConnection,
 } from "../../chat/format";
 import { useConnectionsQuery } from "../../chat/queries";
+import { useFeedbackMutation } from "../../latches/queries";
 import { isOfflineError } from "../../offline/errors";
 import { OfflineBanner } from "../../offline/OfflineBanner";
 import { useOnline } from "../../offline/online";
@@ -25,6 +29,9 @@ import { TabBar } from "../TabBar";
 import { TopbarActions } from "../TopbarActions";
 
 const TONES = ["b", "c", "d", "e"] as const;
+
+/** トーストを出しておく時間(RouteToastと同じ) */
+const TOAST_MS = 2400;
 
 /** トップバー。brandは預けている一覧へ・自分は表示のみ(Homeと同じ扱い) */
 function ConnectionsTopbar() {
@@ -82,6 +89,59 @@ function RowIcon({ latch }: { latch: LatchDTO }) {
 			size="m"
 			tone="b"
 		/>
+	);
+}
+
+/** 問いの見出しの相手。実名を出さない終了の相手には「さん」を付けない */
+const surveyPartner = (latch: LatchDTO): string => {
+	const name = connectionName(latch);
+	return name === ENDED_PARTNER_NAME ? name : `${name}さん`;
+};
+
+/** つながりの品質の5段階の問い(Connections.dc.html)。選ぶか[スキップ]で1回だけ答える */
+function ConnectionSurvey({
+	latch,
+	disabled,
+	onAnswer,
+}: {
+	latch: LatchDTO;
+	disabled: boolean;
+	onAnswer: (score: number | null) => void;
+}) {
+	return (
+		<form className="survey rise rise-1" style={{ marginTop: 12 }}>
+			<p className="t-head">
+				{surveyPartner(latch)}とのつながりは、どうでしたか。
+			</p>
+			<div className="scale" role="radiogroup" aria-label="5段階">
+				{[1, 2, 3, 4, 5].map((n) => (
+					<label key={n}>
+						<input
+							type="radio"
+							name="sv2"
+							value={n}
+							disabled={disabled}
+							onChange={() => onAnswer(n)}
+						/>
+						<span>{n}</span>
+					</label>
+				))}
+			</div>
+			<div className="row" style={{ justifyContent: "space-between" }}>
+				<span className="t-meta">1 いまひとつ</span>
+				<span className="t-meta">5 とてもよい</span>
+			</div>
+			<div className="row" style={{ justifyContent: "flex-end" }}>
+				<button
+					className="btn btn--quiet btn--small"
+					type="button"
+					disabled={disabled}
+					onClick={() => onAnswer(null)}
+				>
+					スキップ
+				</button>
+			</div>
+		</form>
 	);
 }
 
@@ -145,6 +205,15 @@ export function Connections() {
 	const restoring = useIsRestoring();
 	const offline = !online || (isRefetchError && isOfflineError(error));
 	const now = new Date();
+	const feedback = useFeedbackMutation();
+	// 送った問いは応答を待たずに隠し(一覧の取り直しまでの間に再び出さない)、失敗したら戻す
+	const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set());
+	const [thanks, setThanks] = useState(false);
+	useEffect(() => {
+		if (!thanks) return;
+		const t = setTimeout(() => setThanks(false), TOAST_MS);
+		return () => clearTimeout(t);
+	}, [thanks]);
 
 	if (isPending || data === undefined) {
 		return (
@@ -214,6 +283,26 @@ export function Connections() {
 
 	const active = items.filter((l) => l.status === "matched");
 	const done = items.filter(isEndedConnection);
+	const survey = items.find(
+		(l) => l.feedback_due === "connection_quality" && !answered.has(l.id),
+	);
+	const answerSurvey = (id: string, score: number | null) => {
+		setAnswered((prev) => new Set(prev).add(id));
+		feedback.mutate(
+			{ id, body: { kind: "connection_quality", value: { score } } },
+			{
+				onSuccess: () => {
+					if (score !== null) setThanks(true);
+				},
+				onError: () =>
+					setAnswered((prev) => {
+						const next = new Set(prev);
+						next.delete(id);
+						return next;
+					}),
+			},
+		);
+	};
 
 	return (
 		<div className="screen connections">
@@ -231,6 +320,14 @@ export function Connections() {
 						<OfflineBanner />
 					</div>
 				)}
+				{survey ? (
+					<ConnectionSurvey
+						key={survey.id}
+						latch={survey}
+						disabled={feedback.isPending}
+						onAnswer={(score) => answerSurvey(survey.id, score)}
+					/>
+				) : null}
 				{active.length > 0 ? (
 					<>
 						<h2 className="list__head t-label">つながっている</h2>
@@ -265,7 +362,7 @@ export function Connections() {
 				) : null}
 			</div>
 			<TabBar current="connections" />
-			<RouteToast text={toast} />
+			<RouteToast text={thanks ? "ありがとうございます。" : toast} />
 		</div>
 	);
 }

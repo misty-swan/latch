@@ -1,6 +1,7 @@
 /**
  * /connections(Connections・F6b設計 §1.2)の単体試験。
- * 2区分への振り分け・終了の名前・未読・空状態・[さらに表示]・行のリンク先を確かめる
+ * 2区分への振り分け・終了の名前・未読・空状態・[さらに表示]・行のリンク先と、
+ * つながりの品質の5段階の問い(feedback_due・docs/05 §3.3)を確かめる
  */
 
 import type { LatchDTO } from "@latch/shared";
@@ -56,18 +57,27 @@ const json = (body: unknown): Response =>
 	});
 
 let pages: Record<string, unknown>;
-const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-	const url = String(input);
-	if (url.startsWith("/v1/latches?type=matched")) {
-		const cursor = new URL(url, "http://x").searchParams.get("cursor") ?? "";
-		return json(pages[cursor]);
-	}
-	if (url.startsWith("/v1/notifications")) {
-		return json({ items: [], next_cursor: null, unread_count: 0 });
-	}
-	if (url === "/v1/users/me") return json({ id: "u1", has_icon: false });
-	throw new Error(`想定外のfetch: ${url}`);
-});
+/** POST /v1/latches/{id}/feedback の応答(既定は申告後のLatchDTO) */
+let feedbackReply: () => Response;
+const feedbackBodies: unknown[] = [];
+const fetchMock = vi.fn(
+	async (input: RequestInfo | URL, init?: RequestInit) => {
+		const url = String(input);
+		if (/^\/v1\/latches\/[^/]+\/feedback$/u.test(url)) {
+			feedbackBodies.push(JSON.parse(String(init?.body)));
+			return feedbackReply();
+		}
+		if (url.startsWith("/v1/latches?type=matched")) {
+			const cursor = new URL(url, "http://x").searchParams.get("cursor") ?? "";
+			return json(pages[cursor]);
+		}
+		if (url.startsWith("/v1/notifications")) {
+			return json({ items: [], next_cursor: null, unread_count: 0 });
+		}
+		if (url === "/v1/users/me") return json({ id: "u1", has_icon: false });
+		throw new Error(`想定外のfetch: ${url}`);
+	},
+);
 
 const open = (state?: unknown, client = createTestQueryClient()) => {
 	const router = createMemoryRouter(appRoutes, {
@@ -83,6 +93,8 @@ const open = (state?: unknown, client = createTestQueryClient()) => {
 beforeEach(() => {
 	vi.stubGlobal("fetch", fetchMock);
 	fetchMock.mockClear();
+	feedbackBodies.length = 0;
+	feedbackReply = () => json(latchOf({ feedback_due: null }));
 	authSession.setTokens("access-conn", null);
 });
 afterEach(() => {
@@ -90,6 +102,112 @@ afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
 	authSession.clear();
+});
+
+describe("Connections のつながりの品質の問い", () => {
+	const due = (over: Partial<LatchDTO> = {}) =>
+		latchOf({ feedback_due: "connection_quality", ...over });
+
+	it("feedback_dueがconnection_qualityの先頭の1件だけをたずねる", async () => {
+		pages = {
+			"": {
+				items: [
+					latchOf({ id: "L0", feedback_due: null }),
+					due({ id: "L1" }),
+					due({
+						id: "L2",
+						members: [
+							{
+								user_id: "u3",
+								display_name: "あお",
+								bio: null,
+								has_icon: false,
+							},
+						],
+					}),
+				],
+				next_cursor: null,
+			},
+		};
+		open();
+		expect(
+			await screen.findByText("ミナトさんとのつながりは、どうでしたか。"),
+		).toBeTruthy();
+		expect(
+			screen.queryByText("あおさんとのつながりは、どうでしたか。"),
+		).toBeNull();
+		expect(screen.getAllByRole("radio")).toHaveLength(5);
+	});
+
+	it("feedback_dueがnull・attendanceのときは問いを出さない", async () => {
+		pages = {
+			"": {
+				items: [
+					latchOf({ id: "L1", feedback_due: null }),
+					latchOf({ id: "L2", form: "occasion", feedback_due: "attendance" }),
+				],
+				next_cursor: null,
+			},
+		};
+		open();
+		await screen.findByRole("heading", { name: "つながっている" });
+		expect(screen.queryByRole("radiogroup")).toBeNull();
+	});
+
+	it("終了して実名を出さない相手には「さん」を付けない", async () => {
+		pages = {
+			"": { items: [due({ status: "cancelled" })], next_cursor: null },
+		};
+		open();
+		expect(
+			await screen.findByText(
+				"つながっていた相手とのつながりは、どうでしたか。",
+			),
+		).toBeTruthy();
+	});
+
+	it("数字を選ぶと送り、問いを隠してお礼を出す", async () => {
+		pages = { "": { items: [due()], next_cursor: null } };
+		open();
+		const four = await screen.findByRole("radio", { name: "4" });
+		fireEvent.click(four);
+		await waitFor(() =>
+			expect(feedbackBodies).toEqual([
+				{ kind: "connection_quality", value: { score: 4 } },
+			]),
+		);
+		expect(screen.queryByRole("radiogroup")).toBeNull();
+		expect(await screen.findByText("ありがとうございます。")).toBeTruthy();
+	});
+
+	it("[スキップ]はscore=nullで送り、お礼は出さない", async () => {
+		pages = { "": { items: [due()], next_cursor: null } };
+		open();
+		fireEvent.click(await screen.findByRole("button", { name: "スキップ" }));
+		await waitFor(() =>
+			expect(feedbackBodies).toEqual([
+				{ kind: "connection_quality", value: { score: null } },
+			]),
+		);
+		expect(screen.queryByRole("radiogroup")).toBeNull();
+		expect(screen.queryByText("ありがとうございます。")).toBeNull();
+	});
+
+	it("送れなかったら問いを戻す", async () => {
+		pages = { "": { items: [due()], next_cursor: null } };
+		feedbackReply = () =>
+			new Response(
+				JSON.stringify({
+					error: { code: "INTERNAL", message: "x", details: {} },
+				}),
+				{ status: 500, headers: { "Content-Type": "application/json" } },
+			);
+		open();
+		fireEvent.click(await screen.findByRole("radio", { name: "2" }));
+		await waitFor(() => expect(feedbackBodies).toHaveLength(1));
+		expect(await screen.findByRole("radiogroup")).toBeTruthy();
+		expect(screen.queryByText("ありがとうございます。")).toBeNull();
+	});
 });
 
 describe("Connections", () => {

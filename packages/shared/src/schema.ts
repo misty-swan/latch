@@ -13,6 +13,7 @@ import {
 	GEO_RADIUS_MIN_M,
 	INTENT_FORMS,
 	INTENT_STATUSES,
+	LATCH_FEEDBACK_KINDS,
 	LATCH_RESPONSE_VALUES,
 	LATCH_STATUSES,
 	LIMITS,
@@ -127,6 +128,8 @@ export const devBackdateRequestSchema = z
 		response_deadline: isoDateTimeSchema.optional(),
 		history_updated_at: isoDateTimeSchema.optional(),
 		intents_last_evaluated_at: isoDateTimeSchema.optional(),
+		/** 成立の状態記録(to_status=matched)の時刻。自己申告の受付開始(成立から7日)を作る */
+		matched_at: isoDateTimeSchema.optional(),
 	})
 	.strict()
 	.refine((v) => Object.values(v).some((x) => x !== undefined));
@@ -330,6 +333,28 @@ export const deferReasonRequestSchema = z
 export type DeferReasonRequest = z.infer<typeof deferReasonRequestSchema>;
 
 /**
+ * POST /v1/latches/{id}/feedback のリクエスト(docs/05 §3.3・docs/01 §14)。
+ * attendance={attended}・connection_quality={score: 1〜5}。nullはスキップ(答えなかったことを記録する)
+ */
+export const latchFeedbackRequestSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.literal("attendance"),
+			value: z.object({ attended: z.boolean().nullable() }).strict(),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("connection_quality"),
+			value: z
+				.object({ score: z.number().int().min(1).max(5).nullable() })
+				.strict(),
+		})
+		.strict(),
+]);
+export type LatchFeedbackRequest = z.infer<typeof latchFeedbackRequestSchema>;
+
+/**
  * LatchDTO(F4a設計 §4.5)。成立前はproposal・membersのキー自体を含めない(#20)。
  * 成立後(matched・matched経由のcancelled)のみproposalと、自分を除くmembersを含める
  */
@@ -356,6 +381,11 @@ export const latchDtoSchema = z.object({
 		.optional(),
 	/** 未読件数(成立後の一覧用・F6a設計) */
 	unread_count: z.number().int().min(0).optional(),
+	/**
+	 * 本人に今たずねる自己申告の種別(docs/05 §3.3)。受付中で未申告ならその種別・それ以外はnull。
+	 * 成立後(membersと同じ範囲)だけ含める
+	 */
+	feedback_due: z.enum(LATCH_FEEDBACK_KINDS).nullable().optional(),
 	proposal: latchProposalSchema.optional(),
 	members: z
 		.array(

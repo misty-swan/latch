@@ -5,6 +5,7 @@
  */
 import {
 	type LatchDTO,
+	type LatchFeedbackKind,
 	type LatchResponseValue,
 	latchProposalSchema,
 } from "@latch/shared";
@@ -25,6 +26,8 @@ export interface LatchDtoOptions {
 		lastMessage: { body: string; createdAt: Date; userId: string } | null;
 		unreadCount: number;
 	};
+	/** 本人に今たずねる自己申告の種別(docs/05 §3.3)。membersと同じく成立後だけ渡す */
+	feedbackDue?: LatchFeedbackKind | null;
 }
 
 export const toLatchDto = (
@@ -59,6 +62,9 @@ export const toLatchDto = (
 						user_id: opts.chat.lastMessage.userId,
 					};
 		dto.unread_count = opts.chat.unreadCount;
+	}
+	if (opts.feedbackDue !== undefined) {
+		dto.feedback_due = opts.feedbackDue;
 	}
 	return dto;
 };
