@@ -40,13 +40,12 @@ import { OfflineBanner } from "../../offline/OfflineBanner";
 import { useOnline } from "../../offline/online";
 import { intentEditPath, PATHS } from "../../routes/paths";
 import { GlyphPaths } from "../Home";
-import { RouteToast, useRouteToast } from "../RouteToast";
+import { RouteToast, TOAST_MS, useRouteToast } from "../RouteToast";
 import { ScreenGrain } from "../shared";
 import "./intent.css";
 import { rateLimitMessage } from "../../api/rate-limit";
 
 const DAY_MS = 24 * 3_600_000;
-const TOAST_MS = 2400;
 
 /** この意思でつながった件数(成立一覧のmy_intent_idが一致する件数) */
 export const countMatches = (

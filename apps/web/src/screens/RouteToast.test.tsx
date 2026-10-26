@@ -17,13 +17,19 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-/** 見えている範囲(高さ844)の中で、下の操作の上端がtopにある画面 */
-function ScreenWithFoot({ footTop }: { footTop: number }) {
+/** 見えている範囲(高さ844)の中で、下の操作(既定はフッター)の上端がtopにある画面 */
+function ScreenWithFoot({
+	footTop,
+	footClass = "screen__foot",
+}: {
+	footTop: number;
+	footClass?: string;
+}) {
 	const toast = useRouteToast();
 	return (
 		<div className="screen">
 			<div
-				className="screen__foot"
+				className={footClass}
 				ref={(el) => {
 					if (el === null) return;
 					vi.spyOn(el, "getBoundingClientRect").mockReturnValue(
@@ -76,5 +82,28 @@ describe("RouteToast", () => {
 		expect(at(784)).toBe("120px");
 		// フッターが見えている範囲の外(長い画面のスクロールの先)→既定の120px
 		expect(at(1200)).toBe("120px");
+	});
+
+	it("チャットの入力欄・終了の帯の上にも置く(LAT-112)", () => {
+		vi.spyOn(window, "innerHeight", "get").mockReturnValue(844);
+		for (const footClass of ["composer", "ended-bar"]) {
+			const router = createMemoryRouter(
+				[
+					{
+						path: "/x",
+						element: <ScreenWithFoot footTop={680} footClass={footClass} />,
+					},
+				],
+				{
+					initialEntries: [
+						{ pathname: "/x", state: { toast: "ブロックしました。" } },
+					],
+				},
+			);
+			render(<RouterProvider router={router} />);
+			// 下から164pxの高さまである→その上16px
+			expect(screen.getByRole("status").style.bottom, footClass).toBe("180px");
+			cleanup();
+		}
 	});
 });

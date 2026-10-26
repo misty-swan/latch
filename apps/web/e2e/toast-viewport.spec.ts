@@ -1,21 +1,27 @@
 /**
- * 遷移の後のトースト(RouteToast)の置き場のブラウザE2E(LAT-110)。
+ * トースト(RouteToast)の置き場のブラウザE2E(LAT-110・LAT-112)。
  * iPhoneの大きさ(幅390×高さ844)で、トーストが見えている範囲に出て、下の操作
- * (フッターのボタン・タブバー)と重ならないことを、トーストを出す全画面
- * (Home・Connections・IntentDetail・Welcome・Compose)で確かめる。
+ * (フッターのボタン・タブバー・チャットの入力欄)と重ならないことを、トーストを出す全画面
+ * (Home・Connections・IntentDetail・Welcome・Compose・Shelved・Chat)で確かめる。
  * - 意思の詳細(直しました。)とホーム(取り下げました。)は実際の操作で出し、画面が
  *   見えている範囲より長い(スクロールしていない状態で下端が外にある)ことも確かめる
  * - つながり・はじめの画面・書く画面は、遷移元が渡すstate.toastを履歴に入れて出す
  *   (遷移元の操作はpwa-flow・withdraw-flow・flowの各specで証明済み)
- * - 地域を使わない(提案を作らない)。各testの前後でE2EユーザーのactiveなIntentを倒す
+ * - 見送った画面(Shelved)とチャットは、画面の中で出すトーストを実際の操作で出す(LAT-112)。
+ *   チャットは1対1のブロックの直後(LATCHの取り直しが済むまで入力欄が残る)に、書きかけの
+ *   長い文で伸びた入力欄の上に出ることを確かめる。提案はweb専用のsite 50・51
+ *   (他のspecの40〜49と分ける)で作る
+ * - 各testの前後でE2EユーザーのactiveなIntentを倒す
  */
 
 import { type Browser, expect, type Page, test } from "@playwright/test";
 import {
 	captureAccessToken,
 	composeAndRead,
+	establishLatch,
 	expireLeftoverE2eIntents,
 	placeAndBackToHome,
+	proposeLatch,
 	signInAndRegister,
 } from "./helpers";
 
@@ -80,7 +86,8 @@ const isTallerThanViewport = (page: Page): Promise<boolean> =>
 	);
 
 /**
- * トーストが見えている範囲に収まり、見えている下の操作のボタン・リンクと重ならないこと。
+ * トーストが見えている範囲に収まり、見えている下の操作(ボタン・リンク・チャットの入力欄と
+ * 終了の帯)と重ならないこと。
  * 出るときの動き(toast-in)が終わってから位置を測る
  */
 const expectToastClear = async (page: Page, text: string): Promise<void> => {
@@ -94,7 +101,7 @@ const expectToastClear = async (page: Page, text: string): Promise<void> => {
 		const t = el.getBoundingClientRect();
 		return [
 			...document.querySelectorAll(
-				".screen__foot :is(a, button), .tabbar :is(a, button)",
+				".screen__foot :is(a, button), .tabbar :is(a, button), .composer :is(textarea, button), .ended-bar",
 			),
 		]
 			.filter((c) => {
@@ -181,4 +188,72 @@ test("iPhoneの大きさで、つながり・はじめの画面・書く画面�
 	await expect(welcome.getByRole("link", { name: "はじめる" })).toBeVisible();
 	await showRouteToast(welcome, "退会しました。");
 	await expectToastClear(welcome, "退会しました。");
+});
+
+test("iPhoneの大きさで、見送った画面のトーストが見えている範囲に出て、下のボタンと重ならない(LAT-112)", async ({
+	browser,
+}) => {
+	const { a, b } = await proposeLatch(browser, 50, ["E2Eあさひ", "E2Eゆうひ"]);
+	await a.page.close();
+	await b.page.setViewportSize(IPHONE);
+
+	// [今回は見送る]→見送った画面→理由を残す→トースト(「閉じる」の上に出る)
+	await b.page.goto("/home");
+	await b.page.getByRole("link", { name: /提案が届いています/ }).click();
+	await b.page.getByRole("button", { name: "今回は見送る" }).click();
+	await expect(b.page).toHaveURL(/\/latches\/[^/]+\/shelved$/);
+	await b.page
+		.getByRole("button", { name: "見送った理由を残す(任意)" })
+		.click();
+	const sheet = b.page.getByRole("dialog", { name: "見送った理由" });
+	await sheet.getByRole("radio", { name: "日時や場所が合わない" }).check();
+	await sheet.getByRole("button", { name: "残す" }).click();
+	await expectToastClear(
+		b.page,
+		"ありがとうございます。相手には伝わりません。",
+	);
+});
+
+test("iPhoneの大きさで、チャットのトーストが見えている範囲に出て、下の入力欄と重ならない(LAT-112)", async ({
+	browser,
+}) => {
+	const { a, b, latchId } = await establishLatch(browser, 51, [
+		"E2Eあさひ",
+		"E2Eゆうひ",
+	]);
+	await b.page.close();
+	await a.page.setViewportSize(IPHONE);
+	await a.page.goto(`/latches/${latchId}/chat`);
+	const field = a.page.getByRole("textbox", { name: "メッセージ" });
+	await expect(field).toBeVisible();
+	// 書きかけの長い文で入力欄を伸ばす(上限の高さまで)
+	await field.fill(
+		Array.from({ length: 8 }, (_, i) => `${i + 1}行目`).join("\n"),
+	);
+
+	// 1対1のブロックはLATCHを取り直してから終了の帯へ切り替わる。取り直しの応答を止め、
+	// 入力欄が残っているあいだに出るトーストを測る
+	let release = () => {};
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	await a.page.route(
+		(url) => url.pathname === `/v1/latches/${latchId}`,
+		async (route) => {
+			if (route.request().method() === "GET") await held;
+			await route.continue();
+		},
+	);
+	await a.page.getByRole("button", { name: "このつながりについて" }).click();
+	await a.page
+		.getByRole("dialog", { name: "このつながりについて" })
+		.getByRole("button", { name: "ブロックする" })
+		.click();
+	await a.page
+		.getByRole("dialog", { name: "ブロックの確認" })
+		.getByRole("button", { name: "ブロックする" })
+		.click();
+	await expectToastClear(a.page, "ブロックしました。");
+	release();
+	await expect(a.page.getByText("このつながりは終了しました")).toBeVisible();
 });

@@ -1,13 +1,14 @@
 /**
- * 遷移元が渡すトースト(location.state.toast)の共通部品。
- * つながり一覧・預けている一覧・意思の詳細など、別画面から戻った直後に一言を出す画面で使う。
+ * トーストの共通部品。
+ * 遷移元が渡す一言(location.state.toast)を出す useRouteToast と、トーストを見えている範囲に
+ * 置く RouteToast からなる。RouteToast は画面の中で出す一言(見送った画面・チャットなど)にも使う。
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 
-/** トーストを出しておく時間(Shelved.tsxと同じ) */
-const TOAST_MS = 2400;
+/** トーストを出しておく時間(prototype toast()) */
+export const TOAST_MS = 2400;
 
 /** 遷移元が渡したトースト(location.state.toast)を一度だけ出す。再読み込み・戻るで再表示しない */
 export function useRouteToast(): string | null {
@@ -32,21 +33,24 @@ export function useRouteToast(): string | null {
 
 /** 下の操作が見えていないときの下端からの位置(latch.css .toast の bottom と同じ) */
 const TOAST_BOTTOM = 120;
-/** 下の操作(フッターのボタン・タブバー)とトーストのあいだに空ける幅 */
+/** 下の操作(フッターのボタン・タブバー・チャットの入力欄と終了の帯)とトーストのあいだに空ける幅 */
 const TOAST_GAP = 16;
+
+/** 下の操作。チャットの入力欄は書きかけの文で最大140pxまで伸びる(LAT-112) */
+const BOTTOM_CONTROLS = ".screen__foot, .tabbar, .composer, .ended-bar";
 
 /**
  * トーストを置く高さ(見えている範囲の下端からの距離)を決める。
  * latch.css の .toast は .screen の下端から120pxに置くため、.screen が見えている範囲より
- * 長いとスクロールの先に置かれ、下の操作(フッターのボタン・タブバー)が高い画面では
- * それと重なる(LAT-110)。見えている範囲に固定したうえで、見えている下の操作の上に置く
+ * 長いとスクロールの先に置かれ、下の操作が高い画面ではそれと重なる(LAT-110・LAT-112)。
+ * 見えている範囲に固定したうえで、見えている下の操作の上に置く
  */
 function toastBottom(toast: HTMLElement): number {
 	const screenEl = toast.closest(".screen");
 	if (screenEl === null) return TOAST_BOTTOM;
 	const viewportHeight = window.innerHeight;
 	let bottom = TOAST_BOTTOM;
-	for (const el of screenEl.querySelectorAll(".screen__foot, .tabbar")) {
+	for (const el of screenEl.querySelectorAll(BOTTOM_CONTROLS)) {
 		const rect = el.getBoundingClientRect();
 		if (rect.height === 0 || rect.top >= viewportHeight) continue;
 		bottom = Math.max(bottom, viewportHeight - rect.top + TOAST_GAP);
