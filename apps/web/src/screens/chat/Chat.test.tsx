@@ -458,6 +458,25 @@ describe("Chat の送信・受信・既読", () => {
 		expect(FakeSocket.all).toHaveLength(0);
 	});
 
+	it("接続が切れてつなぎ直すと、つながった直後に最新頁を取り直し・切れていた間の相手の発言が出る(DOの再起動・docs/10 §6)", async () => {
+		open();
+		await screen.findByText("本文02");
+		await waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+		FakeSocket.all[0]?.onopen?.();
+		// 切れていた間に相手が送った発言はD1にだけある
+		history = {
+			"": { items: [msg("02", "me"), msg("05", "u2")], next_before: null },
+		};
+		FakeSocket.all[0]?.onclose?.();
+		// 1秒待ってチケットを取り直し、新しい接続を作る
+		await waitFor(() => expect(FakeSocket.all).toHaveLength(2), {
+			timeout: 3000,
+		});
+		expect(screen.queryByText("本文05")).toBeNull();
+		FakeSocket.all[1]?.onopen?.();
+		expect(await screen.findByText("本文05")).toBeTruthy();
+	});
+
 	it("windowのfocusで最新頁(before無し)を取り直す", async () => {
 		open();
 		await screen.findByText("本文02");
