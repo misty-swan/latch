@@ -139,10 +139,16 @@ const jevPairSchema = z
 		a: intentFixtureSchema,
 		b: intentFixtureSchema,
 		match: z.enum(["yes", "no"]),
+		/** falseならJevの採点(順序整合・Precision/Recall@0.60)から外す。地域の比較(region.ts)では使う(LAT-114) */
+		jev_scored: z.boolean().optional(),
 	})
 	.strict();
 
 export type JevPair = z.infer<typeof jevPairSchema>;
+
+/** Jevの採点に使う組(jev_scored: false の組を除く・LAT-114) */
+export const jevScoredPairs = (pairs: JevPair[]): JevPair[] =>
+	pairs.filter((p) => p.jev_scored !== false);
 
 export type JevGoldset = {
 	version: number;

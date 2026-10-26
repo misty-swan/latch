@@ -67,7 +67,7 @@ describe("buildNormalizedText(07 §4: Embedding/Jev入力の正規化テキス�
 			geoRadiusM: 500,
 		});
 		expect(buildNormalizedText(row)).toBe(
-			"ランニング仲間・初級者歓迎・朝練習・競技志向・2〜4人",
+			"ランニング仲間・初級者歓迎・朝練習・競技志向は不可・2〜4人",
 		);
 	});
 
@@ -83,7 +83,19 @@ describe("buildNormalizedText(07 §4: Embedding/Jev入力の正規化テキス�
 			budgetMax: 5000,
 		});
 		expect(buildNormalizedText(row)).toBe(
-			"天文館で飲み会・駅近・カラオケ・2〜4人・10/18 17:00〜19:00・3000〜5000円",
+			"天文館で飲み会・駅近・カラオケは不可・2〜4人・10/18 17:00〜19:00・3000〜5000円",
+		);
+	});
+
+	it("否定条件は項目ごとに「〜は不可」の印を付け、ソフト条件と見分けられる(LAT-113)", () => {
+		const row = intentRow({
+			form: "connection",
+			topic: "飲み友達",
+			softConstraints: ["子連れ"],
+			negativeConstraints: ["タバコ", "子連れ"],
+		});
+		expect(buildNormalizedText(row)).toBe(
+			"飲み友達・子連れ・タバコは不可・子連れは不可・2〜4人",
 		);
 	});
 

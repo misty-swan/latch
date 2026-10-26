@@ -22,12 +22,11 @@ import type {
 } from "../../../apps/worker/src/llm/types";
 import { buildNormalizedText } from "../../../apps/worker/src/pipeline/normalize";
 import { artifactsFingerprint, fingerprint } from "./fingerprint";
-import { loadJevGoldset, loadParserGoldset } from "./goldset";
+import { jevScoredPairs, loadJevGoldset, loadParserGoldset } from "./goldset";
 import { fixtureToRow } from "./intent-row";
 import {
 	type GateScores,
 	judge,
-	type PrecisionAt,
 	precisionAt,
 	scoreJevOrder,
 	scoreParser,
@@ -47,7 +46,6 @@ export type GateRecord = {
 	failures: string[];
 	scores: GateScores;
 	reference: {
-		precisionAt060: { primary: PrecisionAt; fallback: PrecisionAt };
 		latencyP95Ms: {
 			parser: number | null;
 			jevPrimary: number | null;
@@ -211,7 +209,9 @@ export const runGate = async (deps: GateDeps): Promise<GateRecord> => {
 	);
 
 	// ---- Jev((A,B)と(B,A)・第一候補と予備) ----
-	const inputs = jevSet.pairs.map((p) => {
+	// jev_scored: false の組(noの理由がLayer 1の条件で正規化テキストに出ない組)はJevへ送らない(LAT-114)
+	const jevPairs = jevScoredPairs(jevSet.pairs);
+	const inputs = jevPairs.map((p) => {
 		const a = buildNormalizedText(fixtureToRow(p.a));
 		const b = buildNormalizedText(fixtureToRow(p.b));
 		return {
@@ -247,8 +247,12 @@ export const runGate = async (deps: GateDeps): Promise<GateRecord> => {
 	const scores: GateScores = {
 		parser: scoreParser(parserSet.items, parserOutcomes),
 		jev: {
-			primary: scoreJevOrder(jevSet.pairs, primaryAb, primaryBa),
-			fallback: scoreJevOrder(jevSet.pairs, fallbackAb, fallbackBa),
+			primary: scoreJevOrder(jevPairs, primaryAb, primaryBa),
+			fallback: scoreJevOrder(jevPairs, fallbackAb, fallbackBa),
+		},
+		jevAt060: {
+			primary: precisionAt(jevPairs, primaryAb, 0.6),
+			fallback: precisionAt(jevPairs, fallbackAb, 0.6),
 		},
 	};
 	const verdict = judge(scores);
@@ -268,10 +272,6 @@ export const runGate = async (deps: GateDeps): Promise<GateRecord> => {
 		failures,
 		scores,
 		reference: {
-			precisionAt060: {
-				primary: precisionAt(jevSet.pairs, primaryAb, 0.6),
-				fallback: precisionAt(jevSet.pairs, fallbackAb, 0.6),
-			},
 			latencyP95Ms: {
 				parser: p95(parserProbe.latencies),
 				jevPrimary: p95(primaryProbe.latencies),
@@ -329,9 +329,11 @@ export const formatSummary = (r: GateRecord): string => {
 		"Jev順序整合(差の中央値):",
 		`  第一候補TypeSafe: ${numText(j.primary.median)}(失敗 ${j.primary.failedCalls}/${j.primary.totalCalls})`,
 		`  予備Anthropic: ${numText(j.fallback.median)}(失敗 ${j.fallback.failedCalls}/${j.fallback.totalCalls})`,
+		"JevのRecall@0.60(正解yesのうち0.60を超えた割合):",
+		`  第一候補TypeSafe: ${numText(r.scores.jevAt060.primary.recall)}(${r.scores.jevAt060.primary.truePositive}/${r.scores.jevAt060.primary.actualPositive})`,
+		`  予備Anthropic: ${numText(r.scores.jevAt060.fallback.recall)}(${r.scores.jevAt060.fallback.truePositive}/${r.scores.jevAt060.fallback.actualPositive})`,
 		"参考値:",
-		`  Precision@0.60: 第一候補 ${numText(r.reference.precisionAt060.primary.precision)}・予備 ${numText(r.reference.precisionAt060.fallback.precision)}`,
-		`  Recall@0.60: 第一候補 ${numText(r.reference.precisionAt060.primary.recall)}・予備 ${numText(r.reference.precisionAt060.fallback.recall)}`,
+		`  Precision@0.60: 第一候補 ${numText(r.scores.jevAt060.primary.precision)}・予備 ${numText(r.scores.jevAt060.fallback.precision)}`,
 		`  応答時間p95(ミリ秒): Parser ${numText(r.reference.latencyP95Ms.parser, 0)}・Jev第一候補 ${numText(r.reference.latencyP95Ms.jevPrimary, 0)}・Jev予備 ${numText(r.reference.latencyP95Ms.jevFallback, 0)}`,
 		`モデル: Anthropic ${r.models.anthropic}・TypeSafe ${r.models.typesafe_requested}(応答 ${r.models.typesafe_answered.join(", ") || "なし"})`,
 	];

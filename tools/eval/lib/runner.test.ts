@@ -83,9 +83,9 @@ describe("runGate", () => {
 			sleep: async () => {},
 			now: () => new Date("2026-10-24T00:00:00Z"),
 		});
-		// Parser 117件・Jevは47組×2順×(第一候補+予備)
-		expect(f.calls.typesafe).toBe(94);
-		expect(f.calls.anthropic).toBe(117 + 94);
+		// Parser 117件・Jevは採点する57組(59組からjev_scored: falseの2組を除く)×2順×(第一候補+予備)
+		expect(f.calls.typesafe).toBe(114);
+		expect(f.calls.anthropic).toBe(117 + 114);
 		expect(f.maxInFlight()).toBeLessThanOrEqual(4);
 
 		expect(record.ranAt).toBe("2026-10-24T00:00:00.000Z");
@@ -96,8 +96,8 @@ describe("runGate", () => {
 		});
 		expect(record.goldset).toEqual({
 			parserVersion: 2,
-			jevVersion: 1,
-			approvedByOwner: "2026-10-24",
+			jevVersion: 2,
+			approvedByOwner: "2026-10-26",
 		});
 		expect(record.fingerprint).toEqual(fingerprint(repoRoot));
 		expect(record.fingerprintArtifacts).toBe(artifactsFingerprint());
@@ -107,7 +107,12 @@ describe("runGate", () => {
 		expect(record.passed).toBe(false);
 		expect(record.failures.length).toBeGreaterThan(0);
 		expect(record.scores.parser.failures.length).toBeGreaterThan(0);
-		expect(record.reference.precisionAt060.primary.n).toBe(47);
+		expect(record.scores.jevAt060.primary.n).toBe(57);
+		expect(record.scores.jevAt060.primary.actualPositive).toBe(30);
+		// 全軸0.5のLATCH Scoreは0.60を超えないため、Recall@0.60の基準でも不合格になる
+		expect(record.scores.jevAt060.primary.recall).toBe(0);
+		expect(record.failures.join("\n")).toMatch(/Recall@0\.60\(第一候補/);
+		expect(record.failures.join("\n")).toMatch(/Recall@0\.60\(予備/);
 		expect(record.reference.inputTokensMean.parser).toBe(100);
 
 		const text = JSON.stringify(record) + formatSummary(record);
@@ -142,7 +147,7 @@ describe("runGate", () => {
 		);
 		const sleep = vi.fn(async () => {});
 		const record = await runGate({ repoRoot, keys, fetchFn: f.fn, sleep });
-		expect(record.scores.jev.primary.failedCalls).toBe(94);
+		expect(record.scores.jev.primary.failedCalls).toBe(114);
 		expect(record.scores.jev.primary.median).toBeNull();
 		expect(record.passed).toBe(false);
 		expect(record.failures.join("\n")).toMatch(/第一候補/);

@@ -1,6 +1,7 @@
-# Jevのゴールドセット(オーナー承認済み 2026-10-24)。形式は README.md
-version: 1
-approved_by_owner: "2026-10-24"
+# Jevのゴールドセット(オーナー承認済み 版1 2026-10-24・版2 2026-10-26)。形式は README.md
+# 版2: LAT-109の下書き12組(pair-050〜061)を本採用し、pair-027・pair-041にjev_scored: falseを付けた(LAT-114)
+version: 2
+approved_by_owner: "2026-10-26"
 pairs:
   - id: pair-001
     match: "yes"
@@ -704,6 +705,8 @@ pairs:
       area: "八王子市"
   - id: pair-027
     match: "no"
+    # noの理由は地域の遠さ(Layer 1の距離の判定)で、正規化テキストが同じ文になるためJevの採点から外す(eval:regionでは使う・LAT-114)
+    jev_scored: false
     a:
       form: "occasion"
       topic: "ランチ"
@@ -1068,6 +1071,8 @@ pairs:
       area: "さいたま市浦和区"
   - id: pair-041
     match: "no"
+    # noの理由は地域の遠さ(Layer 1の距離の判定)で、正規化テキストが同じ文になるためJevの採点から外す(eval:regionでは使う・LAT-114)
+    jev_scored: false
     a:
       form: "connection"
       topic: "キャンプ仲間"
@@ -1318,3 +1323,339 @@ pairs:
       budgetMin: null
       budgetMax: null
       area: "大阪市北区"
+  - id: pair-050
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "写真仲間"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "世田谷区"
+    b:
+      form: "connection"
+      topic: "休日にカメラを持って街歩き"
+      softConstraints: ["フィルムカメラ"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "杉並区"
+  - id: pair-051
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "一緒に走る仲間"
+      softConstraints: ["週末"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "江東区"
+    b:
+      form: "connection"
+      topic: "フルマラソン完走に向けた練習"
+      softConstraints: ["土日の朝"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "中央区"
+  - id: pair-052
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "自炊のレシピを教え合う"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "中野区"
+    b:
+      form: "connection"
+      topic: "作り置きおかずの情報交換"
+      softConstraints: ["平日の時短"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "練馬区"
+  - id: pair-053
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "楽器のセッション仲間"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "豊島区"
+    b:
+      form: "connection"
+      topic: "ジャズのスタンダードを一緒に演奏"
+      softConstraints: ["ピアノ担当"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "新宿区"
+  - id: pair-054
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "資格の勉強仲間"
+      softConstraints: ["オンライン"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "品川区"
+    b:
+      form: "connection"
+      topic: "簿記2級の合格に向けて励まし合う"
+      softConstraints: ["オンライン"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "大田区"
+  - id: pair-055
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "美術館に行く友達"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "台東区"
+    b:
+      form: "connection"
+      topic: "現代アートの展示を一緒に見て回る"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "港区"
+  - id: pair-056
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "語学の勉強仲間"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "文京区"
+    b:
+      form: "connection"
+      topic: "韓国語で日常会話の練習"
+      softConstraints: ["初級"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "北区"
+  - id: pair-057
+    match: "yes"
+    a:
+      form: "connection"
+      topic: "植物の話ができる人"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "目黒区"
+    b:
+      form: "connection"
+      topic: "ベランダ菜園の育て方を情報交換"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "渋谷区"
+  - id: pair-058
+    match: "no"
+    a:
+      form: "connection"
+      topic: "写真仲間"
+      softConstraints: ["風景を撮りに遠出"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "世田谷区"
+    b:
+      form: "connection"
+      topic: "人物撮影のモデルになってくれる人"
+      softConstraints: ["ポートレート"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "港区"
+  - id: pair-059
+    match: "no"
+    a:
+      form: "connection"
+      topic: "簿記の勉強仲間"
+      softConstraints: ["オンライン"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "品川区"
+    b:
+      form: "connection"
+      topic: "英検の勉強仲間"
+      softConstraints: ["オンライン"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "大田区"
+  - id: pair-060
+    match: "no"
+    a:
+      form: "connection"
+      topic: "ジャズを一緒に演奏"
+      softConstraints: ["ピアノ担当"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "新宿区"
+    b:
+      form: "connection"
+      topic: "ジャズのライブを聴きに行く仲間"
+      softConstraints: []
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "豊島区"
+  - id: pair-061
+    match: "no"
+    a:
+      form: "connection"
+      topic: "マラソン大会に向けた練習"
+      softConstraints: ["週4"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "江東区"
+    b:
+      form: "connection"
+      topic: "のんびり散歩"
+      softConstraints: ["ゆっくり"]
+      negativeConstraints: []
+      participantsMin: 2
+      participantsMax: 2
+      participantsIncludesOwner: true
+      startsAt: null
+      endsAt: null
+      budgetMin: null
+      budgetMax: null
+      area: "中央区"

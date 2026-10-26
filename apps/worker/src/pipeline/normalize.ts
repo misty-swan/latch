@@ -60,9 +60,12 @@ const budgetText = (intent: IntentRow): string | null => {
 	return null;
 };
 
+/** 否定条件の1項目の表記(「タバコ」→「タバコは不可」・docs/07 §4) */
+const negativeText = (item: string): string => `${item}は不可`;
+
 /**
  * 正規化テキストを作る(docs/07 §4の構成・区切りは「・」):
- * topic / ソフト・否定条件の項目(そのまま) / participants /
+ * topic / ソフト条件の項目(そのまま) / 否定条件の項目(「〜は不可」の印を付ける) / participants /
  * 機会のみJST時刻(M/D HH:mm〜HH:mm・ends_at無ければ開始のみ)と予算。
  * hard_constraints・raw_text・geoは含めない。同一行からは常に同一文字列を返す。
  */
@@ -73,9 +76,10 @@ export const buildNormalizedText = (intent: IntentRow): string => {
 	if (intent.topic !== null) {
 		parts.push(intent.topic);
 	}
-	// ソフト・否定条件は項目をそのまま並べる(json列は書き込み時にZod層で文字列配列を保証)
+	// ソフト条件は項目をそのまま並べる(json列は書き込み時にZod層で文字列配列を保証)
 	parts.push(...(intent.softConstraints as string[]));
-	parts.push(...(intent.negativeConstraints as string[]));
+	// 否定条件は普通の条件と見分けられるよう「〜は不可」の印を付ける(Jevが否定を肯定と取り違えないため・LAT-113)
+	parts.push(...(intent.negativeConstraints as string[]).map(negativeText));
 	parts.push(participantsText(intent));
 
 	// 時刻・予算は機会Intentのみ。時刻はJST表記でends_at無しは開始のみ
