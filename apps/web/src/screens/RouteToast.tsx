@@ -37,9 +37,9 @@ const TOAST_GAP = 16;
 
 /**
  * トーストを置く高さ(見えている範囲の下端からの距離)を決める。
- * 実配信の .screen は内容に合わせて縦に伸びる(screens.css の min-height)ため、
- * latch.css の .toast(.screenの下端から120px)のままだとスクロールの先に置かれ、
- * 短い画面では下の操作と重なる(LAT-110)。見えている下の操作があればその上に置く
+ * latch.css の .toast は .screen の下端から120pxに置くため、.screen が見えている範囲より
+ * 長いとスクロールの先に置かれ、下の操作(フッターのボタン・タブバー)が高い画面では
+ * それと重なる(LAT-110)。見えている範囲に固定したうえで、見えている下の操作の上に置く
  */
 function toastBottom(toast: HTMLElement): number {
 	const screenEl = toast.closest(".screen");

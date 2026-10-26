@@ -66,10 +66,17 @@ const showRouteToast = async (page: Page, text: string): Promise<void> => {
 	}, text);
 };
 
-/** 画面が見えている範囲より長いか(スクロールしないと下端が見えない) */
+/**
+ * 画面が見えている範囲より長いか(スクロールしないと下端が見えない)。
+ * 文書全体がスクロールする作りと、.screen__body の内側でスクロールする作りのどちらでも測る
+ */
 const isTallerThanViewport = (page: Page): Promise<boolean> =>
 	page.evaluate(
-		() => document.documentElement.scrollHeight > window.innerHeight,
+		() =>
+			document.documentElement.scrollHeight > window.innerHeight ||
+			[...document.querySelectorAll(".screen__body")].some(
+				(b) => b.scrollHeight > b.clientHeight,
+			),
 	);
 
 /**
@@ -126,7 +133,10 @@ test("iPhoneの大きさで、意思の詳細とホームのトーストが見�
 		.getByRole("button", { name: "直して預ける" })
 		.click();
 	await expect(page).toHaveURL(new RegExp(`/intents/${id}$`));
-	await page.evaluate(() => window.scrollTo(0, 0));
+	await page.evaluate(() => {
+		window.scrollTo(0, 0);
+		for (const b of document.querySelectorAll(".screen__body")) b.scrollTop = 0;
+	});
 	expect(await isTallerThanViewport(page), "意思の詳細が長い").toBe(true);
 	await expectToastClear(page, "直しました。");
 
