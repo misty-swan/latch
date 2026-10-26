@@ -664,6 +664,70 @@ describe("D1の長時間障害(docs/10 §6)", () => {
 		).toBe(200);
 	});
 
+	it("障害中の主キューのメッセージはイベント行の読み取りの失敗でackせず配信の回数に応じた遅延でやり直し、D1が戻った後の再配信で提案まで進む(LAT-104)", async () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const other = await seedIntent();
+		const target = await seedIntent({ embedded: false });
+		const eventId = await seedCreatedEvent(target.id);
+		const e = downEnv();
+
+		// 障害中の配信1〜3回目: イベント行が読めず、10秒・30秒・60秒の遅延でやり直す
+		const delays: (number | undefined)[] = [];
+		for (const attempts of [1, 2, 3]) {
+			const { result, retrySpy } = await runBatch("match-events", eventId, {
+				attempts,
+				env: e,
+			});
+			expect(result.retryMessages).toEqual([{ msgId: "msg-0" }]);
+			delays.push(retrySpy.mock.calls[0]?.[0]?.delaySeconds);
+		}
+		expect(delays).toEqual([10, 30, 60]);
+		const failed = logsOf(logSpy, "pipeline.stage1.failed");
+		expect(failed).toHaveLength(3);
+		for (const log of failed) {
+			expect(log.layer).toBe("d1");
+			expect(log.intent_id).toBeUndefined();
+		}
+		const [pending] = await eventsOf(target.id);
+		expect(pending?.status).toBe("pending");
+
+		// D1が戻った後の再配信(4回目): 第1段→同じ実行の第2段で、相手との提案が出る
+		const { result } = await runBatch("match-events", eventId, {
+			attempts: 4,
+		});
+		expect(result.retryMessages).toEqual([]);
+		expect((await intentRowOf(target.id))?.embeddedAt).not.toBeNull();
+		const proposed = await latchesOfUser(target.userId);
+		expect(proposed).toHaveLength(1);
+		expect(proposed[0]?.status).toBe("proposed");
+		expect((await latchesOfUser(other.userId)).map((l) => l.id)).toEqual(
+			proposed.map((l) => l.id),
+		);
+	});
+
+	it("障害がやり直しの回数より長く続くと、主キューのメッセージはやり直しを求め続けてDLQへ移り、D1が戻った後のDLQの消費で起点の行がdeadになる(LAT-104)", async () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		const target = await seedIntent({ embedded: false });
+		const eventId = await seedCreatedEvent(target.id);
+		const e = downEnv();
+
+		// max_retries=3を超える配信(4回目)もやり直しを求め、QueuesがDLQへ移す
+		const { result, retrySpy } = await runBatch("match-events", eventId, {
+			attempts: 4,
+			env: e,
+		});
+		expect(result.retryMessages).toEqual([{ msgId: "msg-0" }]);
+		expect(retrySpy.mock.calls[0]?.[0]?.delaySeconds).toBe(60);
+
+		// DLQの消費(D1が戻った後): 起点の行をdeadへ隔離し、警報のログを出す
+		await runBatch("match-events-dlq", eventId);
+		const [dead] = await eventsOf(target.id);
+		expect(dead?.status).toBe("dead");
+		expect(logsOf(logSpy, "pipeline.dlq.dead")).toEqual([
+			{ level: "warn", event: "pipeline.dlq.dead", count: 1 },
+		]);
+	});
+
 	it("障害中のキューの消費・DLQ・Cronは例外を外へ出さず、D1が戻った後のCronが未処理の意思を回収して提案まで進む", async () => {
 		vi.spyOn(console, "log").mockImplementation(() => {});
 		// 障害の直前に作られた2件(第1段を待つ意思と、埋め込み済みで評価を待つ意思)
@@ -672,12 +736,11 @@ describe("D1の長時間障害(docs/10 §6)", () => {
 		const eventId = await seedCreatedEvent(target.id);
 		const e = downEnv();
 
-		// 障害中: 主キュー・DLQの消費とCronは例外を外へ出さない
-		// (イベント行の読み取りの失敗でメッセージがackされ捨てられる点はLAT-104で扱う。
-		// ここでは、捨てられても毎分Cronの回収で取り戻せることを確かめる)
-		await expect(
-			runBatch("match-events", eventId, { env: e }),
-		).resolves.toBeDefined();
+		// 障害中: 主キュー・DLQの消費とCronは例外を外へ出さない。主キューのメッセージは
+		// やり直しを求める(LAT-104)。ここでは、やり直しを使い切って捨てられても毎分Cronの
+		// 回収で取り戻せることを確かめる
+		const main = await runBatch("match-events", eventId, { env: e });
+		expect(main.result.retryMessages).toEqual([{ msgId: "msg-0" }]);
 		await expect(
 			runBatch("match-events-dlq", eventId, { env: e }),
 		).resolves.toBeDefined();

@@ -10,8 +10,9 @@
  * 検索するため、upsertの反映待ちは不要。続きの第2段が例外なら、embedding_completedの行の
  * idをベクトル付きでキューへ送り、今の第2段の経路(やり直し・DLQ)に任せる。その送信も
  * 失敗したら行はpendingのまま残り、10分の残留の掃査と未評価の回収(g)が拾う。
- * 消費は例外を外へ出さない(既定はack)。第1段の失敗(意思の読み取り・埋め込み・upsert・embedded_atの
- * 更新・投入)と反映確認の送り直しの失敗だけ、受け取ったメッセージを遅延付きでretryする。
+ * 消費は例外を外へ出さない(既定はack)。イベント行の読み取りの失敗・第1段の失敗(意思の読み取り・
+ * 埋め込み・upsert・embedded_atの更新・投入)と反映確認の送り直しの失敗だけ、受け取ったメッセージを
+ * 遅延付きでretryする。
  * 第1段の失敗は起点の行をpendingのまま残し、STAGE1_RETRY_DELAYS_S(10秒・30秒・60秒)で
  * やり直す。max_retriesを超えたものはDLQでdeadになり、Cronのバックフィル(e)が回収する
  * (06 §5・不具合の修正工程(第2回)の設計 §4)。投入だけの失敗の再配信は、埋め込み・
@@ -465,7 +466,8 @@ const continueStage2 = async (
  * 通常キューの1メッセージを処理する(docs/06 §2の処理枝)。
  * 失敗はD1のイベント行statusで記録し、ここでは例外を握って呼び出し側へは
  * 正常復帰する(ackが原則・06 §5)。やり直すべき一時的な失敗だけを
- * { retryDelaySeconds }で返す(第1段の失敗・#17、反映確認の送り直しの失敗・#23)。
+ * { retryDelaySeconds }で返す(イベント行の読み取りの失敗・LAT-104、第1段の失敗・#17、
+ * 反映確認の送り直しの失敗・#23)。
  * attemptsはこのメッセージの配信の回数(1始まり)で、第1段の遅延の選択に使う。
  * pathは処理した経路(既定queue・応答の後の処理はinline)。intent_createdの起点の行を
  * processedにするとき、payloadに{ path }を載せる(既存の項目は保つ)。負荷試験の集計が
@@ -481,12 +483,42 @@ const consumeEvent = async (
 	const { vector, attempts } = message;
 	const path = message.path ?? "queue";
 	const db = drizzle(env.DB);
-	// イベント行の取得。無ければ何もせずack(送信だけが先行したメッセージ・Task 6引継ぎ)
-	const [event] = await db
-		.select()
-		.from(matchEvents)
-		.where(eq(matchEvents.id, eventId))
-		.limit(1);
+	// 第1段の失敗のやり直し(設計 §4)。起点の行はpendingのまま残し、配信の回数に
+	// 応じた遅延でretryする(max_retriesを超えたらDLQでdead→Cronのバックフィル(e))
+	const retry = {
+		retryDelaySeconds:
+			PIPELINE.STAGE1_RETRY_DELAYS_S[
+				Math.min(
+					Math.max(attempts, 1) - 1,
+					PIPELINE.STAGE1_RETRY_DELAYS_S.length - 1,
+				)
+			],
+	};
+	// イベント行の取得。無ければ何もせずack(送信だけが先行したメッセージ・Task 6引継ぎ)。
+	// 読み取りの一時的な失敗(D1_ERROR等)は種別によらず同じ遅延でやり直す(まだ何も
+	// 処理していない・ackすると未処理の回収とバックフィルまで待つことになる・LAT-104)。
+	// 種別が分からないため、ログは第1段の失敗として出す(intent_idは載せない)
+	const event = await (async (): Promise<
+		MatchEventRow | undefined | typeof READ_FAILED
+	> => {
+		try {
+			const [row] = await db
+				.select()
+				.from(matchEvents)
+				.where(eq(matchEvents.id, eventId))
+				.limit(1);
+			return row;
+		} catch (error) {
+			logger.warn("pipeline.stage1.failed", {
+				error_code: errorCodeOf(error, "EMBEDDING_FAILED"),
+				layer: "d1",
+			});
+			return READ_FAILED;
+		}
+	})();
+	if (event === READ_FAILED) {
+		return retry;
+	}
 	if (event === undefined) {
 		return;
 	}
@@ -534,17 +566,6 @@ const consumeEvent = async (
 			...payload,
 			path,
 		});
-	};
-	// 第1段の失敗のやり直し(設計 §4)。起点の行はpendingのまま残し、配信の回数に
-	// 応じた遅延でretryする(max_retriesを超えたらDLQでdead→Cronのバックフィル(e))
-	const retry = {
-		retryDelaySeconds:
-			PIPELINE.STAGE1_RETRY_DELAYS_S[
-				Math.min(
-					Math.max(attempts, 1) - 1,
-					PIPELINE.STAGE1_RETRY_DELAYS_S.length - 1,
-				)
-			],
 	};
 	// 意思の行を読む。第1段では読み取りの一時的な失敗(D1_ERROR等)もやり直す
 	// (ackすると未処理の回収とバックフィルまで待つことになる)
