@@ -181,6 +181,27 @@ export const disablePushQuietly = async (
 	);
 };
 
+/**
+ * 退会用。この端末の購読だけを外す(サーバーの購読は退会の処理が消しているため・APIは呼ばない)。
+ * 失敗を飲み・時間も区切る
+ */
+export const forgetPushOnDevice = async (
+	env: PushEnv = browserPushEnv,
+): Promise<void> => {
+	const forget = async (): Promise<void> => {
+		if (env.permission() !== "granted") {
+			return;
+		}
+		const manager = await env.pushManager();
+		const subscription = await manager?.getSubscription();
+		await subscription?.unsubscribe();
+	};
+	await withTimeout(
+		forget().catch(() => undefined),
+		DISABLE_TIMEOUT_MS,
+	);
+};
+
 /** 通知の状態のキャッシュのキー(有効化・無効化の後はsetQueryDataで結果を入れる) */
 export const PUSH_STATUS_QUERY_KEY = ["push-status"] as const;
 

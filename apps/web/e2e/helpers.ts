@@ -38,27 +38,30 @@ export const underAgeBirthDate = (): string => {
 
 /**
  * welcome→テストサインインをUIで通し・登録画面(/register)まで進む。
- * 生年月日は呼び出し側で埋める(18歳以上の通常登録と17歳の422確認で値が替わるため)
+ * 生年月日は呼び出し側で埋める(18歳以上の通常登録と17歳の422確認で値が替わるため)。
+ * 戻り値はサインインに使った名前(IdPのsubject・退会の再認証で同じ名前を入れ直す)
  */
-export const signIn = async (page: Page): Promise<void> => {
+export const signIn = async (page: Page): Promise<string> => {
+	const subject = `e2e-web-${crypto.randomUUID()}`;
 	await page.goto("/welcome");
 	await page.getByRole("link", { name: "アカウントをお持ちの方" }).click();
 	await page.getByRole("button", { name: "Googleで続ける" }).click();
-	await page.locator("#dev-name").fill(`e2e-web-${crypto.randomUUID()}`);
+	await page.locator("#dev-name").fill(subject);
 	await page.getByRole("button", { name: "テストではじめる" }).click();
 	await expect(page.locator("#r-name")).toBeVisible();
+	return subject;
 };
 
 /**
  * サインイン→登録(18歳以上)→同意をUIで通し・home(空状態)まで進む。
  * 同意後の着地はcompose(最初の1件を預ける導線・ボードConsent.dc.htmlどおり)のため・
- * #c-textが出ることを確認してから閉じるでhomeへ戻る
+ * #c-textが出ることを確認してから閉じるでhomeへ戻る。戻り値はサインインに使った名前
  */
 export const signInAndRegister = async (
 	page: Page,
 	displayName = "E2Eユーザー",
-): Promise<void> => {
-	await signIn(page);
+): Promise<string> => {
+	const subject = await signIn(page);
 	await page.locator("#r-name").fill(displayName);
 	await page.locator("#r-birth").fill("2000-01-01");
 	await page.getByRole("button", { name: "次へ" }).click();
@@ -66,6 +69,7 @@ export const signInAndRegister = async (
 	await expect(page.locator("#c-text")).toBeVisible();
 	await page.getByRole("link", { name: "閉じる" }).click();
 	await expect(page.getByText("まだ、何も置いていません。")).toBeVisible();
+	return subject;
 };
 
 /** homeの「ひとこと置く」からcomposeへ入り・文章を書いて「読み解く」でconfirmまで進む */
@@ -223,13 +227,13 @@ export const expireLeftoverE2eIntents = (): void => {
 export const setUpUser = async (
 	browser: Browser,
 	displayName: string,
-): Promise<{ page: Page; token: string }> => {
+): Promise<{ page: Page; token: string; subject: string }> => {
 	const context = await browser.newContext();
 	const page = await context.newPage();
-	await signInAndRegister(page, displayName);
+	const subject = await signInAndRegister(page, displayName);
 	const tokenPromise = captureAccessToken(page);
 	await page.reload();
-	return { page, token: await tokenPromise };
+	return { page, token: await tokenPromise, subject };
 };
 
 /**
@@ -241,8 +245,8 @@ export const proposeLatch = async (
 	site: number,
 	names: [string, string],
 ): Promise<{
-	a: { page: Page; token: string };
-	b: { page: Page; token: string };
+	a: { page: Page; token: string; subject: string };
+	b: { page: Page; token: string; subject: string };
 	latchId: string;
 	intentId: string;
 }> => {
@@ -287,8 +291,8 @@ export const establishLatch = async (
 	site: number,
 	names: [string, string],
 ): Promise<{
-	a: { page: Page; token: string };
-	b: { page: Page; token: string };
+	a: { page: Page; token: string; subject: string };
+	b: { page: Page; token: string; subject: string };
 	latchId: string;
 }> => {
 	const { a, b, latchId, intentId } = await proposeLatch(browser, site, names);

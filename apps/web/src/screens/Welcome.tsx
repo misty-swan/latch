@@ -1,11 +1,13 @@
 /**
  * ようこそ画面(ボード: prototype/project/Welcome.dc.html の移植)。
  * 文言・構造・クラス名はボードどおり。導線ははじめる→intro・アカウントをお持ちの方→signin
+ * 退会の直後は遷移元が渡す一言(「退会しました。」・location.state.toast)を出す
  */
 
 import type { CSSProperties } from "react";
 import { Link } from "react-router";
 import { PATHS } from "../routes/paths";
+import { RouteToast, useRouteToast } from "./RouteToast";
 import { ScreenGrain } from "./shared";
 
 /** 縦書きの1文字ごとのspan(ボードの--i連番どおり。iは連番の位置) */
@@ -21,6 +23,7 @@ const TATEGAKI_SECOND_ROW = withIndices(
 );
 
 export function Welcome() {
+	const toast = useRouteToast();
 	return (
 		<div className="screen welcome">
 			<ScreenGrain />
@@ -109,6 +112,7 @@ export function Welcome() {
 					アカウントをお持ちの方
 				</Link>
 			</div>
+			<RouteToast text={toast} />
 		</div>
 	);
 }

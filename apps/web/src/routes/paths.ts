@@ -23,11 +23,13 @@ export const PATHS = {
 	notices: "/notices",
 	me: "/me",
 	profile: "/me/profile",
+	withdraw: "/me/withdraw",
 	settings: "/settings",
 	blocked: "/settings/blocked",
 	report: "/latches/:id/report",
 	terms: "/terms",
 	privacy: "/privacy",
+	help: "/help",
 } as const;
 
 /** 提案1件の画面(F4c設計 §1.1) */

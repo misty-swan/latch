@@ -37,6 +37,12 @@ export const authTokenRequestSchema = z.object({
 	idp_token: z.string().min(1),
 });
 
+/**
+ * DELETE /v1/users/me(退会)のリクエスト。IdPの再認証で得たトークン(docs/05 §3.2・§3.3)。
+ * 形はPOST /v1/auth/tokenと同じ
+ */
+export const withdrawRequestSchema = authTokenRequestSchema;
+
 /** POST /v1/auth/refresh のリクエスト(回転式)。docs/05 §3.2・04 §5 */
 export const refreshRequestSchema = z.object({
 	refresh_token: z.string().min(1),

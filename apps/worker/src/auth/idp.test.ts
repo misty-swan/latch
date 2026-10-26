@@ -101,7 +101,7 @@ describe("テスト鍵モード(docs/04 §4: LATCH_TEST_IDP_JWKS設定時の検�
 		expect(TEST_IDP_AUDIENCE).toBe(EXPECTED_AUDIENCE);
 	});
 
-	it("正しいテスト鍵+iss/aud/sub/exp → googleの{provider,subject}が返る", async () => {
+	it("正しいテスト鍵+iss/aud/sub/exp → googleの{provider,subject,issuedAt}が返る", async () => {
 		const { privateKey, jwks } = await makeKey();
 		const token = await signIdpToken(privateKey);
 		const verified = await verifyIdpToken(
@@ -112,6 +112,8 @@ describe("テスト鍵モード(docs/04 §4: LATCH_TEST_IDP_JWKS設定時の検�
 		expect(verified).toEqual({
 			provider: "google",
 			subject: "idp-subject-123",
+			// iatは退会の再認証が新しさの確認に使う(docs/05 §3.3)
+			issuedAt: expect.any(Number),
 		});
 	});
 
@@ -123,7 +125,11 @@ describe("テスト鍵モード(docs/04 §4: LATCH_TEST_IDP_JWKS設定時の検�
 			"apple",
 			token,
 		);
-		expect(verified).toEqual({ provider: "apple", subject: "idp-subject-123" });
+		expect(verified).toEqual({
+			provider: "apple",
+			subject: "idp-subject-123",
+			issuedAt: expect.any(Number),
+		});
 	});
 
 	it("exp過ぎ → IdpTokenError", async () => {

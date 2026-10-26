@@ -1,6 +1,6 @@
 /**
  * 自分(/me・F7c設計)。prototype/app/app.jsのscreens.me・Me.dc.htmlの移植。
- * ヘルプ・お問い合わせと退会の行は置かない(設計書 §0.3)。
+ * ヘルプ・お問い合わせ(/help)と退会(/me/withdraw)の行はF9で加えた(LAT-94・2026-10-26オーナー決定)。
  * ログアウトはPush購読の後始末→APIでの失効→端末の破棄→キャッシュ破棄→/welcome
  */
 
@@ -153,6 +153,23 @@ export function Me() {
 				</div>
 				<h2 className="list__head t-label">そのほか</h2>
 				<div className="list">
+					<Row
+						to={PATHS.help}
+						label="ヘルプ・お問い合わせ"
+						icon={
+							<>
+								<circle cx="12" cy="12" r="8.5" />
+								<path d="M9.7 9.6a2.4 2.4 0 1 1 3.4 2.2c-.7.3-1.1.9-1.1 1.7v.4" />
+								<circle
+									cx="12"
+									cy="16.9"
+									r=".9"
+									fill="currentColor"
+									stroke="none"
+								/>
+							</>
+						}
+					/>
 					<Row to={PATHS.terms} label="利用規約" icon={DOC} />
 					<Row to={PATHS.privacy} label="プライバシーポリシー" icon={DOC} />
 					<button className="list-row" type="button" onClick={logout}>
@@ -163,6 +180,13 @@ export function Me() {
 						<span>ログアウト</span>
 						<span />
 					</button>
+					<Link className="list-row list-row--danger" to={PATHS.withdraw}>
+						<Icon>
+							<path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+						</Icon>
+						<span>退会する</span>
+						<Chev />
+					</Link>
 				</div>
 			</div>
 		</div>

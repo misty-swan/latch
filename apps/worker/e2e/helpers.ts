@@ -63,6 +63,8 @@ export const signForeignIdpToken = async (sub: string): Promise<string> => {
 /** registerUserの応答(docs/05 §3.3のUserDTO+アクセストークン) */
 export interface RegisteredUser {
 	access_token: string;
+	/** IdPのsubject(退会の再認証で同じアカウントのトークンを作り直すために使う) */
+	subject: string;
 	user: {
 		id: string;
 		display_name: string;
@@ -83,10 +85,11 @@ export const registerUser = async (
 	displayName = "E2Eテストユーザー",
 	birthDate = "2000-01-01",
 ): Promise<RegisteredUser> => {
+	const subject = `e2e-${crypto.randomUUID()}`;
 	const tokenRes = await request.post("/v1/auth/token", {
 		data: {
 			provider: "google",
-			idp_token: await signIdpToken(`e2e-${crypto.randomUUID()}`),
+			idp_token: await signIdpToken(subject),
 		},
 	});
 	expect(tokenRes.status()).toBe(200);
@@ -100,7 +103,11 @@ export const registerUser = async (
 		access_token: string;
 		user: RegisteredUser["user"];
 	};
-	return { access_token: registered.access_token, user: registered.user };
+	return {
+		access_token: registered.access_token,
+		subject,
+		user: registered.user,
+	};
 };
 
 /**

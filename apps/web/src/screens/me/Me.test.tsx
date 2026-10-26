@@ -67,7 +67,7 @@ afterEach(() => {
 });
 
 describe("Me", () => {
-	it("表示名・ひとこと・説明と各導線を出し・退会とヘルプは出さない", async () => {
+	it("表示名・ひとこと・説明と各導線(ヘルプ・お問い合わせと退会を含む)を出す", async () => {
 		setup();
 
 		expect(await screen.findByText("みなと")).toBeTruthy();
@@ -85,8 +85,16 @@ describe("Me", () => {
 		expect(href("外部送信と同意")).toBe("/consent?view=1");
 		expect(href("利用規約")).toBe("/terms");
 		expect(href("プライバシーポリシー")).toBe("/privacy");
-		expect(screen.queryByText("退会する")).toBeNull();
-		expect(screen.queryByText(/ヘルプ/)).toBeNull();
+		expect(href("ヘルプ・お問い合わせ")).toBe("/help");
+		expect(href("退会する")).toBe("/me/withdraw");
+		// 退会の行は注意の色(prototypeのlist-row--danger)で、ログアウトの後に置く
+		const withdraw = screen.getByText("退会する").closest("a");
+		expect(withdraw?.className).toContain("list-row--danger");
+		const logout = screen.getByRole("button", { name: "ログアウト" });
+		expect(
+			logout.compareDocumentPosition(withdraw as Node) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 	});
 
 	it("ひとことが空なら「ひとことは未設定です」を出す", async () => {
