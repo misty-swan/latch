@@ -8,7 +8,7 @@ import { createContext, useContext } from "react";
 export type DesktopState = {
 	/** 左のナビを出している(画面側の下部タブと右上の入口は出さない) */
 	nav: boolean;
-	/** ようこそ画面をPCの2列で描く */
+	/** ようこそとはじめる流れ(intro・サインイン・登録・同意)をPCの2列で描く */
 	landing: boolean;
 	/** 右の提案の部屋に出しているLATCHのID(出していなければnull) */
 	roomLatchId: string | null;

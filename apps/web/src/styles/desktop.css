@@ -1,5 +1,5 @@
 /*
- * PC向けの画面の追加分スタイル(LAT-14・docs/superpowers/specs/2026-10-26-lat14-desktop-design.md)。
+ * PC向けの画面の追加分スタイル(LAT-14・LAT-118・docs/superpowers/specs/2026-10-26-lat14-desktop-design.md)。
  * 見た目の基準は prototype/project/Desktop.dc.html。latch.css(改変禁止)の部品と変数をそのまま使い、
  * ここには外枠(DesktopFrame)とPCだけの並べ方を置く。幅の区切りは src/desktop/media.ts と同じ
  */
@@ -60,6 +60,7 @@
 	.desk--nav.desk--list {
 		grid-template-columns: 256px 400px minmax(0, 1fr);
 	}
+	/* ようこそとはじめる流れは、外枠の列いっぱいに2列で描く */
 	.desk--landing {
 		--desk-col: 100%;
 	}
@@ -273,6 +274,43 @@
 	gap: 18px;
 	margin-top: 28px;
 }
+
+/* ---------- はじめる流れ(ようこそと同じ2列の右の列に、各画面の中身を置く・LAT-118) ---------- */
+/* 上部バーは右の列の上に置き、本文と下部(ボタン)はまとめて縦の中央に寄せる。収まらないときは右の列ごと縦に送る */
+.onboard-desk__panel {
+	display: flex;
+	flex-direction: column;
+	overflow-y: auto;
+	padding: 24px 40px 12px;
+	box-shadow: -1px 0 0 var(--line);
+	background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+.onboard-desk__panel > .screen__form {
+	flex: 1 0 auto;
+}
+.onboard-desk__panel > .screen__body,
+.onboard-desk__panel > .screen__form > .screen__body {
+	flex: none;
+	margin-top: auto;
+	overflow: visible;
+}
+.onboard-desk__panel > .screen__foot,
+.onboard-desk__panel > .screen__form > .screen__foot {
+	margin-bottom: auto;
+	padding-top: 32px;
+}
+.onboard-desk__panel .t-display--s {
+	font-size: 30px;
+}
+.onboard-desk__panel .dots {
+	justify-content: flex-start;
+}
+/* 3つの流れの1枚目の絵(ドーム) */
+.welcome-desk__stage .dome-rest {
+	--size: 300px;
+	margin-top: 160px;
+}
+
 /* 1024〜1279pxでは半円と縦書きを詰める(左の列が狭いため) */
 @media (max-width: 1279px) {
 	.welcome-desk__stage {
@@ -282,7 +320,13 @@
 		--size: 260px;
 		--gap: 22px;
 	}
+	.welcome-desk__stage .dome-rest {
+		--size: 240px;
+	}
 	.welcome-desk__panel {
 		padding: 40px 48px;
+	}
+	.onboard-desk__panel {
+		padding-inline: 24px;
 	}
 }

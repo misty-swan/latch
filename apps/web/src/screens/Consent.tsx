@@ -5,11 +5,12 @@
  *   (同意後は最初の1件を預ける導線・ボードConsent.dc.htmlのリンク先どおり)
  * - 「同意しないで進む」は記録せずhomeへ(同意したユーザーのみがIntentを作成できる・07 §8)
  * 文言・構造・クラス名はボードどおり。記録と遷移の細部だけ実装の裁量
+ * PCの幅(1024px以上)では、ようこそと同じ2列の右の列に描く(LAT-118)
  */
 
 import { Link, useNavigate, useSearchParams } from "react-router";
+import { OnboardScreen } from "../desktop/OnboardScreen";
 import { PATHS } from "../routes/paths";
-import { ScreenGrain } from "./shared";
 
 const CONSENT_STORAGE_KEY = "latch.consent";
 
@@ -48,8 +49,7 @@ export function Consent() {
 	};
 
 	return (
-		<div className="screen">
-			<ScreenGrain />
+		<OnboardScreen label="外部送信の同意">
 			<header className="topbar">
 				<div className="topbar__side">
 					<Link
@@ -125,6 +125,6 @@ export function Consent() {
 					</p>
 				</div>
 			)}
-		</div>
+		</OnboardScreen>
 	);
 }
