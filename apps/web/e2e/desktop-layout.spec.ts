@@ -56,6 +56,8 @@ const expectColumn = async (
 	scope: string,
 	column: number,
 ): Promise<void> => {
+	// 画面の切り替えはURLが先に変わり、中身の描画が後から来るため、中身が出るのを待ってから測る
+	await expect(page.locator(`${scope} .screen__body`).first()).toBeVisible();
 	const m = await page.evaluate((selector) => {
 		const box = (el: Element | null) => el?.getBoundingClientRect() ?? null;
 		const main = box(document.querySelector(selector));
