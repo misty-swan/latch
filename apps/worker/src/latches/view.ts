@@ -11,6 +11,7 @@ import {
 } from "@latch/shared";
 import type { latches, users } from "../db/schema";
 import { toUserDto } from "../routes/users";
+import { DELETED_DISPLAY_NAME } from "../safety/block";
 
 export interface LatchDtoOptions {
 	participantsCount: number;
@@ -48,6 +49,15 @@ export const toLatchDto = (
 	if (opts.members !== undefined) {
 		dto.proposal = latchProposalSchema.parse(latch.proposal);
 		dto.members = opts.members.map((u) => {
+			// 退会した参加者(終了後のLATCHに残る)は名前・ひとこと・アイコンを出さない(docs/05 §2.5)
+			if (u.status !== "active") {
+				return {
+					user_id: u.id,
+					display_name: DELETED_DISPLAY_NAME,
+					bio: "",
+					has_icon: false,
+				};
+			}
 			const { display_name, bio, has_icon } = toUserDto(u);
 			return { user_id: u.id, display_name, bio, has_icon };
 		});

@@ -49,6 +49,8 @@ export interface VerifiedIdp {
 	provider: AuthProvider;
 	/** IdP側のサブジェクト */
 	subject: string;
+	/** 発行時刻(iat・秒)。無ければundefined(退会の再認証が新しさの確認に使う・docs/05 §3.3) */
+	issuedAt?: number;
 }
 
 /** ローカルJWKS(テスト鍵)の簡易キャッシュ。テストの分離のためキーは鍵JSON文字列(docs/04 §4) */
@@ -117,7 +119,11 @@ const verifyWith = async (
 	if (typeof payload.sub !== "string") {
 		throw new IdpTokenError("IDP_TOKEN_INVALID: subが欠落している(docs/04 §4)");
 	}
-	return { provider, subject: payload.sub };
+	return {
+		provider,
+		subject: payload.sub,
+		...(typeof payload.iat === "number" ? { issuedAt: payload.iat } : {}),
+	};
 };
 
 /** テスト鍵モードの検証(env.LATCH_TEST_IDP_JWKS設定時・docs/04 §4) */
