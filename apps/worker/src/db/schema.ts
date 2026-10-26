@@ -341,6 +341,11 @@ export const latches = sqliteTable(
 		completedAt: integer("completed_at", { mode: "timestamp_ms" }),
 		/** 保留中(candidate)から提案中(proposed)へ進めた時刻。pending残留の掃査・提示基準(docs/06 §4) */
 		proposedAt: integer("proposed_at", { mode: "timestamp_ms" }),
+		/**
+		 * 正解データ(calibration_records)の行を作った時刻(docs/05 §2.2)。匿名化した行は
+		 * latch_idを持たないため、作成済みの印をLATCHの側に置き、二重作成を防ぐ
+		 */
+		calibratedAt: integer("calibrated_at", { mode: "timestamp_ms" }),
 		createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 		updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 	},
@@ -358,6 +363,8 @@ export const latches = sqliteTable(
 			t.form,
 			t.lastMessageAt,
 		),
+		// 正解データの未作成の掃査(calibrated_at IS NULL・docs/05 §2.6)
+		index("latches_calibrated_at_status_idx").on(t.calibratedAt, t.status),
 	],
 );
 
@@ -584,22 +591,36 @@ export const surveyResponses = sqliteTable(
 	],
 );
 
-/** 正解データ(docs/01 §14)。退会後はlatch_idをnull化しanonymized=true(docs/05 §2.5) */
-export const calibrationRecords = sqliteTable("calibration_records", {
-	id: text("id", { length: 26 }).primaryKey(),
-	latchId: text("latch_id", { length: 26 }).references(() => latches.id),
-	form: text("form").$type<IntentForm>().notNull(),
-	/** latch_score・jev 7軸 */
-	prediction: text("prediction", { mode: "json" }).notNull(),
-	outcome: text("outcome").$type<CalibrationOutcome>().notNull(),
-	/** 機会={attended} / つながり={chat_started_7d, exchanges_7d, exchanges_30d, blocked} */
-	action: text("action", { mode: "json" }).notNull(),
-	/** つながり7日時点の1問 */
-	survey: text("survey", { mode: "json" }),
-	anonymized: integer("anonymized", { mode: "boolean" }).notNull(),
-	createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-	updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-});
+/**
+ * 正解データ(docs/01 §14・docs/05 §2.2)。提示した提案が閉じた後にCronが1LATCH1行を作り、
+ * 観測の終わり・退会・Intent削除でactionを確定してlatch_idをnull化しanonymized=true(docs/05 §2.5)
+ */
+export const calibrationRecords = sqliteTable(
+	"calibration_records",
+	{
+		id: text("id", { length: 26 }).primaryKey(),
+		latchId: text("latch_id", { length: 26 }).references(() => latches.id),
+		form: text("form").$type<IntentForm>().notNull(),
+		/** {latch_score, jev: ペアごとの7軸の配列} */
+		prediction: text("prediction", { mode: "json" }).notNull(),
+		outcome: text("outcome").$type<CalibrationOutcome>().notNull(),
+		/** 機会={attended, attended_true, attended_false} / つながり={chat_started_7d, exchanges_7d, exchanges_30d, blocked, reported} */
+		action: text("action", { mode: "json" }).notNull(),
+		/** つながり7日時点の1問 */
+		survey: text("survey", { mode: "json" }),
+		/** 提案の条件の粗い形(人数・時間帯のビン・市区町村・docs/08 §7) */
+		context: text("context", { mode: "json" }),
+		anonymized: integer("anonymized", { mode: "boolean" }).notNull(),
+		createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+		updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+	},
+	(t) => [
+		// 1LATCH1行(匿名化した行のnullは重複とみなされない)
+		uniqueIndex("calibration_records_latch_id_uniq").on(t.latchId),
+		// 観測中(anonymized=false)の行の掃査
+		index("calibration_records_anonymized_idx").on(t.anonymized),
+	],
+);
 
 /**
  * レート制限・Jev予算の3層保護の実体(docs/05 §2.2)。

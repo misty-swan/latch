@@ -245,6 +245,7 @@ proposed_at:        datetime | null  # 提示(proposed化)した時刻。保留�
 expires_at:         datetime      # 参加Intent期限の最小値
 last_message_at:    datetime      # 非正規化。成立時に成立時刻を入れ、メッセージ書き込み時に更新(90日判定の索引・F5実装確定。更新はメッセージの保存と同じバッチでmatchedに限る・F6a実装確定)
 completed_at:       datetime | null  # 機会=対象時刻(proposal.time_window.start)から3時間経過 / つながり=最終メッセージ(0件ならmatched時刻)から90日経過
+calibrated_at:      datetime | null  # 正解データ(calibration_records)の行を作った時刻。未提示で閉じた提案は行を作らず印だけ(F9実装確定・LAT-108)
 created_at / updated_at
 ```
 
@@ -285,16 +286,22 @@ UNIQUE(latch_id, user_id, client_id)   # 同じclient_idの再送は既存行を
 
 ```yaml
 id:          ULID(PK)
-latch_id:    FK latches
+latch_id:    FK latches | null   # 観測の間だけ持つ。匿名化でnull。UNIQUE(1LATCH1行・nullは重複とみなさない)
 form:        connection | occasion
-prediction:  json    # latch_score・jev 7軸
+prediction:  json    # {latch_score: latches.score, jev: [ペアごとのJev 7軸]}(評価の行が残っていないペアは含めない)
 outcome:     both_yes | one_no | expired | cancelled
-action:      json    # 機会={attended: bool|null} /
-                    # つながり={chat_started_7d: bool, exchanges_7d: int, exchanges_30d: int, blocked: bool}
-survey:      json | null   # つながり7日時点の1問
-anonymized:  boolean       # 削除・退会後の匿名化済みフラグ
-created_at / updated_at
+                    # 成立の状態記録があればboth_yes(成立の後の離脱・ブロックでcancelledでも)。
+                    # rejected(no・deferで閉じた)=one_no・expired・成立前のcancelled
+action:      json    # 機会={attended: bool|null, attended_true: int, attended_false: int} /
+                    # つながり={chat_started_7d: bool, exchanges_7d: int, exchanges_30d: int, blocked: bool, reported: bool}
+survey:      json | null   # つながり7日時点の1問 {scores: [1〜5の昇順], skipped: int}。申告が無ければnull
+context:     json | null   # 提案の条件の粗い形 {participants: 人数, time_bin: night|morning|afternoon|evening|null, municipality: 市区町村|null}
+anonymized:  boolean       # 確定と匿名化を済ませたか(下記)
+created_at / updated_at    # created_atは提示した時刻(proposed_at)。匿名化で丸める
+INDEX(anonymized)
 ```
+
+**正解データの作成と匿名化(F9実装確定・LAT-108・2026-10-26オーナー決定・01冒頭の決定記録(F9(正解データ)))。** 行は提示した(proposed_atのある)提案が閉じた後(matched・completed・rejected・expired・cancelled)に、毎分Cronの正解データの走査(06 §2の(j))が1LATCH1行を作る。予測はmatch_candidates(評価確定から30日で削除・§2.6)のJevの7軸を写すため、閉じた直後に作る(ペアごとに、提案を作った時点までの最新の評価の行・無ければその後の最初の評価の行)。作成済みの印はlatches.calibrated_at(datetime | null)に置き、行の挿入と印の書き込みを「印がまだ無い」を条件にした1つの取引で書く(再実行・並行した実行・匿名化でlatch_idが消えた後も二重に作らない)。未提示のまま閉じた提案(保留のまま閉じたもの)は人の回答が無いため行を作らず、印だけを付ける。行は観測の間だけLATCHに紐づけ、観測の終わり(成立しなかった提案は閉じた時点・つながりは成立から30日・機会は対象時刻から30日)・参加者の退会・参加Intentの削除のいずれかで、その時点までの行動でaction・surveyを確定し、同じ1文でlatch_idのnull化・時刻の丸め・anonymized=trueを書く(§2.5・08 §7)。観測の途中で確定した行は、その後の行動を含まない。各値の数え方は次のとおり。chat_started_7dは成立時の参加者全員(成立の後に離脱した人を含む)が成立から7日以内に1件以上送信したこと(09 §2のチャット開始と同じ)。exchangesは成立からの期間内のメッセージを送信順に並べ、発言者が入れ替わった回数(最初の発言は数えない)。blockedは参加者どうしのブロックが提案の作成から観測の終わりまでにあったこと、reportedはそのLATCHを対象にした通報があったこと(成立しなかった提案も数える)。attendedは参加の申告(latch_feedbackのattendance)に1件でもtrueがあればtrue、答えがfalseだけならfalse、答えが無ければnull。contextの時間帯は機会の対象時刻(proposal.time_window.start)のJSTの時を6時間ずつに分けたもの(0〜5時=night・6〜11時=morning・12〜17時=afternoon・18〜23時=evening。つながりはnull)、市区町村は基準Intent(最も先に預けた者・提案の地名と同じ)の中心から地名と同じ逆引きで引いたgeofeaturesのmunicipality(地域なし・Intentが残っていなければnull)。主題・地名・予算・IDは持たない。context列・latch_idのUNIQUE・anonymizedの索引・latches.calibrated_atとその索引はマイグレーション0010で追加し、戻す手順(migrations_rollback/0010)を対で持つ(12 §4・11 §3。戻すと匿名化した行の提案の条件と作成済みの印が失われ、作成の処理を動かすと二重に作るため、Workerを先に戻す)
 
 **usage_counters**(レート制限・Jev予算の3層保護の実体): `scope(intent_daily|intent_hourly|jev_intent|jev_user|jev_global_daily|jev_global_monthly|external_send) / key(user_id|intent_id|'-'|<送信先>:<系統>) / period(日付or時間のバケット文字列) / count — PK(scope, key, period)`。加算は `UPDATE … SET count=count+1 … RETURNING` の原子的1文で行い、Queues consumerはバッチ単位でまとめて加算する(並行消費での取りこぼし防止)。periodが90日より古い行はCronで削除する(API単位のスロットルはWorkers Rate Limitingバインディング(key=user_id)が担い、本表には置かない)。**作成・更新の上限(F9実装確定・LAT-93)。** scope=`intent_daily`はIntentの作成の回数(key=user_id・periodはJSTの日付・上限20)、`intent_hourly`は預けているIntentの意味フィールドの書き直しの回数(key=user_id・periodはJSTの時`YYYY-MM-DD-HH`・上限6)で、どちらも利用者単位とする。数える範囲と確保・戻しの方法は04 §5**外部送信の集計(LLM real接続で確定)。** scope=`external_send`は外部AI事業者へ送った回数の記録(08 §5・07 §8)で、keyは`anthropic:parser`・`anthropic:jev`・`typesafe:jev`、periodはJSTの日付とし、送るたびに成否を問わず1加える(`INSERT … ON CONFLICT DO UPDATE`の1文)。送った中身は持たない。記録の失敗は呼び出しを止めない(ログに残すだけ)。予算・レート制限の判定には使わない
 
@@ -327,6 +334,8 @@ latch_status_events: (latch_id)
 reports:      (reporter, latch_id, reportee, target, status) ← 通報者内の統合の照会(F7a)
 match_events: (source_intent_id) ← 削除APIの子の削除・反映確認の照会 / (status, created_at) ← Cronの掃査(マイグレーション0008)
 recent_vectors: (embedded_at) ← 期限切れの控えの削除(マイグレーション0009)
+latches:      (calibrated_at, status) ← 正解データの未作成の掃査(マイグレーション0010)
+calibration_records: UNIQUE(latch_id) ← 1LATCH1行 / (anonymized) ← 観測中の行の掃査(マイグレーション0010)
 ```
 
 latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表である(latches本体はintent_idsのみ保持)。
@@ -343,7 +352,7 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 | proposal_history | 残す(同一ペア排除のため・01 §8)。削除で取り消した進行中の提案のために確保した行は解放する(§2.2) | 本人を含む行を削除 |
 | messages | 残す | 残す(表示名は「つながっていた相手」。本人からの削除要求には該当行の削除で応じる) |
 | latch_responses / latch_feedback | 残す(集計値のみ利用) | 同左ののちcalibration_recordsへ匿名集約 |
-| calibration_records | — | latch_idをnull化+粒度低下(時刻日付丸め・地域市区町村)のうえ anonymized=true |
+| calibration_records | 当該Intentを含むLATCHの行を、その時点までの観測で確定し、latch_idをnull化+粒度低下(時刻日付丸め・地域市区町村)のうえ anonymized=true(2026-10-26オーナー決定・LAT-108) | 本人が参加したLATCHの行に同じ(観測の終わりでも同じ匿名化を行う・§2.2) |
 | notifications / sessions / survey_responses | 当該Intent由来の通知を削除(intent_idが一致するintent_expiredの行を削除・F7b実装確定。LATCHの通知は当該LATCHの取り消しに従う) | 削除(surveyを集計目的で残す場合はID系を除去) |
 | usage_counters | — | 本人key(user_idと本人のIntentのid)の行を削除 |
 | blocks / reports | 残す | 残す(安全のための証跡。最後の活動から1年で削除) |
@@ -351,9 +360,9 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 | R2アイコン | — | icon_key解除+R2オブジェクト削除 |
 | users行 | — | status=deleted + 表示名/プロフィール/アイコンを消去 |
 
-**退会の実行順序(F9実装確定・LAT-94)。** DELETE /v1/users/meは、Intent削除と同じく取り消せない外部の削除を先に行う。(1)本人の全Intentのベクトル(Vectorize)と(2)R2のアイコンを消し、どちらかが失敗したらD1に触れず500 INTERNALで中断する(users行はactiveのまま残り、再試行で完結する)。(3)本人が参加する進行中の提案を閉じ(他のペアの提案履歴を戻すため、提案履歴の削除より前に行う)、(4)matchedのLATCHから参加取り消しと同じ処理で抜ける。(5)子の行(1対1・グループの候補・match_events・通知)・本人の全Intent・本人を含む提案履歴・購読・sessions・survey_responses・usage_countersの削除と、refresh_familiesの失効・users行のstatus=deleted(表示名とひとことは空文字・icon_keyはnull。行とauth列は再登録で使い直すため残す)を1回のバッチ(1つの取引)で書く。(6)(3)の後に並行した評価が作った進行中の提案を拾い直して閉じる(Intent行が消えた後は作られない)。保留の解放・次の組の提案・Web Pushの送り出しは応答の後(waitUntil)に回し、退会者が抜けたLATCHのチャットの接続へはclosedを知らせる(§3.4)。要求に使ったアクセストークンのjtiはKVの失効リストへ入れる。他の端末の発行済みJWTはjtiを保存していないため列挙できず、リフレッシュ族の失効で更新できなくなる(残り寿命は最大1時間・権限が関わる操作はusers.statusの再検証で拒む・§2.3)。messages・latch_responses・latch_feedback・blocks・reports・latches・latch_membersは残す。calibration_recordsへの匿名集約は、calibration_recordsを作る処理の実装と同時に行う(F9時点で未実装・LAT-108)
+**退会の実行順序(F9実装確定・LAT-94)。** DELETE /v1/users/meは、Intent削除と同じく取り消せない外部の削除を先に行う。(1)本人の全Intentのベクトル(Vectorize)と(2)R2のアイコンを消し、どちらかが失敗したらD1に触れず500 INTERNALで中断する(users行はactiveのまま残り、再試行で完結する)。(3)本人が参加する進行中の提案を閉じ(他のペアの提案履歴を戻すため、提案履歴の削除より前に行う)、(4)matchedのLATCHから参加取り消しと同じ処理で抜ける。(5)子の行(1対1・グループの候補・match_events・通知)・本人の全Intent・本人を含む提案履歴・購読・sessions・survey_responses・usage_countersの削除と、refresh_familiesの失効・users行のstatus=deleted(表示名とひとことは空文字・icon_keyはnull。行とauth列は再登録で使い直すため残す)を1回のバッチ(1つの取引)で書く。(6)(3)の後に並行した評価が作った進行中の提案を拾い直して閉じる(Intent行が消えた後は作られない)。保留の解放・次の組の提案・Web Pushの送り出しは応答の後(waitUntil)に回し、退会者が抜けたLATCHのチャットの接続へはclosedを知らせる(§3.4)。要求に使ったアクセストークンのjtiはKVの失効リストへ入れる。他の端末の発行済みJWTはjtiを保存していないため列挙できず、リフレッシュ族の失効で更新できなくなる(残り寿命は最大1時間・権限が関わる操作はusers.statusの再検証で拒む・§2.3)。messages・latch_responses・latch_feedback・blocks・reports・latches・latch_membersは残す。**正解データの匿名集約(F9実装確定・LAT-108)。** (4)の後・(5)の前に、本人が参加者だった全LATCH(離脱済みを含む)のうち閉じたものについて、行の無いものは行を作り、紐づいた行はその時点までの観測で確定して匿名化する(§2.2。予測をmatch_candidatesから写すため、候補を消す(5)より前に置く)。(6)で閉じた提案の分も続けて同じ処理をする(候補は(5)で消えているため、その行の予測にJevの7軸は残らない)。匿名集約の失敗は退会を止めない(ログusers.withdraw.calibration_failed。参加者が退会したLATCHの行は、Cronの正解データの走査が観測の途中でも確定して匿名化する)
 
-**Intent削除の実行順序(F3実装確定)。** Vectorizeの該当ベクトルの削除を先に実行し、これが失敗した場合はD1に触れず500 INTERNALで中断する(クライアントの再試行で完結する)。この順序により「Intent行が消えたならベクトルも消えている」ことを削除APIの側で保証する。ベクトルの削除は期限+7日の遅延ではなく**無条件の即時削除**である。**D1の削除(不具合の修正工程(第2回)で確定)。** 子の行(1対1・グループの候補・match_events・intent_expiredの通知)と本体の削除は1回のバッチ(1つの取引)で行い、途中で失敗しても子だけが消えた状態を残さない(子の行が本体を外部キーで参照するため本体を最後に置く)。グループ候補は、dedup_key(「ID@version」のカンマ結合)の文字列の一致で本人の意思を含む行のidを先に絞ってから消す(表全体のintent_idsを展開する走査をやめる。D1の束縛の上限のため1文50件ずつに分ける・issue #16)。各段の所要時間はログintents.delete.timing(layer=vector・d1)に出し、ベクトルの削除の失敗のerror_codeは例外の分類名にする(06 §7)。**削除の後の書き戻し(不具合の修正工程(第2回)で確定)。** 削除の前に読み取りを済ませた第1段・Cronのバックフィルと修復・状態の同期が、削除の後にベクトルを書き戻すと孤立したベクトルが残る(issue #20)。ベクトルを書く経路はupsertの直前に意思の行を読み直して行が無ければ書かず、それでも残ったベクトルは他の評価のLayer 1で行の無いhitとして見つけて消す(06 §2の孤立したベクトルの自己修復)。
+**Intent削除の実行順序(F3実装確定)。** Vectorizeの該当ベクトルの削除を先に実行し、これが失敗した場合はD1に触れず500 INTERNALで中断する(クライアントの再試行で完結する)。この順序により「Intent行が消えたならベクトルも消えている」ことを削除APIの側で保証する。ベクトルの削除は期限+7日の遅延ではなく**無条件の即時削除**である。**D1の削除(不具合の修正工程(第2回)で確定)。** 子の行(1対1・グループの候補・match_events・intent_expiredの通知)と本体の削除は1回のバッチ(1つの取引)で行い、途中で失敗しても子だけが消えた状態を残さない(子の行が本体を外部キーで参照するため本体を最後に置く)。グループ候補は、dedup_key(「ID@version」のカンマ結合)の文字列の一致で本人の意思を含む行のidを先に絞ってから消す(表全体のintent_idsを展開する走査をやめる。D1の束縛の上限のため1文50件ずつに分ける・issue #16)。**正解データの匿名集約(F9実装確定・LAT-108)。** 進行中の提案を閉じた後・子と本体を消すバッチの前に、本人が参加者のLATCHのうち当該Intentを含むものについて、退会と同じ匿名集約を行う(行の無い閉じた提案は行を作り、紐づいた行はその時点までの観測で確定して匿名化する・§2.2)。失敗は削除を止めない(ログintents.delete.calibration_failed。参加Intentの無いLATCHの行はCronの正解データの走査が確定して匿名化する)。各段の所要時間はログintents.delete.timing(layer=vector・open_latches・cancel・calibration・d1)に出し、ベクトルの削除の失敗のerror_codeは例外の分類名にする(06 §7)。**削除の後の書き戻し(不具合の修正工程(第2回)で確定)。** 削除の前に読み取りを済ませた第1段・Cronのバックフィルと修復・状態の同期が、削除の後にベクトルを書き戻すと孤立したベクトルが残る(issue #20)。ベクトルを書く経路はupsertの直前に意思の行を読み直して行が無ければ書かず、それでも残ったベクトルは他の評価のLayer 1で行の無いhitとして見つけて消す(06 §2の孤立したベクトルの自己修復)。
 
 ### 2.6 保持期間・定期削除(Cron・04 §4)
 
@@ -362,6 +371,7 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 - LATCHのcompleted判定(F5実装確定): matchedのつながりLATCHは最終メッセージ(0件ならmatched時刻)から90日経過、matchedの機会LATCHは対象時刻(proposal.time_window.start)から3時間経過でCronがcompletedへ(01 §8・06 §2の(d))。latches(status, form, last_message_at)の索引で走査し、機会の対象時刻はproposalのJSONから読む(matchedの機会LATCHは対象時刻が7日以内のものに限られ件数が小さいため列を設けない)。completedでIntentの状態とproposal_historyは変えない
 - intentsの期限切れバッチ: (status, expires_at)索引で「expired化対象(now超過)」と「ベクトル削除対象(now-7日超過・vector_deleted_at IS NULL)」の2窓を走査。削除実行時にvector_deleted_atへ記録
 - KVチケット: TTL 60秒で自動消滅
+- calibration_records(F9実装確定・LAT-108): 提示した提案が閉じたら毎分Cronが行を作り、観測の終わり(成立しなかった提案は閉じた時点・つながりは成立から30日・機会は対象時刻から30日)で確定して匿名化する(§2.2・06 §2の(j)。観測を終えた紐づいた行の点検は毎時0分に行う)。匿名化した行(anonymized=true)は削除せず長期保持する(08 §7)。走査はlatches(calibrated_at, status)とcalibration_records(anonymized)の索引で行い、1回500件で頭打ちにする
 
 ## 3. API契約
 

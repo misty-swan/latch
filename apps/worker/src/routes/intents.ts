@@ -58,6 +58,7 @@ import { type DrizzleD1Database, drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { type AppEnv, requireRegistered } from "../auth/middleware";
+import { anonymizeLatches, latchIdsWithIntent } from "../calibration/records";
 import { systemClock } from "../clock/clock";
 import {
 	groupCandidates,
@@ -1261,7 +1262,14 @@ const GROUP_DELETE_CHUNK = 50;
 /** 削除APIの段ごとの所要時間(vector/d1・遅い段の切り分け用) */
 const logDeleteTiming = (
 	intentId: string,
-	layer: "vector" | "d1" | "open_latches" | "cancel" | "release" | "next_group",
+	layer:
+		| "vector"
+		| "d1"
+		| "open_latches"
+		| "cancel"
+		| "release"
+		| "next_group"
+		| "calibration",
 	startedAt: number,
 ): void => {
 	logger.info("intents.delete.timing", {
@@ -1340,6 +1348,25 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 				logDeleteTiming(target.id, layer, startedAt),
 		},
 	);
+	// このIntentから生まれた閉じた提案の正解データを、その時点までの観測で確定して匿名化する
+	// (2026-10-26オーナー決定・docs/05 §2.5・LAT-108)。予測をmatch_candidatesから写すため、
+	// 候補の行を消すbatchより前に行う。失敗しても削除は止めない(参加Intentの無いLATCHの行は
+	// Cronの正解データの走査が確定して匿名化する)
+	const calibrationStartedAt = systemClock.now().getTime();
+	try {
+		await anonymizeLatches(
+			db,
+			await latchIdsWithIntent(db, sub, target.id),
+			deleteNow,
+		);
+	} catch (error) {
+		logger.warn("intents.delete.calibration_failed", {
+			intent_id: target.id,
+			error_code: errorCodeOf(error),
+		});
+	} finally {
+		logDeleteTiming(target.id, "calibration", calibrationStartedAt);
+	}
 	// 本人の意思を含むグループ候補のidを先に絞る。dedup_keyは「ID@version」のカンマ結合
 	// なので文字列の一致で絞れる(ULIDは英数字のみでLIKEの記号を含まない)。全件を
 	// json_eachで展開する走査をやめる(#16)

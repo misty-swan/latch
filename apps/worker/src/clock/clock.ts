@@ -64,3 +64,12 @@ export const jstDayStart = (d: Date): Date => {
 	const { year, month, day } = jstParts(d);
 	return new Date(Date.UTC(year, month - 1, day) - JST_OFFSET_MS);
 };
+
+/** 当月1日JST 0時のUTC時刻(正解データの匿名化の月単位の丸め・docs/08 §7) */
+export const jstMonthStart = (d: Date): Date => {
+	const { year, month } = jstParts(d);
+	return new Date(Date.UTC(year, month - 1, 1) - JST_OFFSET_MS);
+};
+
+/** JSTの時(0〜23) */
+export const jstHour = (d: Date): number => jstParts(d).hour;
