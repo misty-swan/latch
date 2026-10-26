@@ -1,6 +1,6 @@
 /**
  * ルーティング(docs/04 §3.2: React Router library mode)。
- * - welcome/intro/signin・規約ページ(terms/privacy)は未認証で見られる画面・それ以外はRequireAuthで保護する
+ * - welcome/intro/signin・規約ページ(terms/privacy)・ヘルプ(help)は未認証で見られる画面・それ以外はRequireAuthで保護する
  *   (未認証のまま入った場合はwelcomeへ送り返す)
  * ルート定義はappRoutesとして出し・単体試験はcreateMemoryRouter(appRoutes)で使う
  */
@@ -19,12 +19,14 @@ import { IntentDetail } from "./screens/intent/IntentDetail";
 import { IntentEdit } from "./screens/intent/IntentEdit";
 import { LatchScreen } from "./screens/latch/LatchScreen";
 import { ShelvedScreen } from "./screens/latch/ShelvedScreen";
+import { Help } from "./screens/legal/Help";
 import { Privacy } from "./screens/legal/Privacy";
 import { Terms } from "./screens/legal/Terms";
 import { Blocked } from "./screens/me/Blocked";
 import { Me } from "./screens/me/Me";
 import { Profile } from "./screens/me/Profile";
 import { Settings } from "./screens/me/Settings";
+import { Withdraw } from "./screens/me/Withdraw";
 import { Notices } from "./screens/notices/Notices";
 import { ParseFailed } from "./screens/ParseFailed";
 import { Placed } from "./screens/Placed";
@@ -42,6 +44,8 @@ export const appRoutes = [
 	// 規約ページはサインイン前から開ける(F7c設計 §1.1)
 	{ path: PATHS.terms, element: <Terms /> },
 	{ path: PATHS.privacy, element: <Privacy /> },
+	// ヘルプも規約と同じくサインイン前から開ける(LAT-94)
+	{ path: PATHS.help, element: <Help /> },
 	{
 		path: PATHS.register,
 		element: (
@@ -183,6 +187,14 @@ export const appRoutes = [
 		element: (
 			<RequireAuth>
 				<Profile />
+			</RequireAuth>
+		),
+	},
+	{
+		path: PATHS.withdraw,
+		element: (
+			<RequireAuth>
+				<Withdraw />
 			</RequireAuth>
 		),
 	},

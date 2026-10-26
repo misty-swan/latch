@@ -56,11 +56,13 @@ describe("App", () => {
 			"/notices",
 			"/me",
 			"/me/profile",
+			"/me/withdraw",
 			"/settings",
 			"/settings/blocked",
 			"/latches/:id/report",
 			"/terms",
 			"/privacy",
+			"/help",
 		]);
 	});
 

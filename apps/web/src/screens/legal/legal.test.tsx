@@ -118,3 +118,26 @@ describe("プライバシーポリシー(/privacy)", () => {
 		expect(text).toContain("再提案を避けるための提案の履歴");
 	});
 });
+
+describe("ヘルプ・お問い合わせ(/help・LAT-94)", () => {
+	it("未ログインで開け・公開前の版の印と、F10で記入するお問い合わせ先を持つ", () => {
+		const router = setup([PATHS.help]);
+
+		expect(router.state.location.pathname).toBe(PATHS.help);
+		expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+			"ヘルプ・お問い合わせ",
+		);
+		expect(screen.getByText(DRAFT_MARK)).toBeTruthy();
+		expect(screen.getByText("お問い合わせ先: 公開前に記入")).toBeTruthy();
+		const text = document.body.textContent ?? "";
+		for (const word of ["通報する", "ブロックする", "通知と表示", "退会する"]) {
+			expect(text).toContain(word);
+		}
+		expect(
+			screen
+				.getByText("プライバシーポリシー")
+				.closest("a")
+				?.getAttribute("href"),
+		).toBe(PATHS.privacy);
+	});
+});
