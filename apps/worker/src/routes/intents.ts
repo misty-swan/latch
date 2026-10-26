@@ -69,6 +69,7 @@ import {
 } from "../db/schema";
 import type { Env } from "../env";
 import { type ErrorResult, errorJson } from "../http/errors";
+import { rateLimitedResponse, reserveIntentQuota } from "../http/rate-limit";
 import { newUlid } from "../ids";
 import { MS_PER_DAY } from "../intents/expiry";
 import {
@@ -598,6 +599,17 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 		expiresAt = validation.expiresAt;
 	}
 
+	// 作成20件/日(draft保存も1件・docs/04 §5)。挿入の前に1件分を確保し、挿入が失敗したら戻す
+	const quota = await reserveIntentQuota(
+		c.env,
+		"create",
+		sub,
+		c.var.auth.idpSubject,
+		now,
+	);
+	if (!quota.ok) {
+		return rateLimitedResponse(c, quota.reason, quota.retryAfterSeconds);
+	}
 	const insertStartedAt = performance.now();
 	const insertQuery = db
 		.insert(intents)
@@ -643,9 +655,18 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 	// draftは従来の1文の挿入。activeは上限の確認と挿入を条件付きの1文にまとめ、
 	// 往復を1回減らす(#32)。同じ利用者の同時作成でも上限5件を超えない
 	let inserted: typeof intents.$inferSelect | undefined;
-	if (d.status === "active") {
-		inserted = await insertIntentIfUnderActiveLimit(c.env.DB, insertQuery, sub);
-		if (inserted === undefined) {
+	try {
+		inserted =
+			d.status === "active"
+				? await insertIntentIfUnderActiveLimit(c.env.DB, insertQuery, sub)
+				: (await insertQuery)[0];
+	} catch (error) {
+		await quota.release();
+		throw error;
+	}
+	if (inserted === undefined) {
+		await quota.release();
+		if (d.status === "active") {
 			logger.warn("intents.create.rejected", {
 				error_code: "ACTIVE_INTENT_LIMIT",
 			});
@@ -655,12 +676,8 @@ intentRoutes.post("/", requireRegistered, async (c) => {
 			);
 			return c.json(r.body, r.status);
 		}
-	} else {
-		[inserted] = await insertQuery;
-		if (inserted === undefined) {
-			const r = errorJson("INTERNAL", "Intentの作成に失敗しました");
-			return c.json(r.body, r.status);
-		}
+		const r = errorJson("INTERNAL", "Intentの作成に失敗しました");
+		return c.json(r.body, r.status);
 	}
 	// 段ごとの所要時間: auth=認証(JWT検証+KV失効リスト)・insert=上限の確認を含む挿入(#32)
 	const authLatency = c.get("authLatencyMs");
@@ -1047,7 +1064,7 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 			d.expires_at === undefined ? row.expiresAt : new Date(d.expires_at);
 	}
 
-	const result = await updateWithOptimisticLock(db, row, sub, {
+	const values = {
 		form: d.form ?? row.form,
 		topic: d.topic ?? row.topic,
 		category: d.category === undefined ? row.category : d.category,
@@ -1078,8 +1095,32 @@ intentRoutes.patch("/:id", requireRegistered, async (c) => {
 		version: row.version + 1,
 		expiresAt,
 		updatedAt: now,
-	});
+	} satisfies Partial<typeof intents.$inferInsert>;
+	// 更新6回/時間(docs/04 §5)は、activeの意味フィールドの書き直し(再評価が走るもの)だけを
+	// 数える。表示系(notification_level)・draftの編集・active化は数えない。書き込みの前に
+	// 1回分を確保し、書き込みが失敗したら戻す
+	const quota =
+		row.status === "active" && intentMeaningChanged(row, { ...row, ...values })
+			? await reserveIntentQuota(
+					c.env,
+					"update",
+					sub,
+					c.var.auth.idpSubject,
+					now,
+				)
+			: null;
+	if (quota !== null && !quota.ok) {
+		return rateLimitedResponse(c, quota.reason, quota.retryAfterSeconds);
+	}
+	let result: GuardedUpdate;
+	try {
+		result = await updateWithOptimisticLock(db, row, sub, values);
+	} catch (error) {
+		await quota?.release();
+		throw error;
+	}
 	if (result.kind !== "ok") {
+		await quota?.release();
 		if (result.kind === "version_conflict") {
 			logger.warn("intents.update.conflict", {
 				error_code: "VALIDATION_FAILED",

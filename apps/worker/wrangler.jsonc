@@ -110,6 +110,16 @@
 		}
 	],
 
+	// 1ユーザーあたり60req/分(Workers Rate Limiting・key=利用者・docs/04 §5)。
+	// namespace_idはアカウント内で環境ごとに別の値にする(stagingは1002)
+	"ratelimits": [
+		{
+			"name": "API_RATE_LIMITER",
+			"namespace_id": "1001",
+			"simple": { "limit": 60, "period": 60 }
+		}
+	],
+
 	// 毎分Cron(bucket走査・期限切れバッチ等・docs/04 §2)
 	"triggers": {
 		"crons": ["* * * * *"]
@@ -224,6 +234,13 @@
 					"dataset": "latch_metrics_staging"
 				}
 			],
+			"ratelimits": [
+				{
+					"name": "API_RATE_LIMITER",
+					"namespace_id": "1002",
+					"simple": { "limit": 60, "period": 60 }
+				}
+			],
 			"durable_objects": {
 				"bindings": [
 					{
@@ -239,7 +256,9 @@
 				"LATCH_LLM_MODE": "real",
 				"LATCH_PUSH_MODE": "stub",
 				// 応答の後の第1段・第2段(#30・設計 §3.5)
-				"LATCH_INLINE_PIPELINE": "on"
+				"LATCH_INLINE_PIPELINE": "on",
+				// 負荷試験の利用者(idp_subjectがload-で始まる)だけレート制限を外す(docs/10 §5)
+				"LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX": "load-"
 			}
 		}
 	}

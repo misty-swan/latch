@@ -688,6 +688,32 @@ describe("Confirm(サーバーエラーの表示)", () => {
 		expect(router.state.location.pathname).toBe(PATHS.confirm);
 	});
 
+	it("429 RATE_LIMITEDは理由ごとの案内をエラー行に出し、確認画面に留まる(05 §3.1)", async () => {
+		saveComposeState({
+			raw_text: WORDS,
+			draft_id: null,
+			parse: connectionParse,
+		});
+		saveResponse = jsonResponse(429, {
+			error: {
+				code: "RATE_LIMITED",
+				message: "操作の回数が上限に達しました",
+				details: { reason: "intent_creates_per_day" },
+			},
+		});
+		const router = setup();
+
+		fireEvent.click(screen.getByRole("button", { name: "預ける" }));
+
+		expect(
+			await screen.findByText(
+				"今日預けられる意思の数の上限に達しました。明日もう一度お試しください。",
+			),
+		).toBeTruthy();
+		expect(screen.queryByText(/RATE_LIMITED/)).toBeNull();
+		expect(router.state.location.pathname).toBe(PATHS.confirm);
+	});
+
 	it("422 ACTIVE_INTENT_LIMITはボードどおりの上限シートを出し・下書きに残せる", async () => {
 		saveComposeState({
 			raw_text: WORDS,

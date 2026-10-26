@@ -19,6 +19,7 @@ import {
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { ApiError, apiFetch } from "../api/client";
+import { rateLimitMessage } from "../api/rate-limit";
 import {
 	readComposeState,
 	readPendingCompose,
@@ -125,9 +126,10 @@ export function Compose() {
 			navigate(PATHS.home);
 		} catch (cause) {
 			setError(
-				cause instanceof ApiError
-					? cause.message
-					: "下書きを保存できませんでした。もう一度お試しください",
+				rateLimitMessage(cause) ??
+					(cause instanceof ApiError
+						? cause.message
+						: "下書きを保存できませんでした。もう一度お試しください"),
 			);
 			setBusy(false);
 		}

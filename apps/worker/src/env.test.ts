@@ -10,8 +10,13 @@ import {
 } from "./env";
 
 // assertEnvSafety/jwtSecretはバインディング(DB等)を参照しないため、変数のみ与えるヘルパー
+/** 60req/分のバインディング(prodで必須・docs/04 §5)。既定で入れ、欠落の試験だけ外す */
+const RATE_LIMITER = {
+	limit: async () => ({ success: true }),
+} as unknown as RateLimit;
+
 const makeEnv = (overrides: Partial<Env> = {}): Env =>
-	({ ...overrides }) as unknown as Env;
+	({ API_RATE_LIMITER: RATE_LIMITER, ...overrides }) as unknown as Env;
 
 const SECRET_32 = "a".repeat(32);
 
@@ -176,6 +181,55 @@ describe("assertEnvSafety(docs/04 §4・docs/10 §2: prodテスト鍵起動ガ�
 				}),
 			),
 		).toThrow("ENV_UNSAFE_TEST_QUEUE_GUARD");
+	});
+
+	it("prodでレート制限の緩和(LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX)が設定されていたら例外(docs/10 §5)", () => {
+		for (const prefix of ["load-", "e2e-", ""]) {
+			expect(() =>
+				assertEnvSafety(
+					makeEnv({
+						LATCH_ENV: "production",
+						JWT_SECRET: SECRET_32,
+						...PUSH_OK,
+						LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX: prefix,
+					}),
+				),
+			).toThrow("ENV_UNSAFE_RATE_LIMIT_RELAX");
+		}
+	});
+
+	it("stagingとlocalではレート制限の緩和の設定で起動を拒否しない", () => {
+		expect(() =>
+			assertEnvSafety(
+				makeEnv({
+					LATCH_ENV: "staging",
+					ACCESS_AUD: "aud",
+					ACCESS_TEAM_DOMAIN: "https://t.cloudflareaccess.com",
+					LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX: "load-",
+				}),
+			),
+		).not.toThrow();
+		expect(() =>
+			assertEnvSafety(
+				makeEnv({
+					LATCH_ENV: "local",
+					LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX: "e2e-",
+				}),
+			),
+		).not.toThrow();
+	});
+
+	it("prodでAPI_RATE_LIMITERバインディングが無ければ例外(docs/04 §5)", () => {
+		expect(() =>
+			assertEnvSafety(
+				makeEnv({
+					LATCH_ENV: "production",
+					JWT_SECRET: SECRET_32,
+					...PUSH_OK,
+					API_RATE_LIMITER: undefined,
+				}),
+			),
+		).toThrow("ENV_MISSING_RATE_LIMITER");
 	});
 
 	it("prodでJWT_SECRET未設定は例外", () => {

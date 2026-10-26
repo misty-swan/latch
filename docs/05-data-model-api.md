@@ -295,7 +295,7 @@ anonymized:  boolean       # 削除・退会後の匿名化済みフラグ
 created_at / updated_at
 ```
 
-**usage_counters**(レート制限・Jev予算の3層保護の実体): `scope(intent_daily|intent_hourly|jev_intent|jev_user|jev_global_daily|jev_global_monthly|external_send) / key(user_id|intent_id|'-'|<送信先>:<系統>) / period(日付or時間のバケット文字列) / count — PK(scope, key, period)`。加算は `UPDATE … SET count=count+1 … RETURNING` の原子的1文で行い、Queues consumerはバッチ単位でまとめて加算する(並行消費での取りこぼし防止)。periodが90日より古い行はCronで削除する(API単位のスロットルはWorkers Rate Limitingバインディング(key=user_id)が担い、本表には置かない)。**外部送信の集計(LLM real接続で確定)。** scope=`external_send`は外部AI事業者へ送った回数の記録(08 §5・07 §8)で、keyは`anthropic:parser`・`anthropic:jev`・`typesafe:jev`、periodはJSTの日付とし、送るたびに成否を問わず1加える(`INSERT … ON CONFLICT DO UPDATE`の1文)。送った中身は持たない。記録の失敗は呼び出しを止めない(ログに残すだけ)。予算・レート制限の判定には使わない
+**usage_counters**(レート制限・Jev予算の3層保護の実体): `scope(intent_daily|intent_hourly|jev_intent|jev_user|jev_global_daily|jev_global_monthly|external_send) / key(user_id|intent_id|'-'|<送信先>:<系統>) / period(日付or時間のバケット文字列) / count — PK(scope, key, period)`。加算は `UPDATE … SET count=count+1 … RETURNING` の原子的1文で行い、Queues consumerはバッチ単位でまとめて加算する(並行消費での取りこぼし防止)。periodが90日より古い行はCronで削除する(API単位のスロットルはWorkers Rate Limitingバインディング(key=user_id)が担い、本表には置かない)。**作成・更新の上限(F9実装確定・LAT-93)。** scope=`intent_daily`はIntentの作成の回数(key=user_id・periodはJSTの日付・上限20)、`intent_hourly`は預けているIntentの意味フィールドの書き直しの回数(key=user_id・periodはJSTの時`YYYY-MM-DD-HH`・上限6)で、どちらも利用者単位とする。数える範囲と確保・戻しの方法は04 §5**外部送信の集計(LLM real接続で確定)。** scope=`external_send`は外部AI事業者へ送った回数の記録(08 §5・07 §8)で、keyは`anthropic:parser`・`anthropic:jev`・`typesafe:jev`、periodはJSTの日付とし、送るたびに成否を問わず1加える(`INSERT … ON CONFLICT DO UPDATE`の1文)。送った中身は持たない。記録の失敗は呼び出しを止めない(ログに残すだけ)。予算・レート制限の判定には使わない
 
 **geofeatures**: `id / name / municipality / type(city|station) / lat / lng / grid_key(約1km=0.01度グリッドのキー・INDEX)`(ソースはISJ+駅データ。取り込みと変換の規定は04 §4)。grid_keyの書式は `${Math.floor(lat*100)}_${Math.floor(lng*100)}`(F4a実装確定)。逆引きは座標の属するセルの中心を基準点とし、そのセルと周囲を合わせた3×3セルの行からハバーシン距離の最近傍の地名を採る(同距離はid昇順・該当なしは地域名なし)。
 
@@ -373,7 +373,7 @@ latch_membersは§2.2のlatches表からuser_ids列を置き換えた副表で�
 
 - 主要エラーcodeとHTTPステータスの対応: UNAUTHORIZED/TOKEN_EXPIRED=401・FORBIDDEN=403・NOT_FOUND=404・VALIDATION_FAILED/FORM_MISMATCH=400・RATE_LIMITED=429・ACTIVE_INTENT_LIMIT/UNDER_AGE/ALCOHOL_RESTRICTED/PARSE_FAILED=422・EMBEDDING_PENDING=409・UPGRADE_REQUIRED=426(WebSocket接続のルートへのUpgradeでない要求・F6a実装確定)・INTERNAL=500。本人が所属しないlatch・他人のIntentへのアクセスは、存在を推測させないため一律NOT_FOUNDを返す(FORBIDDENは自己リソースへの操作権限の欠如に限る)
 - ページネーション: 一覧系は `?cursor=<不透明>&limit=1..50(既定20)`。応答は `{items: [...], next_cursor: string|null}`
-- レート制限: 1ユーザーあたり60req/分(04 §5)。429には `Retry-After`(固定60秒)を付す
+- レート制限: 1ユーザーあたり60req/分・Intent作成20件/日・更新6回/時間(04 §5)。超えた要求は429 RATE_LIMITEDとし、`details.reason`にどの上限かを載せる(`requests_per_minute`・`intent_creates_per_day`・`intent_updates_per_hour`・F9実装確定)。`Retry-After`は、60req/分では固定60秒、作成20件/日では次のJSTの0時まで、更新6回/時間では次のJSTの正時までの秒数(1以上の整数)とする。数えるのは、作成=`POST /v1/intents`の成功(draft保存も1件)、更新=`PATCH /v1/intents/{id}`のうちactiveの意味フィールド(§3.2の意味フィールドの変更の判定と同じ)が変わる成功だけで、表示系(notification_level)の変更・draftの編集・draftのactive化・pause/resume・失敗した要求は数えない(01冒頭の決定記録(2026-10-26・F9(レート制限)))。60req/分の対象外はauth/token・auth/refresh・auth/logout・healthz・アイコンの取得・WebSocket・dev専用API(04 §5)。画面は理由ごとの案内文を既存のエラー表示の場所に出す(文言は同じ決定記録)
 
 ### 3.2 エンドポイント一覧
 

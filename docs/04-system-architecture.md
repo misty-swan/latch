@@ -203,6 +203,8 @@
 | Jev予算 | 1Intentあたり1日40回・1ユーザーあたり1日120回・再評価30分抑制 | D1カウンタ(日次バケット keyed by intent/user)+最終評価時刻チェック |
 | 実行回数上限 | 1日30,000回・1か月600,000回・80%でalert | D1のグローバルカウンタ+Cronでの検知・Analytics Engineでの傾向記録 |
 
+**源流レート制限の実装(F9実装確定・LAT-93・数える範囲と画面の案内は01冒頭の決定記録(2026-10-26・F9(レート制限)))。** 60req/分は、wrangler設定の`ratelimits`のバインディング`API_RATE_LIMITER`(`simple: {limit: 60, period: 60}`・namespace_idは環境ごとに別の値(トップレベル1001・staging 1002))で数える。認証のミドルウェア(requireAuth・requireRegistered・requirePreRegistration)が認証の成功の直後に確かめ、keyは登録済みならuser_id、登録前(subが無い)ならIdPの種類とsubjectとする。バインディングはCloudflareの拠点ごとのおおよその数え方(結果整合)で、拠点をまたぐ要求などで多少の超過が起こり得るが許す(費用の上限は本表のJev予算と実行回数上限が別に守る)。対象外のAPIは、認証の要らないauth/token・auth/refresh・healthz・アイコンの取得(GET /v1/users/{user_id}/icon)・WebSocket(チケットで認証)と、ログアウト(いつでもできるようにする)・dev専用API(`/v1/dev/*`・prodには無い)とする。作成20件/日と更新6回/時間はusage_counters(05 §2.2)で数え、窓はJSTの日付・JSTの時の固定の窓とする(0時・毎時0分に戻る。窓の境目の前後で最大2倍まで続けて通り得るが許す)。確保は上限未満のときだけ加算する1文(`INSERT … ON CONFLICT DO UPDATE SET count = count + 1 WHERE count < 上限 RETURNING count`)で、作成・更新の書き込みの前に1回分を取り、書き込みが失敗したら1を戻す(並行の要求でも上限を超えない)。429の応答とRetry-Afterは05 §3.1。**試験用の利用者の緩和(10 §5)。** 変数`LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX`(カンマ区切りの接頭辞)にidp_subjectが前方一致する利用者は、3つの上限をすべて数えない(登録済みのアクセストークンもidp_subjectを持つ)。stagingは`load-`(負荷試験の利用者・wrangler.jsonc)、手元のE2Eは`e2e-`(`.dev.vars`・scripts/prepare-dev-vars.mjs)とし、トップレベル(手元の開発とprodの元)には置かない。prodでは、この変数が設定されていれば起動を拒否し(ENV_UNSAFE_RATE_LIMIT_RELAX)、`API_RATE_LIMITER`が無ければ起動を拒否する(ENV_MISSING_RATE_LIMITER)。判定の側もLATCH_ENV=productionでは緩和しない(二重防御)。
+
 上限到達・LLM API障害時はJev未判定として候補を保留し、提案しない(circuit breaker)。Embedding失敗はキューのやり直し(10秒・30秒・60秒)の後にバックフィルで回収する。
 
 ## 6. 環境・CI/CD・テスト戦略

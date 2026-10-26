@@ -147,6 +147,27 @@ describe("Reading", () => {
 		expect(readComposeState()).toBeNull();
 	});
 
+	it("429 RATE_LIMITEDはparse-failedへ行かず、入力欄へ戻して案内を出す(05 §3.1)", async () => {
+		parseApiResponse = jsonResponse(429, {
+			error: {
+				code: "RATE_LIMITED",
+				message: "x",
+				details: { reason: "requests_per_minute" },
+			},
+		});
+		savePendingCompose({ raw_text: WORDS, draft_id: null });
+		const router = setup();
+
+		await waitFor(() => {
+			expect(router.state.location.pathname).toBe(PATHS.compose);
+		});
+		expect(
+			await screen.findByText(
+				"操作が続いたため、少し時間をおいてください。1分ほどでまたお使いいただけます。",
+			),
+		).toBeTruthy();
+	});
+
 	it("サーバーの失敗(500)でもparse-failedへ遷移する", async () => {
 		parseApiResponse = jsonResponse(500, {
 			error: { code: "INTERNAL", message: "x", details: {} },

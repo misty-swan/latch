@@ -23,6 +23,7 @@ import {
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ApiError, apiFetch } from "../api/client";
+import { rateLimitMessage } from "../api/rate-limit";
 import { clearComposeState, readComposeState } from "../intents/composeState";
 import { FactsEditor } from "../intents/FactsEditor";
 import {
@@ -45,6 +46,10 @@ import { ScreenGrain } from "./shared";
 
 /** エラー応答を人間向けの行に正規化する(理由コードの既知分は案内へ・未知分はコードのまま) */
 const messagesFromApiError = (error: ApiError): string[] => {
+	const limited = rateLimitMessage(error);
+	if (limited !== null) {
+		return [limited];
+	}
 	if (error.code === "VALIDATION_FAILED") {
 		const raw = error.details.reasons;
 		const reasons = Array.isArray(raw)
