@@ -299,7 +299,7 @@ export type PrecisionAt = {
 export const latchScore = (axes: JevAxes): number =>
 	Math.min(axes.would_a_accept_b, axes.would_b_accept_a) * LATCH.CALIBRATION_C;
 
-/** Offline Precision@閾値とRecall@閾値(docs/09 §4)。参考値で合否には使わない。超えるの判定はLayer 5と同じ「>」 */
+/** Offline Precision@閾値とRecall@閾値(docs/09 §4)。Recallは合否に使い(LAT-114)、Precisionは参考値。超えるの判定はLayer 5と同じ「>」 */
 export const precisionAt = (
 	pairs: JevPair[],
 	outcomes: JevOutcome[],
@@ -344,6 +344,8 @@ export const precisionAt = (
 export type GateScores = {
 	parser: ParserScores;
 	jev: { primary: JevOrderScore; fallback: JevOrderScore };
+	/** (A,B)の順の結果による閾値0.60での値。recallを合否に使う(precisionは参考値・LAT-114) */
+	jevAt060: { primary: PrecisionAt; fallback: PrecisionAt };
 };
 
 /** 合格基準(設計書 §3.3・百分率の整数で持ち、境界は「以上」を整数演算で判定する) */
@@ -361,6 +363,8 @@ export const CRITERIA = {
 	jevOrderMedian: 0.3,
 	/** Jevの呼び出しの失敗の割合の上限(百分率・これを超えると不合格) */
 	jevFailedCallsPct: 10,
+	/** JevのRecall@0.60の下限(百分率・以上で合格。オーナー決定 2026-10-26・LAT-114) */
+	jevRecallAt060: 80,
 } as const;
 
 const pct = (r: number): string => `${(r * 100).toFixed(1)}%`;
@@ -412,5 +416,20 @@ export const judge = (
 	};
 	jev(scores.jev.primary, "第一候補TypeSafe");
 	jev(scores.jev.fallback, "予備Anthropic");
+
+	const recall = (s: PrecisionAt, name: string) => {
+		const need = CRITERIA.jevRecallAt060;
+		if (s.actualPositive === 0) {
+			failures.push(
+				`JevのRecall@0.60(${name}): 採点できる正解yesの組がありません(基準${need}%以上)`,
+			);
+		} else if (s.truePositive * 100 < need * s.actualPositive) {
+			failures.push(
+				`JevのRecall@0.60(${name}): ${pct(s.truePositive / s.actualPositive)}(${s.truePositive}/${s.actualPositive})が基準${need}%以上を満たしません`,
+			);
+		}
+	};
+	recall(scores.jevAt060.primary, "第一候補TypeSafe");
+	recall(scores.jevAt060.fallback, "予備Anthropic");
 	return { passed: failures.length === 0, failures };
 };

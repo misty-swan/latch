@@ -1,8 +1,8 @@
 /**
- * Jevの少数の組の確かめ(LAT-109)。本体のゴールドセットと承認待ちの下書き(jev-pairs-draft.yaml)を
+ * Jevの組の確かめ(LAT-109)。ゴールドセット(jev-pairs.yaml)のうちJevの採点に使う組を
  * (A,B)の順だけでJevのrealへ送り、組ごとのLATCH ScoreとPrecision/Recall@0.60を標準出力へ出す。
  * 精度ゲートの採点ではない(順序整合を測らず、記録も書かない)。本物のAIを呼ぶ(課金あり)。
- * 使い方: pnpm --filter eval exec tsx jev-probe.ts [--draft-only] [--primary-only] [--fallback-only]
+ * 使い方: pnpm --filter eval exec tsx jev-probe.ts [--primary-only] [--fallback-only]
  * APIキーはgate.tsと同じく環境変数かtools/eval/.envから読む。キー・URLは出力しない
  */
 import { existsSync } from "node:fs";
@@ -12,7 +12,7 @@ import { anthropicJev } from "../../apps/worker/src/llm/real/jev-anthropic";
 import { typesafeJev } from "../../apps/worker/src/llm/real/jev-typesafe";
 import type { JevFn, JevOutcome } from "../../apps/worker/src/llm/types";
 import { buildNormalizedText } from "../../apps/worker/src/pipeline/normalize";
-import { type JevPair, loadJevGoldset } from "./lib/goldset";
+import { type JevPair, jevScoredPairs, loadJevGoldset } from "./lib/goldset";
 import { fixtureToRow } from "./lib/intent-row";
 import { latchScore, precisionAt } from "./lib/score";
 
@@ -26,19 +26,11 @@ const MAX_RETRIES = 5;
 const args = new Set(process.argv.slice(2));
 
 const sets: { name: string; pairs: JevPair[] }[] = [
-	...(args.has("--draft-only")
-		? []
-		: [
-				{
-					name: "本体",
-					pairs: loadJevGoldset(join(repoRoot, "eval/goldset/jev-pairs.yaml"))
-						.pairs,
-				},
-			]),
 	{
-		name: "下書き",
-		pairs: loadJevGoldset(join(repoRoot, "eval/goldset/jev-pairs-draft.yaml"))
-			.pairs,
+		name: "本体",
+		pairs: jevScoredPairs(
+			loadJevGoldset(join(repoRoot, "eval/goldset/jev-pairs.yaml")).pairs,
+		),
 	},
 ];
 

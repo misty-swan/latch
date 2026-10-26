@@ -37,8 +37,10 @@ const wrangler = (top: string, staging: string) => `{
 }
 `;
 
+type At060 = { truePositive: number; actualPositive: number };
 type Record = {
 	passed: boolean;
+	scores: { jevAt060: { primary: At060; fallback: At060 } };
 	goldset: { approvedByOwner: string | null };
 	models: {
 		anthropic: string;
@@ -77,6 +79,12 @@ const makeRepo = (opts: {
 	if (!opts.noRecord) {
 		const record: Record = {
 			passed: true,
+			scores: {
+				jevAt060: {
+					primary: { truePositive: 30, actualPositive: 30 },
+					fallback: { truePositive: 30, actualPositive: 30 },
+				},
+			},
 			goldset: { approvedByOwner: "2026-10-24" },
 			models: {
 				anthropic: "claude-haiku-5-5",
@@ -133,6 +141,60 @@ describe("checkGate", () => {
 			}),
 		);
 		expect(errs.join("\n")).toMatch(/passed/);
+	});
+
+	it.each([
+		[
+			"第一候補が基準を下回る",
+			"primary",
+			{ truePositive: 23, actualPositive: 30 },
+		],
+		["予備が基準を下回る", "fallback", { truePositive: 0, actualPositive: 30 }],
+		["正解yesの組が無い", "primary", { truePositive: 0, actualPositive: 0 }],
+	] as const)(
+		"JevのRecall@0.60が基準80%以上を満たさない記録は落ちる(%s)",
+		(_n, key, at) => {
+			const errs = checkGate(
+				makeRepo({
+					top: "real",
+					record: (r) => {
+						r.scores.jevAt060[key] = { ...at };
+					},
+				}),
+			);
+			expect(errs).toHaveLength(1);
+			expect(errs[0]).toMatch(/Recall@0\.60/);
+		},
+	);
+
+	it("JevのRecall@0.60がちょうど基準(80%)なら通る", () => {
+		expect(
+			checkGate(
+				makeRepo({
+					top: "real",
+					record: (r) => {
+						r.scores.jevAt060.fallback = {
+							truePositive: 24,
+							actualPositive: 30,
+						};
+					},
+				}),
+			),
+		).toEqual([]);
+	});
+
+	it("Recall@0.60を合否に加える前の記録(値が無い)は落ちる", () => {
+		const errs = checkGate(
+			makeRepo({
+				top: "real",
+				record: (r) => {
+					delete (r as Partial<Record>).scores;
+				},
+			}),
+		);
+		expect(errs).toHaveLength(2);
+		expect(errs.join("\n")).toMatch(/第一候補/);
+		expect(errs.join("\n")).toMatch(/予備/);
 	});
 
 	it("未承認のゴールドセットでの記録は落ちる", () => {

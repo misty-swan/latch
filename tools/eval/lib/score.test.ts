@@ -11,6 +11,7 @@ import {
 	type JevOrderScore,
 	judge,
 	type ParserScores,
+	type PrecisionAt,
 	precisionAt,
 	scoreJevOrder,
 	scoreParser,
@@ -321,14 +322,26 @@ const jevScore = (median: number | null, failedCalls = 0): JevOrderScore => ({
 	failedPairs: [],
 });
 
+const at060 = (truePositive: number, actualPositive: number): PrecisionAt => ({
+	threshold: 0.6,
+	precision: null,
+	predictedPositive: truePositive,
+	truePositive,
+	recall: actualPositive === 0 ? null : truePositive / actualPositive,
+	actualPositive,
+	n: actualPositive,
+	failedCalls: 0,
+});
+
 const scores = (over: Partial<GateScores> = {}): GateScores => ({
 	parser: passingParser(),
 	jev: { primary: jevScore(0.3), fallback: jevScore(0.3) },
+	jevAt060: { primary: at060(8, 10), fallback: at060(8, 10) },
 	...over,
 });
 
 describe("judge", () => {
-	it("ちょうど基準値(90%・85%・80%・中央値0.3・失敗10%)は合格", () => {
+	it("ちょうど基準値(90%・85%・80%・中央値0.3・失敗10%・Recall@0.60 80%)は合格", () => {
 		expect(
 			judge(
 				scores({
@@ -354,6 +367,18 @@ describe("judge", () => {
 		expect(r.failures.join("\n")).toMatch(/alcohol.*recall/);
 		expect(r.failures.join("\n")).toMatch(/第一候補/);
 		expect(r.failures.join("\n")).toMatch(/予備.*失敗/);
+	});
+
+	it("JevのRecall@0.60が基準80%を下回るか、正解yesの組が無ければ、第一候補・予備のそれぞれで不合格", () => {
+		const r = judge(
+			scores({ jevAt060: { primary: at060(7, 10), fallback: at060(0, 0) } }),
+		);
+		expect(r.passed).toBe(false);
+		expect(r.failures).toHaveLength(2);
+		expect(r.failures[0]).toMatch(
+			/Recall@0\.60\(第一候補TypeSafe\): 70\.0%\(7\/10\)/,
+		);
+		expect(r.failures[1]).toMatch(/Recall@0\.60\(予備Anthropic\): 採点できる/);
 	});
 
 	it("採点できる件が無い項目と、中央値が出せないJevは不合格", () => {

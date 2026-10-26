@@ -1,6 +1,6 @@
 /**
  * CIの照合(設計書 §3.4)。apps/worker/wrangler.jsonc のトップレベルと全env.*の
- * vars.LATCH_LLM_MODEにrealがあれば、eval/records/gate.json が合格・承認済みの
+ * vars.LATCH_LLM_MODEにrealがあれば、eval/records/gate.json が合格・JevのRecall@0.60が基準以上(第一候補と予備)・承認済みの
  * ゴールドセット・固定したTypeSafeのモデル名(応答した版も固定した版だけ)・今のprompts.tsと同じモデル名・
  * 今のファイルと同じ指紋・今の値から描いた値と同じ指紋であることを求める。
  * 問題を日本語の文で返す(空配列=通る)。
@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ParseError, parse as parseJsonc } from "jsonc-parser";
 import { artifactsFingerprint, fingerprint } from "./fingerprint";
+import { CRITERIA } from "./score";
 
 export const GATE_RECORD_PATH = "eval/records/gate.json";
 const WRANGLER_PATH = "apps/worker/wrangler.jsonc";
@@ -56,6 +57,12 @@ export const checkGate = (repoRoot: string): string[] => {
 	}
 	let record: {
 		passed?: unknown;
+		scores?: {
+			jevAt060?: Record<
+				string,
+				{ truePositive?: unknown; actualPositive?: unknown } | undefined
+			>;
+		};
 		goldset?: { approvedByOwner?: unknown };
 		models?: {
 			anthropic?: unknown;
@@ -74,6 +81,25 @@ export const checkGate = (repoRoot: string): string[] => {
 	const problems: string[] = [];
 	if (record.passed !== true) {
 		problems.push(`${GATE_RECORD_PATH} がpassed: trueではありません(${where})`);
+	}
+	// Recall@0.60を合否に加える前の記録(値が無い)や、基準を下回る記録を通さない(LAT-114)
+	for (const [key, name] of [
+		["primary", "第一候補TypeSafe"],
+		["fallback", "予備Anthropic"],
+	] as const) {
+		const at = record.scores?.jevAt060?.[key];
+		const tp = at?.truePositive;
+		const pos = at?.actualPositive;
+		if (
+			typeof tp !== "number" ||
+			typeof pos !== "number" ||
+			pos === 0 ||
+			tp * 100 < CRITERIA.jevRecallAt060 * pos
+		) {
+			problems.push(
+				`${GATE_RECORD_PATH} のJevのRecall@0.60(${name})が無いか、基準${CRITERIA.jevRecallAt060}%以上を満たしません。採り直してください`,
+			);
+		}
 	}
 	if (
 		typeof record.goldset?.approvedByOwner !== "string" ||

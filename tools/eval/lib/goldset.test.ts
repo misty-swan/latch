@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadJevGoldset, loadParserGoldset } from "./goldset";
+import { jevScoredPairs, loadJevGoldset, loadParserGoldset } from "./goldset";
 
 const write = (body: string): string => {
 	const dir = mkdtempSync(join(tmpdir(), "goldset-"));
@@ -112,6 +112,25 @@ describe("loadJevGoldset", () => {
 		);
 		expect(g.pairs[0]?.a.area).toBe("渋谷区");
 		expect(g.pairs[0]?.b.area).toBeUndefined();
+	});
+
+	it("jev_scored: false の組はJevの採点に使う組から除く(書かなければ使う・LAT-114)", () => {
+		const off = pair("p2").replace(
+			"match: yes\n",
+			"match: yes\n    jev_scored: false\n",
+		);
+		const g = loadJevGoldset(
+			write(`version: 1\napproved_by_owner: null\npairs:\n${pair("p1")}${off}`),
+		);
+		expect(g.pairs.map((p) => p.id)).toEqual(["p1", "p2"]);
+		expect(jevScoredPairs(g.pairs).map((p) => p.id)).toEqual(["p1"]);
+		expect(() =>
+			loadJevGoldset(
+				write(
+					`version: 1\napproved_by_owner: null\npairs:\n${pair("p3").replace("match: yes\n", "match: yes\n    jev_scored: no\n")}`,
+				),
+			),
+		).toThrow(/p3/);
 	});
 
 	it("idの重複・matchの不正は例外", () => {
