@@ -275,6 +275,9 @@ describe("precisionAt", () => {
 			precision: 0.5,
 			predictedPositive: 2,
 			truePositive: 1,
+			// 採点できた正解yesはy1・y2(fは失敗で除く)。超えたのはy1だけ
+			recall: 0.5,
+			actualPositive: 2,
 			n: 3,
 			failedCalls: 1,
 		});
@@ -282,6 +285,12 @@ describe("precisionAt", () => {
 
 	it("閾値を超えた組が無ければprecisionはnull", () => {
 		expect(precisionAt([pair("a")], [jok()], 0.6).precision).toBeNull();
+	});
+
+	it("採点できた正解yesの組が無ければrecallはnull", () => {
+		const r = precisionAt([pair("n", "no")], [jok()], 0.6);
+		expect(r.recall).toBeNull();
+		expect(r.actualPositive).toBe(0);
 	});
 });
 

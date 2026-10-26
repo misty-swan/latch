@@ -144,27 +144,37 @@ export interface JevQuestion {
 	criteria: { true: string; false: string };
 }
 
-/** Jevの7軸の問い(07 §5・01 §13) */
-export const JEV_QUESTIONS: Record<JevAxis, JevQuestion> = {
+/**
+ * 意思の読み方(07 §5)。TypeSafeは軸ごとの問いを別々に読むため各軸の問いの前に置き、
+ * 予備のsystem文には1回だけ置く。語彙や具体さの違う同じ目的の組を食い違いと読ませない
+ * (LAT-109: 同じ目的のつながりIntentを低く判定していた)
+ */
+export const JEV_READING_GUIDE =
+	"`intent_a`と`intent_b`は、2人がそれぞれ「誰かとしたいこと」として預けた意思の短い要約で、主題・条件・人数(日時の決まった機会なら日時と予算)を「・」で区切ったもの。日時の無いものは、続く関係や仲間を求めるつながりの意思である。同じ目的を別の言い方や別の具体さで書いたもの(片方が大きな枠で、もう片方がその中の具体的な題材・ジャンル・進め方を書いたもの)は、目的が一致するものとして読む。書かれていない条件は、こだわりが無いものとして読む。食い違いと見るのは、したいことや、明示された条件(本気度・頻度・時間帯・人数・相手への条件など)が両立しないとき。";
+
+/** 7軸の問いの本体(読み方を除く) */
+const JEV_AXIS_QUESTIONS: Record<JevAxis, JevQuestion> = {
 	would_a_accept_b: {
 		instructions:
-			"`intent_a`を書いた人は、`intent_b`を書いた人からの誘いを受けて、一緒に参加したいと思うか",
+			"`intent_a`を書いた人は、`intent_b`を書いた人からの誘いを受けて、一緒に参加したい(つながりなら、知り合って関係を始めたい)と思うか",
 		criteria: {
-			true: "`intent_a`の人が`intent_b`の人と一緒に参加することを受け入れる",
-			false: "`intent_a`の人は`intent_b`の人と一緒に参加することを断る",
+			true: "`intent_a`の人が`intent_b`の人と一緒に参加する(つながりなら、知り合う)ことを受け入れる",
+			false:
+				"`intent_a`の人は`intent_b`の人と一緒に参加する(つながりなら、知り合う)ことを断る",
 		},
 	},
 	would_b_accept_a: {
 		instructions:
-			"`intent_b`を書いた人は、`intent_a`を書いた人からの誘いを受けて、一緒に参加したいと思うか",
+			"`intent_b`を書いた人は、`intent_a`を書いた人からの誘いを受けて、一緒に参加したい(つながりなら、知り合って関係を始めたい)と思うか",
 		criteria: {
-			true: "`intent_b`の人が`intent_a`の人と一緒に参加することを受け入れる",
-			false: "`intent_b`の人は`intent_a`の人と一緒に参加することを断る",
+			true: "`intent_b`の人が`intent_a`の人と一緒に参加する(つながりなら、知り合う)ことを受け入れる",
+			false:
+				"`intent_b`の人は`intent_a`の人と一緒に参加する(つながりなら、知り合う)ことを断る",
 		},
 	},
 	purpose_fit: {
 		instructions:
-			"`intent_a`と`intent_b`は、したいこと(目的・活動)が一致しているか",
+			"`intent_a`と`intent_b`は、したいこと(目的・活動)が一致しているか。言い方や具体さが違っても、片方の目的がもう片方の目的に含まれるか、一緒にすれば両方の目的が満たされるなら一致とする",
 		criteria: {
 			true: "両者のしたいことが同じか、一緒にして両方が満たされる",
 			false: "したいことが違い、一緒にしても片方しか満たされない",
@@ -197,13 +207,24 @@ export const JEV_QUESTIONS: Record<JevAxis, JevQuestion> = {
 	},
 	latent_yes: {
 		instructions:
-			"`intent_a`と`intent_b`の人に、この組み合わせを提案したら、両者とも実際に参加すると答えるか",
+			"`intent_a`と`intent_b`の人に、この組み合わせを提案したら、両者とも実際に参加する(つながりなら、知り合う)と答えるか",
 		criteria: {
 			true: "両者とも提案に参加すると答える",
 			false: "少なくともどちらかが提案を見送る",
 		},
 	},
 };
+
+/** Jevの7軸の問い(07 §5・01 §13)。第一候補(TypeSafe)へ送る形で、各軸の問いの前に読み方を置く */
+export const JEV_QUESTIONS: Record<JevAxis, JevQuestion> = Object.fromEntries(
+	JEV_AXES.map((axis) => [
+		axis,
+		{
+			...JEV_AXIS_QUESTIONS[axis],
+			instructions: `${JEV_READING_GUIDE}\n${JEV_AXIS_QUESTIONS[axis].instructions}`,
+		},
+	]),
+) as Record<JevAxis, JevQuestion>;
 
 /**
  * 予備のJev(Anthropic)のsystem文(設計書§5.2)。7軸の確率の数値だけを返させ、
@@ -213,11 +234,13 @@ export const JEV_ANTHROPIC_SYSTEM_PROMPT = `あなたは、2人の利用者が�
 次の${JEV_AXES.length}つの問いそれぞれについて、「はい」である確率を0から1の数値で答えます。
 出力はJSONスキーマに従うJSONだけを返します。理由・説明・前置きは書きません。
 
+${JEV_READING_GUIDE}
+
 ${JEV_AXES.map(
 	(axis) =>
-		`- ${axis}: ${JEV_QUESTIONS[axis].instructions}
-  はい(1に近い): ${JEV_QUESTIONS[axis].criteria.true}
-  いいえ(0に近い): ${JEV_QUESTIONS[axis].criteria.false}`,
+		`- ${axis}: ${JEV_AXIS_QUESTIONS[axis].instructions}
+  はい(1に近い): ${JEV_AXIS_QUESTIONS[axis].criteria.true}
+  いいえ(0に近い): ${JEV_AXIS_QUESTIONS[axis].criteria.false}`,
 ).join("\n")}`;
 
 /**
