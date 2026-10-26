@@ -4,6 +4,7 @@
  */
 
 import { Link } from "react-router";
+import { useDesktop } from "../desktop/context";
 import { useMeQuery } from "../me/queries";
 import { useUnreadCount } from "../notices/queries";
 import { PATHS } from "../routes/paths";
@@ -12,6 +13,8 @@ import { Avatar } from "./latch/art";
 export function TopbarActions() {
 	const unread = useUnreadCount();
 	const me = useMeQuery();
+	// PCでは左のナビが同じ役目を持つ(LAT-14)
+	if (useDesktop().nav) return null;
 	return (
 		<>
 			<Link

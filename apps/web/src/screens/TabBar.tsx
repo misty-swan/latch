@@ -1,9 +1,12 @@
 /** 下部タブ(預けている・置く・つながり)。HomeとConnectionsで共有する */
 
 import { Link } from "react-router";
+import { useDesktop } from "../desktop/context";
 import { PATHS } from "../routes/paths";
 
 export function TabBar({ current }: { current: "home" | "connections" }) {
+	// PCでは左のナビが同じ役目を持つ(LAT-14)
+	if (useDesktop().nav) return null;
 	return (
 		<nav className="tabbar" aria-label="メイン">
 			<Link

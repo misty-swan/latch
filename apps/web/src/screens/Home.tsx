@@ -14,6 +14,7 @@ import type { IntentDTO, IntentStatus, LatchDTO } from "@latch/shared";
 import { useIsRestoring } from "@tanstack/react-query";
 import type { CSSProperties } from "react";
 import { Link } from "react-router";
+import { useDesktop } from "../desktop/context";
 import { INTENT_STATUS_LABELS, useIntentsQuery } from "../intents/queries";
 import { formatWhen } from "../latches/format";
 import { useProposalsQuery } from "../latches/queries";
@@ -258,6 +259,8 @@ function IntentCard({
 /** 提案の到着カード(prototype arrivalBlock)。yes済みは相手の回答待ちで押した状態 */
 function ArrivalCard({ latch, now }: { latch: LatchDTO; now: Date }) {
 	const pressed = latch.my_response === "yes";
+	// PCで右の提案の部屋に出している提案は、矢印の代わりにそのことを示す(Desktop.dc.html)
+	const inRoom = useDesktop().roomLatchId === latch.id;
 	return (
 		<Link
 			className={`arrival${pressed ? " is-pressed" : ""} rise`}
@@ -278,9 +281,13 @@ function ArrivalCard({ latch, now }: { latch: LatchDTO; now: Date }) {
 					)}
 				</span>
 			</span>
-			<svg className="ic ic--s" viewBox="0 0 24 24" aria-hidden="true">
-				<path d="M9.5 6l6 6-6 6" />
-			</svg>
+			{inRoom ? (
+				<span className="t-label arrival__aside">右に表示中</span>
+			) : (
+				<svg className="ic ic--s" viewBox="0 0 24 24" aria-hidden="true">
+					<path d="M9.5 6l6 6-6 6" />
+				</svg>
+			)}
 		</Link>
 	);
 }
