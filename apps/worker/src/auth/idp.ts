@@ -27,13 +27,17 @@ export const TEST_IDP_ISSUER = "urn:latch:test-idp";
 /** テスト鍵モードのaudience(docs/04 §4: テスト専用の固定値) */
 export const TEST_IDP_AUDIENCE = "latch-test";
 
-/** googleの本番JWKSとissuer(docs/04 §4) */
+/** googleの本番JWKSとissuer(docs/04 §4)。Googleはissに`https://accounts.google.com`と
+ * `accounts.google.com`のどちらも使うため両方を受け付ける */
 const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
-const GOOGLE_ISSUER = "accounts.google.com";
+export const GOOGLE_ISSUERS = [
+	"https://accounts.google.com",
+	"accounts.google.com",
+];
 
 /** appleの本番JWKSとissuer(docs/04 §4) */
 const APPLE_JWKS_URL = "https://appleid.apple.com/auth/keys";
-const APPLE_ISSUER = "https://appleid.apple.com";
+export const APPLE_ISSUER = "https://appleid.apple.com";
 
 /** IdPトークン検証の失敗(署名不一致・iss/aud/exp不一致・設定欠落等すべてを含む) */
 export class IdpTokenError extends Error {
@@ -67,17 +71,17 @@ const remoteJwksCache = new Map<
 const prodConfig = (
 	env: Env,
 	provider: AuthProvider,
-): { jwksUrl: string; issuer: string; audience: string | undefined } => {
+): { jwksUrl: string; issuer: string[]; audience: string | undefined } => {
 	if (provider === "google") {
 		return {
 			jwksUrl: GOOGLE_JWKS_URL,
-			issuer: GOOGLE_ISSUER,
+			issuer: GOOGLE_ISSUERS,
 			audience: env.GOOGLE_CLIENT_ID,
 		};
 	}
 	return {
 		jwksUrl: APPLE_JWKS_URL,
-		issuer: APPLE_ISSUER,
+		issuer: [APPLE_ISSUER],
 		audience: env.APPLE_CLIENT_ID,
 	};
 };
@@ -85,7 +89,7 @@ const prodConfig = (
 /** jwtVerifyの共通処理(署名・iss/aud・RS256をjoseが検証。sub・expは必須・docs/04 §4) */
 const verifyWith = async (
 	getKey: GetKeyFunction<JWTHeaderParameters, FlattenedJWSInput>,
-	expected: { issuer: string; audience: string },
+	expected: { issuer: string | string[]; audience: string },
 	provider: AuthProvider,
 	token: string,
 ): Promise<VerifiedIdp> => {
