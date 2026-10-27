@@ -111,7 +111,7 @@
 	],
 
 	// 1ユーザーあたり60req/分(Workers Rate Limiting・key=利用者・docs/04 §5)。
-	// namespace_idはアカウント内で環境ごとに別の値にする(stagingは1002)
+	// namespace_idはアカウント内で環境ごとに別の値にする(stagingは1002・productionは1003)
 	"ratelimits": [
 		{
 			"name": "API_RATE_LIMITER",
@@ -259,6 +259,117 @@
 				"LATCH_INLINE_PIPELINE": "on",
 				// 負荷試験の利用者(idp_subjectがload-で始まる)だけレート制限を外す(docs/10 §5)
 				"LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX": "load-"
+			}
+		},
+
+		// prod環境(F10・docs/04 §6・docs/11 §2・手順はdocs/runbooks/prod.md)。区画名は
+		// 起動ガード(src/env.tsのassertEnvSafety)が判定するLATCH_ENV=productionに合わせる
+		// (Worker名はlatch-worker-production)。staging区画と同じくバインディングとvarsを
+		// 全部書き直す(書き漏れはtests/wrangler-envs.test.tsが検出する)。資源名は
+		// -production付きの新規名。D1とKVのIDは資源を作るまで仮の値(全部0)で、
+		// scripts/provision-prod.mjs --write で実IDへ置き換える(IDは秘密ではない)
+		"production": {
+			// 独自ドメイン(LAT-121)が決まるまではworkers.devも使わない(公開のURLを持たない)。
+			// ドメインが決まったらroutesを足す(docs/runbooks/prod.md 7章):
+			//   "routes": [{ "pattern": "<ドメイン>", "custom_domain": true }],
+			"workers_dev": false,
+			"preview_urls": false,
+			"triggers": {
+				"crons": ["* * * * *"]
+			},
+			"observability": {
+				"enabled": true
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "latch-db-production",
+					// 仮の値(provision-prod.mjs --write が実IDを書き込む)
+					"database_id": "00000000-0000-0000-0000-000000000000",
+					"migrations_dir": "migrations"
+				}
+			],
+			"kv_namespaces": [
+				{
+					"binding": "REVOCATION_KV",
+					// 仮の値(provision-prod.mjs --write が実IDを書き込む)
+					"id": "00000000000000000000000000000000"
+				},
+				{
+					"binding": "PIPELINE_KV",
+					// 仮の値(provision-prod.mjs --write が実IDを書き込む)
+					"id": "00000000000000000000000000000000"
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "ICONS",
+					"bucket_name": "latch-icons-production"
+				}
+			],
+			"vectorize": [
+				{
+					"binding": "VECTORS",
+					"index_name": "latch-intents-production"
+				}
+			],
+			"ai": {
+				"binding": "AI"
+			},
+			"queues": {
+				"producers": [
+					{
+						"binding": "MATCH_QUEUE",
+						"queue": "match-events-production"
+					}
+				],
+				"consumers": [
+					{
+						"queue": "match-events-production",
+						"max_retries": 3,
+						"max_batch_timeout": 1,
+						"max_batch_size": 1,
+						"dead_letter_queue": "match-events-dlq-production"
+					},
+					{
+						"queue": "match-events-dlq-production",
+						"max_retries": 1
+					}
+				]
+			},
+			"analytics_engine_datasets": [
+				{
+					"binding": "PIPELINE_AX",
+					"dataset": "latch_metrics_production"
+				}
+			],
+			"ratelimits": [
+				{
+					"name": "API_RATE_LIMITER",
+					"namespace_id": "1003",
+					"simple": { "limit": 60, "period": 60 }
+				}
+			],
+			"durable_objects": {
+				"bindings": [
+					{
+						"name": "CHAT_DO",
+						"class_name": "ChatRoomDO"
+					}
+				]
+			},
+			// レート制限の緩和(LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX)は置かない(起動ガードが拒む・docs/10 §5)
+			"vars": {
+				"LATCH_ENV": "production",
+				// 暫定(LAT-91でオーナーが決める)。Parser/JevとEmbeddingはstubのまま置き、
+				// realにする時期と手順はLAT-91で決める。公開の前提はreal固定(docs/11 §1)。
+				// realにするとANTHROPIC_API_KEY・TYPESAFE_API_KEYが無い限り起動を拒む
+				"LATCH_EMBEDDING_MODE": "stub",
+				"LATCH_LLM_MODE": "stub",
+				// prodはreal必須(起動ガードENV_UNSAFE_PUSH・本番VAPID鍵はLAT-87)
+				"LATCH_PUSH_MODE": "real",
+				// 応答の後の第1段・第2段(#30・設計 §3.5)
+				"LATCH_INLINE_PIPELINE": "on"
 			}
 		}
 	}

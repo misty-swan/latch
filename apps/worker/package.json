@@ -11,7 +11,11 @@
 		"test:staging-e2e": "node scripts/staging-e2e.mjs",
 		"provision:staging": "node scripts/provision-staging.mjs",
 		"secrets:staging": "node scripts/put-staging-secrets.mjs",
-		"deploy:staging": "node scripts/deploy-staging.mjs"
+		"deploy:staging": "node scripts/deploy-staging.mjs",
+		"provision:prod": "node scripts/provision-prod.mjs",
+		"secrets:prod": "node scripts/put-prod-secrets.mjs",
+		"check:prod-secrets": "node scripts/check-prod-secrets.mjs",
+		"deploy:prod": "node scripts/deploy-prod.mjs"
 	},
 	"dependencies": {
 		"@latch/shared": "workspace:*",

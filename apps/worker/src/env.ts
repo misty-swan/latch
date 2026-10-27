@@ -114,8 +114,11 @@ export const jwtSecret = (env: Env): string => {
 	return env.JWT_SECRET ?? DEV_FALLBACK_JWT_SECRET;
 };
 
-/** VAPIDのsubが仮の送信者か(mailto:で、@の後が.invalidで終わるかexample.com/org/net。大文字小文字を区別しない) */
-const isPlaceholderVapidSubject = (subject: string): boolean => {
+/**
+ * VAPIDのsubが仮の送信者か(mailto:で、@の後が.invalidで終わるかexample.com/org/net。大文字小文字を区別しない)。
+ * prodのシークレット登録(scripts/put-prod-secrets.mjs)も登録前の確かめに使う
+ */
+export const isPlaceholderVapidSubject = (subject: string): boolean => {
 	const trimmed = subject.trim();
 	if (!trimmed.toLowerCase().startsWith("mailto:")) return false;
 	// ?以降(mailtoのヘッダ)と末尾のドット(FQDN表記)を除いてドメインを取り出す

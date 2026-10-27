@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # prodへのデプロイ(deploy-prod)を手で起動する(docs/11 §2)。ci・web-e2eも同じ版で走る
+  workflow_dispatch:
 
 jobs:
   ci:
@@ -88,3 +90,50 @@ jobs:
           LATCH_STAGING_URL: ${{ secrets.LATCH_STAGING_URL }}
           LATCH_ACCESS_CLIENT_ID: ${{ secrets.LATCH_ACCESS_CLIENT_ID }}
           LATCH_ACCESS_CLIENT_SECRET: ${{ secrets.LATCH_ACCESS_CLIENT_SECRET }}
+
+  # prodへのデプロイ(F10・docs/11 §2・docs/04 §6・docs/runbooks/prod.md 4〜5章)。Actionsの画面から
+  # mainを選んで手で起動し(workflow_dispatch)、ci・web-e2eの成功後、GitHubの環境productionの
+  # 承認者が承認してから動く。シークレットは環境productionにだけ置き、stagingのトークンとは
+  # 名前を分ける(CLOUDFLARE_API_TOKEN_PROD。環境のシークレットが無いときにリポジトリの
+  # stagingのトークンへ倒れないため)。使うstepだけに渡すのはdeploy-stagingと同じ。
+  # webはVITE_DEV_AUTHを付けずにビルドする(テスト用サインインの画面を出さない)。
+  # 載せる前に、varsとシークレットの名前を点検し、テスト鍵の残存や必須の欠落があれば止まる
+  deploy-prod:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: [ci, web-e2e]
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    concurrency:
+      group: prod-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22.22.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node apps/worker/scripts/run-redacted.mjs node apps/worker/scripts/check-prod-secrets.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_PROD }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - run: pnpm --filter web build
+      - run: node apps/worker/scripts/run-redacted.mjs pnpm --filter worker exec wrangler d1 migrations apply DB --env production --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_PROD }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - run: node apps/worker/scripts/run-redacted.mjs pnpm --filter worker exec wrangler deploy --env production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_PROD }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # 独自ドメイン(LAT-121)が決まるまでは公開のURLが無いため、LATCH_PROD_URLが未登録なら飛ばす
+      - run: |
+          if [ -z "$LATCH_PROD_URL" ]; then
+            echo "疎通確認は飛ばしました(LATCH_PROD_URLが未登録)"
+          else
+            node apps/worker/scripts/prod-smoke.mjs
+          fi
+        env:
+          LATCH_PROD_URL: ${{ secrets.LATCH_PROD_URL }}
