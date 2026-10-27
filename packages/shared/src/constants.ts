@@ -58,6 +58,7 @@ export const ERROR_CODES = [
 	"EMBEDDING_PENDING",
 	"INTERNAL",
 	"UPGRADE_REQUIRED",
+	"TEMPORARILY_UNAVAILABLE",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
@@ -77,6 +78,7 @@ export const ERROR_HTTP_STATUS: Record<ErrorCode, number> = {
 	EMBEDDING_PENDING: 409,
 	INTERNAL: 500,
 	UPGRADE_REQUIRED: 426,
+	TEMPORARILY_UNAVAILABLE: 503,
 };
 
 /** マッチングイベント種別(Queue/DO間で発行される) */
@@ -269,6 +271,10 @@ export const PIPELINE = {
 	// 実際の待ちは各値の0.5〜1.5倍のばらつきを掛ける(同時に失敗した要求が同じ時刻に
 	// やり直してまたぶつからないように・LAT-100)。最大の合計10.5秒は応答の後の実行(30秒)に収まる
 	STAGE1_UPSERT_RETRY_DELAYS_MS: [1_000, 2_000, 4_000],
+	// 意思の削除と退会のベクトルの削除を、要求の中でやり直す待ち(ミリ秒・LAT-126)。失敗するたびに
+	// 順に待って最大2回やり直す。Vectorizeの書き込みの頻度の上限(VECTOR_DELETE_40041)の一瞬の
+	// 重なりを吸収するための短い待ちで、利用者が応答を待つ時間(最大の合計1.5秒)を延ばしすぎない
+	VECTOR_DELETE_RETRY_DELAYS_MS: [500, 1_000],
 	// 意思を有効にした要求(作成・下書きの有効化)のintent_createdのメッセージを遅らせる秒数。
 	// 第1段・第2段は応答の後(waitUntil・上限30秒)に同じ要求の続きで行い、キューのメッセージは
 	// それと重ならないよう遅らせて、済んでいなければやり直す役にする(#30・設計 §3.5)

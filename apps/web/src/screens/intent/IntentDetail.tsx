@@ -281,11 +281,19 @@ function Detail({ intent, now }: { intent: IntentDTO; now: Date }) {
 	const notify =
 		pendingNotify ?? intent.notification_level === "proposals_only";
 
-	/** 失敗の扱い: 状態の食い違いは取り直し・通信失敗は固定の案内・その他は一般の一文 */
+	/**
+	 * 失敗の扱い: 状態の食い違いは取り直し・通信失敗は固定の案内・一時的に受け付けられない
+	 * (503・取り下げのベクトルの削除が上限に当たった・LAT-126)はサーバーの「少し待って」の文言・
+	 * その他は一般の一文
+	 */
 	const fail = (error: unknown) => {
 		if (isInvalidStatus(error)) {
 			void client.invalidateQueries({ queryKey: intentQueryKey(id) });
 			setNotice("状態が変わっていました。最新の内容を読み直しました。");
+			return;
+		}
+		if (error instanceof ApiError && error.code === "TEMPORARILY_UNAVAILABLE") {
+			setNotice(error.message);
 			return;
 		}
 		setNotice(

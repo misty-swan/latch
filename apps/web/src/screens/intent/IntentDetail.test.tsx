@@ -76,6 +76,7 @@ let intent404: boolean;
 let connections: LatchDTO[];
 let pauseResponse: () => Response | Promise<Response>;
 let patchResponse: () => Response | Promise<Response>;
+let deleteResponse: () => Response | Promise<Response>;
 const fetchMock = vi.fn(
 	async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input);
@@ -90,8 +91,7 @@ const fetchMock = vi.fn(
 			return json(intent);
 		}
 		if (url === path && method === "PATCH") return patchResponse();
-		if (url === path && method === "DELETE")
-			return new Response(null, { status: 204 });
+		if (url === path && method === "DELETE") return deleteResponse();
 		if (url === path)
 			return intent404
 				? json({ error: { code: "NOT_FOUND", message: "x" } }, 404)
@@ -138,6 +138,7 @@ beforeEach(() => {
 		intent = { ...intent, notification_level: "muted" };
 		return json(intent);
 	};
+	deleteResponse = () => new Response(null, { status: 204 });
 	sessionStorage.clear();
 });
 afterEach(() => {
@@ -361,6 +362,61 @@ describe("IntentDetail 操作", () => {
 		await waitFor(() => expect(router.state.location.pathname).toBe("/home"));
 		expect(callsTo("DELETE", `/v1/intents/${ID}`)).toHaveLength(1);
 		expect(await screen.findByText("取り下げました。")).toBeTruthy();
+	});
+
+	/** 確認のシートを経て取り下げを1回送る */
+	const confirmDelete = async () => {
+		fireEvent.click(await screen.findByRole("button", { name: "取り下げる" }));
+		const dialog = screen.getByRole("dialog");
+		const confirm = Array.from(dialog.querySelectorAll("button")).find(
+			(b) => b.textContent === "取り下げる",
+		) as HTMLButtonElement;
+		fireEvent.click(confirm);
+	};
+
+	it("取り下げが503(一時的に受け付けられない)ならサーバーの「少し待って」の文言を出して留まる(LAT-126)", async () => {
+		deleteResponse = () =>
+			json(
+				{
+					error: {
+						code: "TEMPORARILY_UNAVAILABLE",
+						message:
+							"削除できませんでした。少し待ってからもう一度お試しください",
+						details: {},
+					},
+				},
+				503,
+			);
+		const router = open();
+		await confirmDelete();
+		expect(
+			await screen.findByText(
+				"削除できませんでした。少し待ってからもう一度お試しください",
+			),
+		).toBeTruthy();
+		expect(router.state.location.pathname).toBe(`/intents/${ID}`);
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
+	it("取り下げが500なら一般の一文を出す(503の文言と分ける)", async () => {
+		deleteResponse = () =>
+			json(
+				{
+					error: {
+						code: "INTERNAL",
+						message: "削除に失敗しました。時間を置いて再度お試しください",
+						details: {},
+					},
+				},
+				500,
+			);
+		open();
+		await confirmDelete();
+		expect(
+			await screen.findByText(
+				"うまくいきませんでした。もう一度お試しください。",
+			),
+		).toBeTruthy();
 	});
 
 	it("確認のシートはやめるで閉じる", async () => {

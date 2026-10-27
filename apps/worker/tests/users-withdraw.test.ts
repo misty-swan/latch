@@ -603,17 +603,23 @@ describe("退会で残すもの・相手の側の見え方(docs/05 §2.5・01 §
 });
 
 describe("外部の削除の失敗(docs/05 §2.5の実行順序)", () => {
-	it("ベクトルの削除に失敗したら500で中断し、D1は変えない(再試行で完了する)", async () => {
+	it("ベクトルの削除がやり直しの後も失敗したら500で中断し、D1は変えない(再試行で完了する)", async () => {
 		const a = await registerUser("甲");
 		const b = await registerUser("乙");
 		const intentId = await insertIntent(a.id);
 		const proposed = await seedLatch([a, b], "proposed");
-		vi.spyOn(memoryVectorStore(), "deleteByIds").mockRejectedValueOnce(
-			new Error("vectorize down"),
-		);
+		const deleteSpy = vi
+			.spyOn(memoryVectorStore(), "deleteByIds")
+			.mockRejectedValue(new Error("vectorize down"));
 
 		const res = await withdraw(a);
 		expect(res.status).toBe(500);
+		expect(((await res.json()) as { error: { code: string } }).error.code).toBe(
+			"INTERNAL",
+		);
+		// 最初の1回と、0.5秒・1秒の待ちのやり直し2回(試験では待ち0・LAT-126)
+		expect(deleteSpy).toHaveBeenCalledTimes(3);
+		deleteSpy.mockRestore();
 		expect((await userRow(a.id))?.status).toBe("active");
 		expect(await statusOf(proposed)).toBe("proposed");
 		const [intent] = await db
@@ -622,6 +628,46 @@ describe("外部の削除の失敗(docs/05 §2.5の実行順序)", () => {
 			.where(eq(intents.id, intentId));
 		expect(intent).toBeDefined();
 
+		expect((await withdraw(a)).status).toBe(204);
+		expect((await userRow(a.id))?.status).toBe("deleted");
+	});
+
+	it("ベクトルの削除の一時的な失敗は短いやり直しで吸収し、退会を続ける(LAT-126)", async () => {
+		const a = await registerUser("甲");
+		await insertIntent(a.id);
+		const deleteSpy = vi
+			.spyOn(memoryVectorStore(), "deleteByIds")
+			.mockRejectedValueOnce(
+				new Error("VECTOR_DELETE_ERROR (code = 40041): Too Many Requests"),
+			);
+
+		expect((await withdraw(a)).status).toBe(204);
+		expect(deleteSpy).toHaveBeenCalledTimes(2);
+		expect((await userRow(a.id))?.status).toBe("deleted");
+	});
+
+	it("書き込みの頻度の上限(VECTOR_DELETE_40041)が続けば503と「少し待って」の文言で中断する(LAT-126)", async () => {
+		const a = await registerUser("甲");
+		await insertIntent(a.id);
+		const deleteSpy = vi
+			.spyOn(memoryVectorStore(), "deleteByIds")
+			.mockRejectedValue(
+				new Error("VECTOR_DELETE_ERROR (code = 40041): Too Many Requests"),
+			);
+
+		const res = await withdraw(a);
+		expect(res.status).toBe(503);
+		const body = (await res.json()) as {
+			error: { code: string; message: string };
+		};
+		expect(body.error.code).toBe("TEMPORARILY_UNAVAILABLE");
+		expect(body.error.message).toBe(
+			"退会できませんでした。少し待ってからもう一度お試しください",
+		);
+		expect((await userRow(a.id))?.status).toBe("active");
+
+		// 上限が解けた後の再試行で完了する
+		deleteSpy.mockRestore();
 		expect((await withdraw(a)).status).toBe(204);
 		expect((await userRow(a.id))?.status).toBe("deleted");
 	});

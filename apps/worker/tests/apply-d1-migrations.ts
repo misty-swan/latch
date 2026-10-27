@@ -18,3 +18,10 @@ const { setStage1UpsertRetryDelaysForTest } = await import(
 	"../src/pipeline/consumer"
 );
 setStage1UpsertRetryDelaysForTest([0, 0]);
+
+// 意思の削除と退会のベクトルの削除のやり直しの待ち(本番は0.5秒・1秒)も試験では待たない(LAT-126)。
+// 待ちの長さの試験は src/vectorstore/delete-retry.test.ts で偽物のsleepを渡して行う
+const { setVectorDeleteRetryDelaysForTest } = await import(
+	"../src/vectorstore/delete-retry"
+);
+setVectorDeleteRetryDelaysForTest([0, 0]);

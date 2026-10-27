@@ -9,7 +9,7 @@
  * - PATCH /v1/users/me: display_name・bioの部分更新(1フィールド以上必須)
  * - DELETE /v1/users/me: 退会(docs/05 §2.5・§3.3)。本文 {provider, idp_token} でIdPの再認証を
  *   受け、本人のアカウントのトークンで発行から10分以内のときだけ削除処理(users/withdraw.ts)を行う。
- *   成功は204。再認証の失敗は一律403 FORBIDDEN(401はクライアントがセッション切れとして扱うため使わない)・退会済みは404・外部の削除の失敗は500(D1は未変更・再試行できる)
+ *   成功は204。再認証の失敗は一律403 FORBIDDEN(401はクライアントがセッション切れとして扱うため使わない)・退会済みは404・外部の削除の失敗は500(D1は未変更・再試行できる。ベクトルの削除が書き込みの頻度の上限に当たったときは503・LAT-126)
  * エラー応答はdocs/05 §3.1の共通形状(errorJson)のみ。
  * 時刻の規律(docs/04 §4): ルートは合成の起点(composition root)のためsystemClockをimportして使う
  */
@@ -35,7 +35,7 @@ import {
 } from "../auth/middleware";
 import { createRefreshFamily } from "../auth/refresh";
 import { notifyClosed } from "../chat/notify";
-import { systemClock } from "../clock/clock";
+import { systemClock, systemSleep } from "../clock/clock";
 import { users } from "../db/schema";
 import { type Env, jwtSecret } from "../env";
 import { errorJson } from "../http/errors";
@@ -47,6 +47,7 @@ import { errorCodeOf } from "../pipeline/errors";
 import { flushPush } from "../push/dispatch";
 import { pushSenderOf } from "../push/sender";
 import { WithdrawAbortedError, withdrawUser } from "../users/withdraw";
+import { isVectorDeleteRateLimited } from "../vectorstore/delete-retry";
 
 /** 構造化ロガー(docs/08 §6: 許可フィールドのみ)。user_id・表示名は決して出力しない */
 const logger = createLogger();
@@ -332,17 +333,25 @@ userRoutes.delete("/me", requireRegistered, async (c) => {
 	const now = systemClock.now();
 	let result: Awaited<ReturnType<typeof withdrawUser>>;
 	try {
-		result = await withdrawUser(c.env, db, user, now);
+		result = await withdrawUser(c.env, db, user, now, systemSleep);
 	} catch (error) {
 		if (error instanceof WithdrawAbortedError) {
 			logger.error("users.withdraw.aborted", {
 				layer: error.layer,
 				error_code: errorCodeOf(error.cause),
 			});
-			const r = errorJson(
-				"INTERNAL",
-				"退会できませんでした。時間を置いて再度お試しください",
-			);
+			// ベクトルの削除が書き込みの頻度の上限(VECTOR_DELETE_40041)に当たったときは、
+			// 少し待てば通るため503と別の文言にする(LAT-126)
+			const r =
+				error.layer === "vector" && isVectorDeleteRateLimited(error.cause)
+					? errorJson(
+							"TEMPORARILY_UNAVAILABLE",
+							"退会できませんでした。少し待ってからもう一度お試しください",
+						)
+					: errorJson(
+							"INTERNAL",
+							"退会できませんでした。時間を置いて再度お試しください",
+						);
 			return c.json(r.body, r.status);
 		}
 		throw error;
