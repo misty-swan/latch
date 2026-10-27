@@ -172,7 +172,7 @@ LATCH_PROD_URL=<prodのURL> pnpm --filter worker check:prod-secrets
 
 ## 7. 独自ドメイン(LAT-121)
 
-独自ドメインが決まるまで、prodは公開のURLを持たない(`workers_dev`も`preview_urls`も`false`)。決まったら次を行う。
+独自ドメインが決まるまで、prodは公開のURLを持たない(`workers_dev`も`preview_urls`も`false`)。公開前のprodにはCloudflare Accessを置かない(2026-10-27オーナー決定・LAT-91)ため、ドメインをつないだ時点から、URLを知っていれば誰でも登録できる。**ドメインは公開の直前につなぐ**(資源の作成・シークレット・戻し方のリハーサルの準備を先に済ませ、2章〜6章の確認はドメインをつないだ後に続けて行う)。決まったら次を行う。
 
 1. ドメインをCloudflareのアカウントに追加する(DNSをCloudflareで管理する)
 2. `apps/worker/wrangler.jsonc`のproduction区画のコメントにある`routes`を有効にし、`<ドメイン>`を実際のドメインに書き換えてコミットする(`custom_domain: true`で、デプロイ時にDNSの記録と証明書が作られる)
@@ -233,3 +233,45 @@ pnpm --filter worker exec wrangler d1 time-travel restore DB --env production --
 (データベース全体をその時点へ戻す。それより後の書き込みはすべて失われる)
 
 - Vectorizeの索引はD1から作り直す(04 §7)。手順は戻し方のリハーサル(LAT-88)で決める
+
+## 9. Embeddingの作り直し(07 §4・LAT-116)
+
+Embeddingのモデル、または正規化テキストの作り方を変えたときに、activeな意思のベクトルを作り直す手順である。専用の道具は作らず、毎分Cronの埋め込みバックフィル(06 §2(e))に任せる(2026-10-27オーナー決定・LAT-116)。バックフィルは、activeで`embedded_at`がNULLかつ更新から5分たった意思を、1回最大500件、埋め込み→upsert→その場の評価の順に処理する。
+
+### 9.1 モデルを替えるとき
+
+モデルを替えるときは、**必ず新しいVectorizeの索引を作って差し替える**(次元と距離は作成後に変えられず、同じ次元でも新旧のベクトルが同じ索引に混ざると近さが意味を持たなくなるため)。
+
+1. 新しいモデルで精度ゲートを採り直す(07 §6・`pnpm eval:gate`・`pnpm eval:region`。本物のAIを呼ぶので課金がある)
+2. 新しい索引を作る
+
+   ```bash
+   pnpm --filter worker exec wrangler vectorize create <新しい索引の名前> --dimensions <新しい次元> --metric cosine
+   pnpm --filter worker exec wrangler vectorize create-metadata-index <新しい索引の名前> --propertyName form --type string
+   ```
+
+   (status・categoryも同じく作る。作り方は資源の作成のスクリプト(`apps/worker/scripts/lib/provision.mjs`)と同じ)
+3. `wrangler.jsonc`のproduction区画の索引の名前と、コードのモデル名を新しいものにしてコミットし、5章でデプロイする
+4. すぐに、activeな意思の埋め込みを消す(`updated_at`は変えない。古い行はすぐバックフィルに拾われる)
+
+   ```bash
+   pnpm --filter worker exec wrangler d1 execute DB --env production --remote --command "UPDATE intents SET embedded_at = NULL, embedding_model = NULL WHERE status = 'active'"
+   ```
+
+5. 毎分Cronが作り直して評価する。次が0になるまで待つ(ログの`cron.backfilled`・`cron.backfill.aborted`も見る)
+
+   ```bash
+   pnpm --filter worker exec wrangler d1 execute DB --env production --remote --command "SELECT COUNT(*) FROM intents WHERE status = 'active' AND embedded_at IS NULL"
+   ```
+
+6. 0になったら、古い索引を消す(`wrangler vectorize delete <古い索引の名前>`)
+
+- 3から5が終わるまでの間、まだ作り直していない意思は新しい索引に無いため、候補に出ない(数百件なら数分)
+- pausedの意思は触らない。再開(resume)のときに第1段が今のモデルで埋め込み直す
+- 費用: Embedding(Workers AI)は意思1万件でも数セント。Jevは同じversionの組の結果を使い回すため、呼ぶのは新しく見つかった組だけで、1日の上限と保留が効く
+
+### 9.2 正規化テキストだけを替えるとき
+
+モデルが同じなら索引はそのまま使う。9.1の4と5だけを行う。既にある組のJevの判定はやり直さない(同じversionの組の結果を使い回す・2026-10-27オーナー決定)。
+
+stagingで行うときは、`--env production`を`--env staging`に替える。

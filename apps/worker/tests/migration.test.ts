@@ -1,5 +1,7 @@
 import { env } from "cloudflare:test";
 import { expect, it } from "vitest";
+import rollback0000Sql from "../migrations_rollback/0000_rollback.sql?raw";
+import rollback0001Sql from "../migrations_rollback/0001_rollback.sql?raw";
 import rollback0002Sql from "../migrations_rollback/0002_rollback.sql?raw";
 import rollback0003Sql from "../migrations_rollback/0003_rollback.sql?raw";
 import rollback0004Sql from "../migrations_rollback/0004_rollback.sql?raw";
@@ -476,3 +478,28 @@ it("戻しマイグレーション0011の適用で3列と索引が消える(docs
 		"intents_status_jev_held_at_idx",
 	);
 });
+
+it.each([
+	["0000_initial_schema.sql", rollback0000Sql],
+	["0001_refresh_rotation.sql", rollback0001Sql],
+	["0002_delayed_reeval_at.sql", rollback0002Sql],
+	["0003_latch_proposal.sql", rollback0003Sql],
+	["0004_group_member_left_at.sql", rollback0004Sql],
+	["0005_chat_hidden_client_id.sql", rollback0005Sql],
+	["0006_report_target.sql", rollback0006Sql],
+	["0007_notification_push.sql", rollback0007Sql],
+	["0008_match_events_indexes.sql", rollback0008Sql],
+	["0009_recent_vectors.sql", rollback0009Sql],
+	["0010_calibration_records.sql", rollback0010Sql],
+	["0011_jev_held.sql", rollback0011Sql],
+])(
+	"戻しマイグレーションは当て済みの記録(d1_migrations)の自分の行%sだけを消す(docs/11 §3・LAT-88)",
+	(name, sql) => {
+		const deletes = toStatements(sql).filter((s) =>
+			s.startsWith("DELETE FROM `d1_migrations`"),
+		);
+		expect(deletes).toEqual([
+			`DELETE FROM \`d1_migrations\` WHERE \`name\` = '${name}'`,
+		]);
+	},
+);

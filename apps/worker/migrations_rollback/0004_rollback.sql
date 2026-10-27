@@ -6,3 +6,6 @@
 -- 注意: 離脱時刻の記録は失われる(離脱済みメンバーの行は残るため、戻す前にグループLATCHを止めること)。
 
 ALTER TABLE `latch_members` DROP COLUMN `left_at`;
+--> statement-breakpoint
+-- 当て済みの記録を消し、直した同じ番号を wrangler d1 migrations apply で当て直せるようにする(docs/11 §3・LAT-88)
+DELETE FROM `d1_migrations` WHERE `name` = '0004_group_member_left_at.sql';

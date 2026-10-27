@@ -12,3 +12,6 @@ DROP INDEX `messages_latch_id_user_id_client_id_uq`;
 ALTER TABLE `messages` DROP COLUMN `client_id`;
 --> statement-breakpoint
 ALTER TABLE `latch_members` DROP COLUMN `hidden_at`;
+--> statement-breakpoint
+-- 当て済みの記録を消し、直した同じ番号を wrangler d1 migrations apply で当て直せるようにする(docs/11 §3・LAT-88)
+DELETE FROM `d1_migrations` WHERE `name` = '0005_chat_hidden_client_id.sql';

@@ -11,3 +11,6 @@ DROP INDEX `reports_reporter_latch_id_reportee_target_status_idx`;
 ALTER TABLE `reports` DROP COLUMN `target`;
 --> statement-breakpoint
 ALTER TABLE `reports` DROP COLUMN `message_id`;
+--> statement-breakpoint
+-- 当て済みの記録を消し、直した同じ番号を wrangler d1 migrations apply で当て直せるようにする(docs/11 §3・LAT-88)
+DELETE FROM `d1_migrations` WHERE `name` = '0006_report_target.sql';

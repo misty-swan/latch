@@ -28,3 +28,6 @@ DROP TABLE IF EXISTS `refresh_families`;
 DROP TABLE IF EXISTS `usage_counters`;
 DROP TABLE IF EXISTS `geofeatures`;
 DROP TABLE IF EXISTS `users`;
+--> statement-breakpoint
+-- 当て済みの記録を消し、直した同じ番号を wrangler d1 migrations apply で当て直せるようにする(docs/11 §3・LAT-88)
+DELETE FROM `d1_migrations` WHERE `name` = '0000_initial_schema.sql';

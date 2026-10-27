@@ -8,3 +8,6 @@
 DROP INDEX `match_events_source_intent_id_idx`;
 --> statement-breakpoint
 DROP INDEX `match_events_status_created_at_idx`;
+--> statement-breakpoint
+-- 当て済みの記録を消し、直した同じ番号を wrangler d1 migrations apply で当て直せるようにする(docs/11 §3・LAT-88)
+DELETE FROM `d1_migrations` WHERE `name` = '0008_match_events_indexes.sql';

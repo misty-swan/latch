@@ -5,3 +5,6 @@
 -- intentsから遅延再評価の実行済みマーカー列を撤去する(docs/06 §2(h))。
 
 ALTER TABLE `intents` DROP COLUMN `delayed_reeval_at`;
+--> statement-breakpoint
+-- 当て済みの記録を消し、直した同じ番号を wrangler d1 migrations apply で当て直せるようにする(docs/11 §3・LAT-88)
+DELETE FROM `d1_migrations` WHERE `name` = '0002_delayed_reeval_at.sql';

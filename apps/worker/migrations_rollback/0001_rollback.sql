@@ -7,3 +7,6 @@
 
 DROP INDEX IF EXISTS `refresh_families_current_hash_uniq`;
 ALTER TABLE `refresh_families` DROP COLUMN `previous_hash`;
+--> statement-breakpoint
+-- 当て済みの記録を消し、直した同じ番号を wrangler d1 migrations apply で当て直せるようにする(docs/11 §3・LAT-88)
+DELETE FROM `d1_migrations` WHERE `name` = '0001_refresh_rotation.sql';

@@ -1,5 +1,7 @@
 このディレクトリは、D1スキーマを元に戻すためのマイグレーション(戻すマイグレーション)を置く場所です。docs/11 §3の「マイグレーションは元に戻すマイグレーションを必ず対で作成する」規律の運用手順にあたり、`migrations/`(wranglerが自動適用する正規ディレクトリ)とは別のディレクトリに置くことで、wranglerの自動適用対象外とします。適用は `wrangler d1 execute latch-db --file=migrations_rollback/0000_rollback.sql --local`(リモート環境では `--remote`)のように環境指定付きで明示実行してください。初回マイグレーションは `migrations/0000_initial_schema.sql`(drizzle-kit生成・2026-10-17作成)で、本ディレクトリの `0000_rollback.sql`(同日作成)はその対です。以降のマイグレーション `NNNN_xxx.sql` を追加する際は、対となる `migrations_rollback/NNNN_rollback.sql` を同じタイミングで作成してください。
 
+戻すマイグレーションは、形を戻した後の末尾で、wranglerの適用記録の自分の番号の行を消します(`DELETE FROM \`d1_migrations\` WHERE \`name\` = 'NNNN_xxx.sql';`・2026-10-27決定・docs/11 §3)。これで、戻した番号は次の `wrangler d1 migrations apply` で当て直されます。新しく作るときもこの1文を末尾に置いてください(`tests/migration.test.ts` が全ファイルで確かめます)。中身に誤りがあって当て直さないときは、戻した直後に記録を書き戻し(`INSERT INTO d1_migrations (name) VALUES ('NNNN_xxx.sql')`)、直したものを新しい番号で作ります(手順は `docs/runbooks/rollback-rehearsal.md` 4.2・4.4)。
+
 
 0006(通報のtarget・message_id列と検索索引)の対は `0006_rollback.sql`(2026-10-21作成)です。0006はtargetをDEFAULTなしのNOT NULLで追加するため、staging・prodへ適用する前に `SELECT COUNT(*) FROM reports` が0であることを確かめてください(F7a以前は書き込みAPIが無く0のはずです。行があればALTERは止まり、データは壊れません)。
 

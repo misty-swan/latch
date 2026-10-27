@@ -22,3 +22,6 @@ CREATE TABLE `__old_latch_status_events` (
 INSERT INTO `__old_latch_status_events`("id", "latch_id", "from_status", "to_status", "created_at") SELECT "id", "latch_id", coalesce("from_status", ''), "to_status", "created_at" FROM `latch_status_events`;
 DROP TABLE `latch_status_events`;
 ALTER TABLE `__old_latch_status_events` RENAME TO `latch_status_events`;
+--> statement-breakpoint
+-- 当て済みの記録を消し、直した同じ番号を wrangler d1 migrations apply で当て直せるようにする(docs/11 §3・LAT-88)
+DELETE FROM `d1_migrations` WHERE `name` = '0003_latch_proposal.sql';

@@ -15,3 +15,6 @@ ALTER TABLE `notifications` DROP COLUMN `intent_id`;
 ALTER TABLE `notifications` DROP COLUMN `push_state`;
 --> statement-breakpoint
 ALTER TABLE `notifications` DROP COLUMN `push_attempted_at`;
+--> statement-breakpoint
+-- 当て済みの記録を消し、直した同じ番号を wrangler d1 migrations apply で当て直せるようにする(docs/11 §3・LAT-88)
+DELETE FROM `d1_migrations` WHERE `name` = '0007_notification_push.sql';

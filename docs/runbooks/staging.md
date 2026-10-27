@@ -237,7 +237,7 @@ pnpm --filter worker exec wrangler d1 execute DB --env staging --remote --file m
 
 (0008番で加えた変更を取り消す。番号によってはデータが消える場合があるため、必要なときだけ行う。0008は索引だけでデータは消えない)
 
-- 取り消しのSQLは、wranglerの適用記録(D1の`d1_migrations`表の行)を消さない。記録が残ったままだと、次のデプロイでその番号は適用済みとして飛ばされる。取り消した番号をもう一度適用し直す手順は、本番前の戻し方のリハーサル(F10・11 §3)で決める
+- 取り消しのSQLは、末尾でwranglerの適用記録(D1の`d1_migrations`表の、その番号の行)も消す(2026-10-27決定・11 §3)。次の`wrangler d1 migrations apply`(デプロイ)で、その番号は古い順に適用し直される。中身に誤りがあって適用し直さないときは、取り消しの直後に記録を書き戻し、直したものを新しい番号で作る(手順は`docs/runbooks/rollback-rehearsal.md` 4.2・4.4)
 - Workerはデータベースの形に合わせて動くため、形を戻したら6.1でWorkerも対応する版へ戻す
 
 ## 7. 負荷試験の実行
@@ -471,3 +471,7 @@ LATCH_E2E_PORT=<空きポート> node apps/worker/scripts/staging-e2e.mjs --loca
 
 - wrangler devの出力は`apps/worker/.wrangler/staging-e2e/wrangler-dev.log`に残る
 - `--local`を付けずに`LATCH_LOAD_BASE_URL=http://localhost:<ポート>`で動かしているwrangler devへ向けても流せる(宛先の切り替えだけでstagingへ向けられることの確かめ)
+
+## 9. Embeddingの作り直し(07 §4・LAT-116)
+
+Embeddingのモデルや正規化テキストの作り方を変えたときの作り直しは、prodと同じ手順で行う(`docs/runbooks/prod.md` 9章。`--env production`を`--env staging`に替える)。

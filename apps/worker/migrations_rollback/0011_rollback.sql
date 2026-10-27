@@ -13,3 +13,6 @@ ALTER TABLE `intents` DROP COLUMN `jev_held_count`;
 ALTER TABLE `intents` DROP COLUMN `jev_held_reason`;
 --> statement-breakpoint
 ALTER TABLE `intents` DROP COLUMN `jev_held_at`;
+--> statement-breakpoint
+-- 当て済みの記録を消し、直した同じ番号を wrangler d1 migrations apply で当て直せるようにする(docs/11 §3・LAT-88)
+DELETE FROM `d1_migrations` WHERE `name` = '0011_jev_held.sql';
