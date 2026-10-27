@@ -1,5 +1,6 @@
 /**
- * wrangler.jsoncのトップレベルとenv.stagingの整合の確認(F8b設計 §1.1・docs/04 §6)。
+ * wrangler.jsoncのトップレベルとenv.staging・env.productionの整合の確認(F8b設計 §1.1・
+ * docs/04 §6・prodはF10)。
  * wranglerの環境ではバインディングとvarsが区画へ引き継がれないため、書き漏れを
  * 単体試験で防ぐ(workerd内からは実FSを読めないので?rawで文字列として読む)。
  */
@@ -36,9 +37,12 @@ interface Section {
 	workers_dev?: boolean;
 	preview_urls?: boolean;
 }
-const config = parse(raw) as Section & { env?: { staging?: Section } };
+const config = parse(raw) as Section & {
+	env?: { staging?: Section; production?: Section };
+};
 const top = config;
 const staging = config.env?.staging as Section;
+const production = config.env?.production as Section;
 
 /** バインディング名の集合(種類ごと) */
 const bindingNames = (s: Section) => ({
@@ -136,19 +140,92 @@ describe("wrangler.jsonc の env.staging", () => {
 	});
 });
 
+describe("wrangler.jsonc の env.production(F10・docs/04 §6)", () => {
+	it("区画が存在する", () => {
+		expect(production).toBeDefined();
+	});
+
+	it("バインディング名の集合がトップレベルと一致し、aiもある", () => {
+		expect(bindingNames(production)).toEqual(bindingNames(top));
+		expect(production.ai?.binding).toBe("AI");
+	});
+
+	it("varsは起動ガードの判定値(LATCH_ENV=production)・Push real・応答の後の処理on・緩和なし", () => {
+		// LLMとEmbeddingのモードはLAT-91のオーナー判断待ちの暫定(stub)。決まったらここも直す
+		expect(production.vars).toEqual({
+			LATCH_ENV: "production",
+			LATCH_EMBEDDING_MODE: "stub",
+			LATCH_LLM_MODE: "stub",
+			LATCH_PUSH_MODE: "real",
+			LATCH_INLINE_PIPELINE: "on",
+		});
+	});
+
+	it("60req/分のバインディングがあり、namespace_idがトップレベル・stagingと別", () => {
+		expect(production.ratelimits).toEqual([
+			{
+				name: "API_RATE_LIMITER",
+				namespace_id: "1003",
+				simple: { limit: 60, period: 60 },
+			},
+		]);
+	});
+
+	it("資源名が-production付きで、トップレベル・stagingと異なる", () => {
+		expect(production.d1_databases?.[0].database_name).toBe(
+			"latch-db-production",
+		);
+		expect(production.r2_buckets?.[0].bucket_name).toBe(
+			"latch-icons-production",
+		);
+		expect(production.vectorize?.[0].index_name).toBe(
+			"latch-intents-production",
+		);
+		expect(production.analytics_engine_datasets?.[0].dataset).toBe(
+			"latch_metrics_production",
+		);
+		expect(production.queues?.producers?.[0].queue).toBe(
+			"match-events-production",
+		);
+	});
+
+	it("queuesのconsumerが-production付きの名前とDLQ・再試行回数を持つ", () => {
+		expect(production.queues?.consumers).toEqual([
+			{
+				queue: "match-events-production",
+				max_retries: 3,
+				max_batch_timeout: 1,
+				max_batch_size: 1,
+				dead_letter_queue: "match-events-dlq-production",
+			},
+			{ queue: "match-events-dlq-production", max_retries: 1 },
+		]);
+	});
+
+	it("毎分Cronを持つ", () => {
+		expect(production.triggers?.crons).toEqual(["* * * * *"]);
+	});
+
+	it("独自ドメインが決まるまで公開のURLを持たない(workers.devもプレビューURLも無効)", () => {
+		expect(production.workers_dev).toBe(false);
+		expect(production.preview_urls).toBe(false);
+	});
+});
+
 describe("主キューの消費者の待ち時間(#19)", () => {
-	it("トップレベルとstagingの主キューのmax_batch_timeoutが1(秒)", () => {
+	it("トップレベル・staging・productionの主キューのmax_batch_timeoutが1(秒)", () => {
 		const mainOf = (s: Section) =>
 			s.queues?.consumers?.find((c) => c.dead_letter_queue !== undefined)
 				?.max_batch_timeout;
 		expect(mainOf(top)).toBe(1);
 		expect(mainOf(staging)).toBe(1);
+		expect(mainOf(production)).toBe(1);
 	});
 });
 
 describe("主キューの消費者のバッチ(#30・オーナー決定)", () => {
-	it("トップレベルとstagingの主キューのmax_batch_sizeが1、DLQは指定しない", () => {
-		for (const s of [top, staging]) {
+	it("トップレベル・staging・productionの主キューのmax_batch_sizeが1、DLQは指定しない", () => {
+		for (const s of [top, staging, production]) {
 			const consumers = s.queues?.consumers ?? [];
 			const main = consumers.find((c) => c.dead_letter_queue !== undefined);
 			const dlq = consumers.find((c) => c.dead_letter_queue === undefined);
