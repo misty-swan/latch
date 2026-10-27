@@ -361,11 +361,11 @@
 			// レート制限の緩和(LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX)は置かない(起動ガードが拒む・docs/10 §5)
 			"vars": {
 				"LATCH_ENV": "production",
-				// 暫定(LAT-91でオーナーが決める)。Parser/JevとEmbeddingはstubのまま置き、
-				// realにする時期と手順はLAT-91で決める。公開の前提はreal固定(docs/11 §1)。
-				// realにするとANTHROPIC_API_KEY・TYPESAFE_API_KEYが無い限り起動を拒む
-				"LATCH_EMBEDDING_MODE": "stub",
-				"LATCH_LLM_MODE": "stub",
+				// Parser/JevとEmbeddingは最初のデプロイからreal(2026-10-27オーナー決定・LAT-91・
+				// 公開の前提はreal固定・docs/11 §1)。prod専用のANTHROPIC_API_KEY・TYPESAFE_API_KEYが
+				// 無い限り起動を拒む(ENV_MISSING_LLM_KEY)ので、キーを先に登録してからデプロイする
+				"LATCH_EMBEDDING_MODE": "real",
+				"LATCH_LLM_MODE": "real",
 				// prodはreal必須(起動ガードENV_UNSAFE_PUSH・本番VAPID鍵はLAT-87)
 				"LATCH_PUSH_MODE": "real",
 				// 応答の後の第1段・第2段(#30・設計 §3.5)

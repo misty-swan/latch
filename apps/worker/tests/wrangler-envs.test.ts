@@ -150,12 +150,12 @@ describe("wrangler.jsonc の env.production(F10・docs/04 §6)", () => {
 		expect(production.ai?.binding).toBe("AI");
 	});
 
-	it("varsは起動ガードの判定値(LATCH_ENV=production)・Push real・応答の後の処理on・緩和なし", () => {
-		// LLMとEmbeddingのモードはLAT-91のオーナー判断待ちの暫定(stub)。決まったらここも直す
+	it("varsは起動ガードの判定値(LATCH_ENV=production)・LLMとEmbeddingとPushがreal・応答の後の処理on・緩和なし", () => {
+		// LLMとEmbeddingは最初のデプロイからreal(2026-10-27オーナー決定・LAT-91)
 		expect(production.vars).toEqual({
 			LATCH_ENV: "production",
-			LATCH_EMBEDDING_MODE: "stub",
-			LATCH_LLM_MODE: "stub",
+			LATCH_EMBEDDING_MODE: "real",
+			LATCH_LLM_MODE: "real",
 			LATCH_PUSH_MODE: "real",
 			LATCH_INLINE_PIPELINE: "on",
 		});

@@ -55,7 +55,7 @@ pnpm --filter worker provision:prod -- --write
 | JWT_SECRET | ログインの合言葉(32バイトの乱数) | 3.1のスクリプトが作る |
 | VAPID_PUBLIC_KEY・VAPID_PRIVATE_KEY | Web Pushの本番の鍵の組(LAT-87) | 3.1のスクリプトがその場で作る |
 | VAPID_SUBJECT | 通知の送り手の連絡先(`mailto:`で始まる実在の宛先) | 3.1のスクリプトへ環境変数で渡す |
-| ANTHROPIC_API_KEY・TYPESAFE_API_KEY | LLMのAPIキー | 3.2(`LATCH_LLM_MODE=real`にするときだけ必須) |
+| ANTHROPIC_API_KEY・TYPESAFE_API_KEY | LLMのAPIキー(prod専用) | 3.2(必須・最初のデプロイの前に登録) |
 | GOOGLE_CLIENT_ID・APPLE_CLIENT_ID | 本番IdPの識別子 | 3.3(本番IdPの接続・LAT-90) |
 
 **`pnpm --filter worker secrets:staging`はprodに使わない。**stagingの登録スクリプトはテスト用の鍵を登録する。prodの登録は3.1のスクリプトか、1件ずつの`wrangler secret put … --env production`だけで行う。
@@ -74,9 +74,9 @@ LATCH_VAPID_SUBJECT=mailto:<連絡先> pnpm --filter worker secrets:prod
 - Workerがまだ無いときは、wranglerが空のWorkerを作ってから登録する
 - どうしても鍵を作り直すとき(漏えいなど)は、`pnpm --filter worker exec wrangler secret delete <名前> --env production`で消してからもう一度実行する。VAPID鍵は2件を組で消す
 
-### 3.2 LLMのAPIキー(LATCH_LLM_MODE=realにするとき)
+### 3.2 LLMのAPIキー
 
-prodのParser/JevとEmbeddingのモードは、LAT-91でオーナーが決めるまで暫定で`stub`にしてある(公開の前提はreal固定・11 §1)。realにするときは、先にAPIキーの2件を登録してから`wrangler.jsonc`のproduction区画のvarsを変えてデプロイする。順番を逆にすると、キーが無いためWorkerが起動を拒む。
+prodのParser/JevとEmbeddingは、最初のデプロイから`real`にする(2026-10-27オーナー決定・LAT-91・公開の前提はreal固定・11 §1)。キーが無いとWorkerが起動を拒む(ENV_MISSING_LLM_KEY)ため、**最初のデプロイより前に**次の2件を登録する。キーはstagingと共用せず、prod専用に発行したものを使う(費用をstagingと分けて見られ、漏れたときに片方だけを止められるため・LAT-91)。
 
 ```bash
 pnpm --filter worker exec wrangler secret put ANTHROPIC_API_KEY --env production
@@ -85,7 +85,7 @@ pnpm --filter worker exec wrangler secret put TYPESAFE_API_KEY --env production
 
 (名前ごとに値の入力を求められ、入力するとprodのWorkerへ保存される)
 
-- stagingと同じキーを使うか、prod専用に発行するかはLAT-91で決める
+- 発行は、AnthropicのConsoleとTypeSafeの管理画面でprod用のキーを新しく作る。stagingのキーは使わない
 
 ### 3.3 本番IdP(LAT-90)
 

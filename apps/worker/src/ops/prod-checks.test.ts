@@ -25,9 +25,19 @@ const PROD_SECRETS = {
 	VAPID_SUBJECT: "mailto:ops@latch.app",
 } satisfies Record<(typeof REQUIRED_PROD_SECRETS)[number], string>;
 
+/** prodのvarsはLLMとEmbeddingがreal(LAT-91)なので、LLMのAPIキー2件も加えたもの */
+const PROD_SECRETS_WITH_LLM = {
+	...PROD_SECRETS,
+	ANTHROPIC_API_KEY: "x",
+	TYPESAFE_API_KEY: "x",
+};
+
 describe("checkProdConfig(docs/11 §1・LAT-122)", () => {
 	it("wrangler.jsoncのenv.productionのvarsと必須のシークレットだけなら問題なし", () => {
-		const result = checkProdConfig(prodVars, Object.keys(PROD_SECRETS));
+		const result = checkProdConfig(
+			prodVars,
+			Object.keys(PROD_SECRETS_WITH_LLM),
+		);
 		expect(result.problems).toEqual([]);
 	});
 
@@ -35,7 +45,7 @@ describe("checkProdConfig(docs/11 §1・LAT-122)", () => {
 		const env = {
 			API_RATE_LIMITER: RATE_LIMITER,
 			...prodVars,
-			...PROD_SECRETS,
+			...PROD_SECRETS_WITH_LLM,
 		} as unknown as Env;
 		expect(() => assertEnvSafety(env)).not.toThrow();
 	});
@@ -44,7 +54,7 @@ describe("checkProdConfig(docs/11 §1・LAT-122)", () => {
 		"%sがシークレットにあれば問題とし、起動ガードも拒む",
 		(name) => {
 			const result = checkProdConfig(prodVars, [
-				...Object.keys(PROD_SECRETS),
+				...Object.keys(PROD_SECRETS_WITH_LLM),
 				name,
 			]);
 			expect(result.problems).toEqual([
@@ -53,7 +63,7 @@ describe("checkProdConfig(docs/11 §1・LAT-122)", () => {
 			const env = {
 				API_RATE_LIMITER: RATE_LIMITER,
 				...prodVars,
-				...PROD_SECRETS,
+				...PROD_SECRETS_WITH_LLM,
 				[name]: "x",
 			} as unknown as Env;
 			expect(() => assertEnvSafety(env)).toThrow();
@@ -63,7 +73,7 @@ describe("checkProdConfig(docs/11 §1・LAT-122)", () => {
 	it("varsに禁止の名前があれば問題とする", () => {
 		const result = checkProdConfig(
 			{ ...prodVars, LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX: "load-" },
-			Object.keys(PROD_SECRETS),
+			Object.keys(PROD_SECRETS_WITH_LLM),
 		);
 		expect(result.problems).toEqual([
 			"varsにLATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIXがある(起動ガードが拒む)",
@@ -71,7 +81,7 @@ describe("checkProdConfig(docs/11 §1・LAT-122)", () => {
 	});
 
 	it.each(REQUIRED_PROD_SECRETS)("%sが無ければ問題とする", (name) => {
-		const names = Object.keys(PROD_SECRETS).filter((n) => n !== name);
+		const names = Object.keys(PROD_SECRETS_WITH_LLM).filter((n) => n !== name);
 		expect(checkProdConfig(prodVars, names).problems).toEqual([
 			`シークレットに${name}が無い`,
 		]);
@@ -79,6 +89,7 @@ describe("checkProdConfig(docs/11 §1・LAT-122)", () => {
 
 	it("LATCH_LLM_MODE=realならLLMのAPIキー2件を求める", () => {
 		const vars = { ...prodVars, LATCH_LLM_MODE: "real" };
+		// LLMのAPIキーを除いた必須のシークレットだけを渡す
 		expect(checkProdConfig(vars, Object.keys(PROD_SECRETS)).problems).toEqual([
 			"LATCH_LLM_MODE=realなのにシークレットにANTHROPIC_API_KEYが無い(ENV_MISSING_LLM_KEY)",
 			"LATCH_LLM_MODE=realなのにシークレットにTYPESAFE_API_KEYが無い(ENV_MISSING_LLM_KEY)",
@@ -95,7 +106,7 @@ describe("checkProdConfig(docs/11 §1・LAT-122)", () => {
 	it("LATCH_ENVとLATCH_PUSH_MODEの取り違えを問題とする", () => {
 		const result = checkProdConfig(
 			{ ...prodVars, LATCH_ENV: "staging", LATCH_PUSH_MODE: "stub" },
-			Object.keys(PROD_SECRETS),
+			Object.keys(PROD_SECRETS_WITH_LLM),
 		);
 		expect(result.problems).toEqual([
 			"varsのLATCH_ENVがproductionではない(staging)。起動ガードが働かない",
@@ -106,7 +117,7 @@ describe("checkProdConfig(docs/11 §1・LAT-122)", () => {
 	it("realでないモードと本番IdPの値の欠落は注意として返す", () => {
 		const result = checkProdConfig(
 			{ ...prodVars, LATCH_LLM_MODE: "stub" },
-			Object.keys(PROD_SECRETS),
+			Object.keys(PROD_SECRETS_WITH_LLM),
 		);
 		expect(result.notes).toEqual([
 			"Parser/JevかEmbeddingがrealではない(公開の前提はreal固定・docs/11 §1・LAT-91)",
