@@ -17,7 +17,7 @@ import {
 	getQueueResult,
 } from "cloudflare:test";
 import { LATCH, LIMITS, type MatchQueueMessage, PIPELINE } from "@latch/shared";
-import { and, eq, isNotNull, or } from "drizzle-orm";
+import { and, eq, isNotNull, ne, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1186,7 +1186,13 @@ describe("F4aの追加走査(docs/06 §2・§4・§6・docs/05 §2.6)", () => {
 
 		await runScheduledPipeline(testEnv, directClock);
 
-		const periods = (await db.select().from(usageCounters))
+		// 同じ実行の日次サマリ(日本時間9時以降・docs/04 §9)が前日の送る権利の行を足すため除く
+		const periods = (
+			await db
+				.select()
+				.from(usageCounters)
+				.where(ne(usageCounters.scope, "alert_mail"))
+		)
 			.map((row) => row.period)
 			.sort();
 		expect(periods).toEqual(

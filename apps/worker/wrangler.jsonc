@@ -141,8 +141,20 @@
 		}
 	],
 
+	// オーナーへのメール(予算アラート・日次サマリ・docs/04 §9)。Cloudflare Email Serviceの送信。
+	// 宛先(ALERT_MAIL_TO)と送り元(ALERT_MAIL_FROM)はsecretに置き、ここに書かない
+	// (宛先はCloudflareで確認済みのアドレス・送り元は独自ドメインのアドレス・docs/runbooks/prod.md)。
+	// 手元のwrangler devでは送信をまねるだけ(LATCH_MAIL_MODE=stubでは呼ばない)
+	"send_email": [
+		{
+			"name": "ALERT_MAIL"
+		}
+	],
+
 	"vars": {
 		"LATCH_LLM_MODE": "stub",
+		// オーナーへのメールの送り手(既定stub・src/mail/sender.ts)。realのときだけ送る
+		"LATCH_MAIL_MODE": "stub",
 		// Web Pushの送り手(既定stub・F7b設計 §5.5)。prodはreal必須
 		"LATCH_PUSH_MODE": "stub",
 		// Embeddingの動作モード(既定stub・07 §2)。Parser/JevのLATCH_LLM_MODEとは独立
@@ -241,6 +253,11 @@
 					"simple": { "limit": 60, "period": 60 }
 				}
 			],
+			"send_email": [
+				{
+					"name": "ALERT_MAIL"
+				}
+			],
 			"durable_objects": {
 				"bindings": [
 					{
@@ -255,6 +272,8 @@
 				"LATCH_EMBEDDING_MODE": "real",
 				"LATCH_LLM_MODE": "real",
 				"LATCH_PUSH_MODE": "stub",
+				// オーナーへのメールは送らない(独自ドメインが無い・prodと宛先を分けない・docs/04 §9)
+				"LATCH_MAIL_MODE": "stub",
 				// 応答の後の第1段・第2段(#30・設計 §3.5)
 				"LATCH_INLINE_PIPELINE": "on",
 				// 負荷試験の利用者(idp_subjectがload-で始まる)だけレート制限を外す(docs/10 §5)
@@ -350,6 +369,11 @@
 					"simple": { "limit": 60, "period": 60 }
 				}
 			],
+			"send_email": [
+				{
+					"name": "ALERT_MAIL"
+				}
+			],
 			"durable_objects": {
 				"bindings": [
 					{
@@ -368,6 +392,9 @@
 				"LATCH_LLM_MODE": "real",
 				// prodはreal必須(起動ガードENV_UNSAFE_PUSH・本番VAPID鍵はLAT-87)
 				"LATCH_PUSH_MODE": "real",
+				// オーナーへのメール(docs/04 §9)。ALERT_MAIL_TO・ALERT_MAIL_FROMのsecretが無い間は
+				// 送るたびに失敗のログ(alert.mail.failed)を出すだけで、起動は止めない
+				"LATCH_MAIL_MODE": "real",
 				// 応答の後の第1段・第2段(#30・設計 §3.5)
 				"LATCH_INLINE_PIPELINE": "on"
 			}

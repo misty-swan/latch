@@ -36,6 +36,12 @@ export const IDP_CLIENT_NAMES = [
 	"APPLE_CLIENT_ID",
 ] as const;
 
+/**
+ * オーナーへのメール(予算アラート・日次サマリ・docs/04 §9)の宛先と送り元。送り元は独自ドメイン
+ * (LAT-121)のアドレスで、ドメインが決まるまで登録できないため、欠落は注意として返す
+ */
+export const ALERT_MAIL_SECRETS = ["ALERT_MAIL_TO", "ALERT_MAIL_FROM"] as const;
+
 export interface ProdCheckResult {
 	/** 起動ガードに拒まれる・公開の前提(docs/11 §1)を満たさない点 */
 	problems: string[];
@@ -98,6 +104,18 @@ export const checkProdConfig = (
 		notes.push(
 			"Parser/JevかEmbeddingがrealではない(公開の前提はreal固定・docs/11 §1・LAT-91)",
 		);
+	}
+	if (vars.LATCH_MAIL_MODE !== "real") {
+		notes.push(
+			"varsのLATCH_MAIL_MODEがrealではない(コストアラートと日次サマリが届かない・docs/11 §1)",
+		);
+	}
+	for (const name of ALERT_MAIL_SECRETS) {
+		if (!secrets.has(name)) {
+			notes.push(
+				`シークレットに${name}が無い(コストアラートと日次サマリが届かない・docs/runbooks/prod.md・LAT-86)`,
+			);
+		}
 	}
 	for (const name of IDP_CLIENT_NAMES) {
 		if (!secrets.has(name) && !(name in vars)) {

@@ -57,6 +57,7 @@ pnpm --filter worker provision:prod -- --write
 | VAPID_SUBJECT | 通知の送り手の連絡先(`mailto:`で始まる実在の宛先) | 3.1のスクリプトへ環境変数で渡す |
 | ANTHROPIC_API_KEY・TYPESAFE_API_KEY | LLMのAPIキー(prod専用) | 3.2(必須・最初のデプロイの前に登録) |
 | GOOGLE_CLIENT_ID・APPLE_CLIENT_ID | 本番IdPの識別子 | 3.3(本番IdPの接続・LAT-90) |
+| ALERT_MAIL_TO・ALERT_MAIL_FROM | オーナーへのメール(予算アラート・日次サマリ)の宛先と送り元 | 3.4(独自ドメインの後・LAT-86) |
 
 **`pnpm --filter worker secrets:staging`はprodに使わない。**stagingの登録スクリプトはテスト用の鍵を登録する。prodの登録は3.1のスクリプトか、1件ずつの`wrangler secret put … --env production`だけで行う。
 
@@ -90,6 +91,26 @@ pnpm --filter worker exec wrangler secret put TYPESAFE_API_KEY --env production
 ### 3.3 本番IdP(LAT-90)
 
 本番のGoogle/Appleのサインインの接続のしかた(Google CloudのOAuthクライアント・Apple DeveloperのServices ID・戻り先の登録)は`docs/runbooks/idp.md`に置く(LAT-90)。識別子は2か所に同じ値を入れる: Workerの`GOOGLE_CLIENT_ID`・`APPLE_CLIENT_ID`(`wrangler secret put … --env production`)と、画面のビルドの`VITE_GOOGLE_CLIENT_ID`・`VITE_APPLE_CLIENT_ID`(GitHubの環境`production`の変数(vars)。手元から`deploy:prod`で載せるときはシェルの環境変数)。画面は値の無いIdPのボタンを出さない。6章の点検は、Worker側の値が無いあいだ「注意」として表示する(起動は妨げない)。
+
+### 3.4 オーナーへのメール(LAT-86・LAT-124)
+
+Jevの予算の80%到達のアラートと、毎朝9時(日本時間)の前日分の日次サマリは、Cloudflare Email Serviceで送る(2026-10-27オーナー決定・04 冒頭の決定記録(オーナーへのメール))。prodの`LATCH_MAIL_MODE`は`real`で、Workerは`ALERT_MAIL`の送信バインディングを持つ(`apps/worker/wrangler.jsonc`)。送り元は独自ドメインのアドレスに限られるため、**独自ドメイン(7章)をCloudflareに追加した後**に次を行う。それまでは送るたびに失敗のログ(`alert.mail.failed`・error_code=`MAIL_NOT_CONFIGURED`)が出るだけで、Workerは動く。
+
+1. Cloudflareの画面で、そのドメインをEmail Service(Email Sending)に登録する(画面の案内どおりにDNSの記録を足す)。送り元は例えば`alerts@<ドメイン>`にする
+2. Cloudflareの画面のEmail Routingの宛先(Destination addresses)で、オーナーのメールアドレスを宛先として追加し、届いた確認メールのリンクを押して確認済みにする(確認済みの宛先への送信は無料・04 §9)
+3. 宛先と送り元をprodのシークレットに登録する
+
+```bash
+pnpm --filter worker exec wrangler secret put ALERT_MAIL_TO --env production
+pnpm --filter worker exec wrangler secret put ALERT_MAIL_FROM --env production
+```
+
+(名前ごとに値の入力を求められる。ALERT_MAIL_TOには2の確認済みのアドレス、ALERT_MAIL_FROMには1の送り元のアドレスを入れる)
+
+- 届いたかは、翌朝9時すぎの日次サマリ(件名`[LATCH production] 日次サマリ(<前日の日付>)`)で確かめる。届かなければWorkers Logsで`alert.mail.failed`のerror_code(`E_SENDER_NOT_VERIFIED`=送り元のドメインが未登録、`E_RECIPIENT_NOT_ALLOWED`等)を見る。1通につき3回(3分)失敗すると諦め、`alert.mail.abandoned`を出す
+- 6章の点検は、2件が無いあいだ「注意」として表示する(起動もデプロイも妨げない)
+- メールの本文は件数と割合だけで、利用者のID・本文・表示名は載せない(08 §6)
+- stagingは`LATCH_MAIL_MODE=stub`で送らない(独自ドメインが無く、prodと宛先を分けない)
 
 ## 4. APIトークンとGitHubの登録
 
@@ -178,7 +199,7 @@ LATCH_PROD_URL=<prodのURL> pnpm --filter worker check:prod-secrets
 2. `apps/worker/wrangler.jsonc`のproduction区画のコメントにある`routes`を有効にし、`<ドメイン>`を実際のドメインに書き換えてコミットする(`custom_domain: true`で、デプロイ時にDNSの記録と証明書が作られる)
 3. 5章でデプロイし、4.2の`LATCH_PROD_URL`を登録して5.3の疎通確認を行う
 
-- ドメインが決まると、規約の問い合わせ先(LAT-85)・本番IdPのリダイレクト先(LAT-90)・VAPID_SUBJECT(LAT-87)も決まる
+- ドメインが決まると、規約の問い合わせ先(LAT-85)・本番IdPのリダイレクト先(LAT-90)・VAPID_SUBJECT(LAT-87)・オーナーへのメールの送り元(3.4・LAT-86)も決まる
 - `tests/wrangler-envs.test.ts`はprodの`workers_dev`が`false`であることを確かめている。routesを足すときは試験にもroutesの確認を加える
 
 ## 8. 戻し方
