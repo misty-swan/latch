@@ -1,6 +1,8 @@
 /**
  * /me/withdraw(Withdraw・LAT-94)の単体試験。確認の段の文言・やめる・再認証から退会までの流れ・
- * 失敗の表示を確かめる(試験はimport.meta.env.DEVのためdevの確かめに繋がる)
+ * 失敗の表示を確かめる(試験はimport.meta.env.DEVのためdevの確かめに繋がる)。
+ * 本番相当(DEV=false)では、サインインに使ったIdPのボタンを出し・押すとIdPの認可画面へ移ること
+ * (移動はstartIdpRedirectを差し替えて確かめる・本物のIdPには接続しない)
  */
 
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -13,10 +15,16 @@ import {
 } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { startIdpRedirect } from "../../auth/idp";
 import { authSession } from "../../auth/session";
 import { appRoutes } from "../../router";
 import { PATHS } from "../../routes/paths";
 import { createTestQueryClient } from "../../test/helpers";
+
+vi.mock("../../auth/idp", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../auth/idp")>()),
+	startIdpRedirect: vi.fn(() => true),
+}));
 
 const json = (body: unknown, status = 200): Response =>
 	new Response(status === 204 ? null : JSON.stringify(body), {
@@ -34,10 +42,10 @@ const fetchMock = vi.fn(
 	},
 );
 
-const setup = () => {
+const setup = (state?: unknown) => {
 	authSession.setTokens("access-1", "refresh-1");
 	const router = createMemoryRouter(appRoutes, {
-		initialEntries: [PATHS.me, PATHS.withdraw],
+		initialEntries: [PATHS.me, { pathname: PATHS.withdraw, state }],
 		initialIndex: 1,
 	});
 	render(
@@ -70,6 +78,8 @@ afterEach(() => {
 	cleanup();
 	authSession.clear();
 	vi.unstubAllGlobals();
+	vi.unstubAllEnvs();
+	vi.mocked(startIdpRedirect).mockClear();
 });
 
 describe("Withdraw", () => {
@@ -153,5 +163,67 @@ describe("Withdraw", () => {
 		expect(
 			screen.getByRole("button", { name: "確かめて退会する" }),
 		).toHaveProperty("disabled", false);
+	});
+
+	describe("本番相当(DEV=false)", () => {
+		beforeEach(() => {
+			vi.stubEnv("DEV", false);
+			vi.stubEnv("VITE_GOOGLE_CLIENT_ID", "google-client");
+			vi.stubEnv("VITE_APPLE_CLIENT_ID", "jp.example.latch.web");
+		});
+
+		it("Appleで入った人には「Appleで確かめて退会する」だけを出し、押すとAppleの認可画面へ移る", () => {
+			authSession.setProvider("apple");
+			setup();
+
+			expect(
+				screen.queryByRole("button", { name: "Googleで確かめて退会する" }),
+			).toBeNull();
+			fireEvent.click(
+				screen.getByRole("button", { name: "Appleで確かめて退会する" }),
+			);
+
+			expect(startIdpRedirect).toHaveBeenCalledWith("apple", "withdraw");
+			expect(screen.queryByLabelText("サインインに使った名前")).toBeNull();
+		});
+
+		it("使ったIdPが分からなければ、client idのあるIdPのボタンを並べる", () => {
+			vi.stubEnv("VITE_APPLE_CLIENT_ID", "");
+			setup();
+
+			fireEvent.click(
+				screen.getByRole("button", { name: "Googleで確かめて退会する" }),
+			);
+			expect(
+				screen.queryByRole("button", { name: "Appleで確かめて退会する" }),
+			).toBeNull();
+			expect(startIdpRedirect).toHaveBeenCalledWith("google", "withdraw");
+		});
+
+		it("使ったIdPのclient idが無ければ、ボタンを出さずに確認できない旨を示す", () => {
+			vi.stubEnv("VITE_APPLE_CLIENT_ID", "");
+			authSession.setProvider("apple");
+			setup();
+
+			expect(
+				screen.queryByRole("button", { name: /で確かめて退会する$/ }),
+			).toBeNull();
+			expect(
+				screen.getByText(
+					"いまは本人の確認ができません。時間をおいてお試しください。",
+				),
+			).toBeTruthy();
+		});
+
+		it("IdPの戻りで失敗したときは、渡された一言を出す", () => {
+			setup({
+				idpError:
+					"本人であることを確かめられませんでした。もう一度お試しください",
+			});
+
+			expect(screen.getByRole("alert").textContent).toBe(
+				"本人であることを確かめられませんでした。もう一度お試しください",
+			);
+		});
 	});
 });

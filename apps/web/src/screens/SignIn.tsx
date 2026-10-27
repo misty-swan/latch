@@ -1,48 +1,51 @@
 /**
  * サインイン画面(ボード: SignIn.dc.html の移植)。
- * - Google/Appleのボタンは本番IdP SDK接続がスコープ外のため表示のみ(押すと未実装の旨)
- * - 開発/ステージング(import.meta.env.DEV・またはVITE_DEV_AUTH=1)では・押すと
+ * - 本番ではGoogle/Appleのボタンで各IdPの認可画面へ移動し(auth/idp.ts)、戻り先(/auth/callback)で
+ *   POST /v1/auth/tokenへ進む(docs/04 §4)。client id(VITE_GOOGLE_CLIENT_ID・VITE_APPLE_CLIENT_ID)が
+ *   未設定のIdPのボタンは出さない。戻りで失敗したときは、戻り先から渡された一言をここに出す
+ * - 開発/ステージング(import.meta.env.DEV・またはVITE_DEV_AUTH=1)では・どちらのボタンも
  *   テストサインイン(名前入力→POST /v1/dev/idp-token→POST /v1/auth/token)に繋がる
- *   (docs/04 §4のテスト鍵・F2'計画Task 2のdev専用エンドポイント)
+ *   (docs/04 §4のテスト鍵・F2'計画Task 2のdev専用エンドポイント。サーバーもテスト鍵で確かめるため本番IdPには進まない)
  * 文言・構造・クラス名はボードどおり。dev専用UIの細部だけ実装の裁量
  * PCの幅(1024px以上)では、ようこそと同じ2列の右の列に描く(LAT-118)
  */
 
+import type { AuthProvider } from "@latch/shared";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { ApiError, apiFetch } from "../api/client";
-import { authSession } from "../auth/session";
+import { isIdpConfigured, startIdpRedirect } from "../auth/idp";
+import { isDevSigninEnabled, signInWithIdpToken } from "../auth/signin";
 import { OnboardScreen } from "../desktop/OnboardScreen";
 import { PATHS } from "../routes/paths";
 
-/** POST /v1/auth/tokenの応答(docs/05 §3.2・worker/routes/auth.tsの実装に一致) */
-interface AuthTokenResponse {
-	access_token: string;
-	refresh_token: string | null;
-	expires_in: number;
-	user: unknown;
-	registration_required: boolean;
+/** IdPの戻り先(IdpCallback)から渡す状態 */
+export interface SignInLocationState {
+	/** 失敗の一言(取り消しのときは渡さない) */
+	idpError?: string;
 }
-
-/** devサインインが有効か(開発ビルドまたは明示的な有効化) */
-const isDevSigninEnabled = (): boolean =>
-	import.meta.env.DEV || import.meta.env.VITE_DEV_AUTH === "1";
 
 export function SignIn() {
 	const navigate = useNavigate();
+	const location = useLocation();
+	const devEnabled = isDevSigninEnabled();
 	const [devFormOpen, setDevFormOpen] = useState(false);
 	const [subject, setSubject] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [prodNote, setProdNote] = useState(false);
+	const [redirectFailed, setRedirectFailed] = useState(false);
+	const idpError = (location.state as SignInLocationState | null)?.idpError;
+	// devではどちらのボタンもテストサインインに繋ぐ。本番ではclient idのあるIdPだけを出す
+	const showGoogle = devEnabled || isIdpConfigured("google");
+	const showApple = devEnabled || isIdpConfigured("apple");
 
-	const startSignin = () => {
-		if (isDevSigninEnabled()) {
-			setProdNote(false);
+	const startSignin = (provider: AuthProvider) => {
+		if (devEnabled) {
 			setDevFormOpen(true);
-		} else {
-			// 本番ボタンの実接続はスコープ外(未実装の旨のみ示す)
-			setProdNote(true);
+			return;
+		}
+		if (!startIdpRedirect(provider, "signin")) {
+			setRedirectFailed(true);
 		}
 	};
 
@@ -58,12 +61,11 @@ export function SignIn() {
 				"/dev/idp-token",
 				{ method: "POST", json: { subject: trimmed } },
 			);
-			const token = await apiFetch<AuthTokenResponse>("/auth/token", {
-				method: "POST",
-				json: { provider: "google", idp_token },
-			});
-			authSession.setTokens(token.access_token, token.refresh_token);
-			navigate(token.registration_required ? PATHS.register : PATHS.home, {
+			const { registrationRequired } = await signInWithIdpToken(
+				"google",
+				idp_token,
+			);
+			navigate(registrationRequired ? PATHS.register : PATHS.home, {
 				replace: true,
 			});
 		} catch (cause) {
@@ -102,34 +104,53 @@ export function SignIn() {
 					ログインには、GoogleかAppleのアカウントを使います。LATCHでパスワードを作ることはありません。
 				</p>
 				<div className="stack" style={{ gap: 10, marginTop: 36 }}>
-					<button
-						type="button"
-						className="btn btn--secondary btn--block"
-						onClick={startSignin}
-					>
-						<svg className="ic ic--fill" viewBox="0 0 24 24" aria-hidden="true">
-							<path d="M19.6 12.2c0-.6-.1-1.1-.2-1.6H12v3.1h4.3a3.7 3.7 0 0 1-1.6 2.4v2h2.6c1.5-1.4 2.3-3.4 2.3-5.9z" />
-							<path d="M12 20c2.2 0 4-.7 5.3-1.9l-2.6-2a4.8 4.8 0 0 1-7.2-2.5H4.8v2.1A8 8 0 0 0 12 20z" />
-							<path d="M7.5 13.6a4.8 4.8 0 0 1 0-3.2V8.3H4.8a8 8 0 0 0 0 7.4z" />
-							<path d="M12 7.2c1.2 0 2.3.4 3.2 1.2l2.3-2.3A8 8 0 0 0 4.8 8.3l2.7 2.1A4.8 4.8 0 0 1 12 7.2z" />
-						</svg>
-						Googleで続ける
-					</button>
-					<button
-						type="button"
-						className="btn btn--secondary btn--block"
-						onClick={startSignin}
-					>
-						<svg className="ic ic--fill" viewBox="0 0 24 24" aria-hidden="true">
-							<path d="M15.6 12.6c0-2 1.6-2.9 1.7-3a3.7 3.7 0 0 0-2.9-1.6c-1.2-.1-2.4.7-3 .7s-1.6-.7-2.6-.7a3.9 3.9 0 0 0-3.3 2c-1.4 2.5-.4 6.1 1 8.1.7 1 1.5 2 2.5 2s1.4-.6 2.6-.6 1.5.6 2.6.6 1.7-1 2.4-2a8 8 0 0 0 1.1-2.2 3.4 3.4 0 0 1-2.1-3.3z" />
-							<path d="M13.8 6.4a3.4 3.4 0 0 0 .8-2.5 3.6 3.6 0 0 0-2.3 1.2 3.3 3.3 0 0 0-.8 2.4 3 3 0 0 0 2.3-1.1z" />
-						</svg>
-						Appleで続ける
-					</button>
+					{showGoogle && (
+						<button
+							type="button"
+							className="btn btn--secondary btn--block"
+							onClick={() => startSignin("google")}
+						>
+							<svg
+								className="ic ic--fill"
+								viewBox="0 0 24 24"
+								aria-hidden="true"
+							>
+								<path d="M19.6 12.2c0-.6-.1-1.1-.2-1.6H12v3.1h4.3a3.7 3.7 0 0 1-1.6 2.4v2h2.6c1.5-1.4 2.3-3.4 2.3-5.9z" />
+								<path d="M12 20c2.2 0 4-.7 5.3-1.9l-2.6-2a4.8 4.8 0 0 1-7.2-2.5H4.8v2.1A8 8 0 0 0 12 20z" />
+								<path d="M7.5 13.6a4.8 4.8 0 0 1 0-3.2V8.3H4.8a8 8 0 0 0 0 7.4z" />
+								<path d="M12 7.2c1.2 0 2.3.4 3.2 1.2l2.3-2.3A8 8 0 0 0 4.8 8.3l2.7 2.1A4.8 4.8 0 0 1 12 7.2z" />
+							</svg>
+							Googleで続ける
+						</button>
+					)}
+					{showApple && (
+						<button
+							type="button"
+							className="btn btn--secondary btn--block"
+							onClick={() => startSignin("apple")}
+						>
+							<svg
+								className="ic ic--fill"
+								viewBox="0 0 24 24"
+								aria-hidden="true"
+							>
+								<path d="M15.6 12.6c0-2 1.6-2.9 1.7-3a3.7 3.7 0 0 0-2.9-1.6c-1.2-.1-2.4.7-3 .7s-1.6-.7-2.6-.7a3.9 3.9 0 0 0-3.3 2c-1.4 2.5-.4 6.1 1 8.1.7 1 1.5 2 2.5 2s1.4-.6 2.6-.6 1.5.6 2.6.6 1.7-1 2.4-2a8 8 0 0 0 1.1-2.2 3.4 3.4 0 0 1-2.1-3.3z" />
+								<path d="M13.8 6.4a3.4 3.4 0 0 0 .8-2.5 3.6 3.6 0 0 0-2.3 1.2 3.3 3.3 0 0 0-.8 2.4 3 3 0 0 0 2.3-1.1z" />
+							</svg>
+							Appleで続ける
+						</button>
+					)}
 				</div>
-				{prodNote && (
+				{((!showGoogle && !showApple) || redirectFailed) && (
 					<p className="note" style={{ marginTop: 20 }}>
-						<span>Google/Appleでのサインインは準備中です。</span>
+						<span>
+							いまはサインインできません。時間をおいてお試しください。
+						</span>
+					</p>
+				)}
+				{idpError !== undefined && !devFormOpen && (
+					<p className="field__error" role="alert" style={{ marginTop: 20 }}>
+						{idpError}
 					</p>
 				)}
 				{devFormOpen && (

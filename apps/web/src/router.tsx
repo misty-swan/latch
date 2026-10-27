@@ -1,6 +1,6 @@
 /**
  * ルーティング(docs/04 §3.2: React Router library mode)。
- * - welcome/intro/signin・規約ページ(terms/privacy)・ヘルプ(help)は未認証で見られる画面・それ以外はRequireAuthで保護する
+ * - welcome/intro/signin・IdPの戻り先(auth/callback)・規約ページ(terms/privacy)・ヘルプ(help)は未認証で見られる画面・それ以外はRequireAuthで保護する
  *   (未認証のまま入った場合はwelcomeへ送り返す)
  * - "/"は起動の入口(StartRoute)。どの道順にも当たらないURL(古いstart_urlの/index.htmlなど)は"/"へ送る(LAT-115)
  * - 全画面をPC向けの外枠(DesktopFrame)で包む(LAT-14)
@@ -17,6 +17,7 @@ import { Consent } from "./screens/Consent";
 import { Chat } from "./screens/chat/Chat";
 import { Connections } from "./screens/chat/Connections";
 import { Home } from "./screens/Home";
+import { IdpCallback } from "./screens/IdpCallback";
 import { Intro } from "./screens/Intro";
 import { IntentDetail } from "./screens/intent/IntentDetail";
 import { IntentEdit } from "./screens/intent/IntentEdit";
@@ -44,6 +45,8 @@ const screenRoutes = [
 	{ path: PATHS.welcome, element: <Welcome /> },
 	{ path: PATHS.intro, element: <Intro /> },
 	{ path: PATHS.signin, element: <SignIn /> },
+	// 本番IdPからの戻り先。目的(サインイン・退会)はこの画面が出発の控えで分ける(docs/04 §4)
+	{ path: PATHS.idpCallback, element: <IdpCallback /> },
 	// 規約ページはサインイン前から開ける(F7c設計 §1.1)
 	{ path: PATHS.terms, element: <Terms /> },
 	{ path: PATHS.privacy, element: <Privacy /> },

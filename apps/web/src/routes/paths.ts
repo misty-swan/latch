@@ -6,6 +6,8 @@ export const PATHS = {
 	welcome: "/welcome",
 	intro: "/intro",
 	signin: "/signin",
+	// 本番IdP(Google/Apple)からの戻り先(docs/04 §4・IdPに登録するリダイレクトURL)
+	idpCallback: "/auth/callback",
 	register: "/register",
 	consent: "/consent",
 	compose: "/compose",

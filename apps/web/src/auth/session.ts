@@ -16,10 +16,14 @@
  *   「オフライン中のセッション」(offline)とし、保護画面の描画を許す
  * - clear()の最後に登録されたlistenerを呼ぶ(端末に保存した内容の破棄に使う)
  * - 保存した利用者IDと異なる利用者のトークンを得たらonUserChangeのlistenerを呼ぶ(同上)
+ * - サインインに使ったIdP(google/apple)をlocalStorage(latch.idp)に置く(退会の再認証で同じIdPを出すため)
  */
+
+import type { AuthProvider } from "@latch/shared";
 
 const REFRESH_STORAGE_KEY = "latch.refresh";
 const USER_ID_STORAGE_KEY = "latch.uid";
+const PROVIDER_STORAGE_KEY = "latch.idp";
 const REFRESH_ENDPOINT = "/v1/auth/refresh";
 const LOGOUT_ENDPOINT = "/v1/auth/logout";
 
@@ -236,6 +240,15 @@ export const authSession = {
 		}
 		notifyUserChange(userChanged);
 	},
+	/** サインインに使ったIdP(未記録・読めない値はnull)。画面の出し分けだけに使う */
+	get provider(): AuthProvider | null {
+		const stored = localStorage.getItem(PROVIDER_STORAGE_KEY);
+		return stored === "google" || stored === "apple" ? stored : null;
+	},
+	/** サインインに使ったIdPを記録する(clear()で消す) */
+	setProvider(provider: AuthProvider): void {
+		localStorage.setItem(PROVIDER_STORAGE_KEY, provider);
+	},
 	/**
 	 * セッションを破棄する(メモリとlocalStorageの両方)。最後に登録されたlistenerを呼ぶ。
 	 * listenerが投げても破棄は済んでおり、他のlistenerも呼ぶ
@@ -246,6 +259,7 @@ export const authSession = {
 		offline = false;
 		localStorage.removeItem(REFRESH_STORAGE_KEY);
 		localStorage.removeItem(USER_ID_STORAGE_KEY);
+		localStorage.removeItem(PROVIDER_STORAGE_KEY);
 		notify(clearListeners);
 	},
 	/**

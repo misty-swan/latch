@@ -39,6 +39,7 @@ describe("App", () => {
 			"/welcome",
 			"/intro",
 			"/signin",
+			"/auth/callback",
 			"/register",
 			"/consent",
 			"/compose",
