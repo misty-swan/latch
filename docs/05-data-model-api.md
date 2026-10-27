@@ -1,9 +1,9 @@
 # LATCH データモデル・API仕様書
 
-- 文書バージョン: v0.49
+- 文書バージョン: v0.50
 - ステータス: Draft
 - プロダクト名: LATCH
-- 作成日: 2026-10-17(v0.49更新: 2026-10-27)
+- 作成日: 2026-10-17(v0.50更新: 2026-10-27)
 - v0.2の変更点: 多角レビュー(loop1)の指摘を反映。draft保存のNullable化とactive化検証リスト・提案履歴のoutcome設計・退会APIと削除表の拡充・WSチケットの署名トークン化・カウンタとインデックスの実装規定を追加
 - v0.3の変更点: refresh_familiesにprevious_hash・current_hash UNIQUEを追加(04 §4の回転猶予・再利用検出の実装確定・猶予窓=KV 120秒)。§2.3のKVに回転猶予キー(`rfg:`)の規定を追記
 - v0.4の変更点: F1実装に伴い§3.3にauth/users系・アイコン系APIの確定レスポンス形状を追記し、§3.1にエラーコード対応のHTTPステータスを明記。§2.3のKVに回転猶予の結果整合性に関する限界注記(窓内の再提示でKVエントリが見えない場合は族を失効させない)を追加。§3.2・§3.3のアイコンGETのCache-Control表記を実装値(private, max-age=3600)に精緻化
@@ -52,7 +52,8 @@
 - v0.47の変更点: 前提文書欄の版数同期(F10公開準備のオーナー決定(2026-10-27)に伴う04の改版への追従)。内容の変更はない
 - v0.48の変更点: 前提文書欄の版数同期(法務確認の扱いのオーナー決定(2026-10-27・LAT-78)に伴う01・02・04の改版への追従)。内容の変更はない
 - v0.49の変更点: 不具合の修正工程(第8回・LAT-126・2026-10-27)とオーナー決定(12 §2の決定記録(F10公開準備)の4)に伴い、§2.5のIntent削除と退会の実行順序に、ベクトルの削除の短いやり直し(0.5秒・1秒の待ちで最大2回)と、書き込みの頻度の上限(VECTOR_DELETE_40041)が続いたときの503 TEMPORARILY_UNAVAILABLEを加えた。§3.1の対応表にTEMPORARILY_UNAVAILABLE=503を、§3.3のDELETE /v1/users/meの失敗の扱いに同じ503を加えた
-- 前提文書: 01 要件定義書 v0.27 / 02 スコープ・受け入れ条件合意書 v0.30 / 04 アーキテクチャ設計書 v0.46
+- v0.50の変更点: コストアラートと日次サマリをオーナーのメールへ送る仕組みの実装(LAT-124・2026-10-27オーナー決定・04冒頭の決定記録(オーナーへのメール))に伴い、§2.2のusage_countersへオーナーへのメールの送る権利のscope(`alert_mail`・keyはメールの種類・periodは日か月・countの符号で送信済みと失敗を表す・04 §4)を加えた。前提文書欄の版数を更新
+- 前提文書: 01 要件定義書 v0.27 / 02 スコープ・受け入れ条件合意書 v0.30 / 04 アーキテクチャ設計書 v0.47
 - 本書の位置づけ: 01第17〜19節(データモデル・API)をD1+Drizzle・Hono・リアルタイムチャット(04)の上に確定させる。テーブル・インデックス・API契約(エンドポイント・エラー・ページネーション・WebSocketプロトコル)を定め、実装はこれに従う。Zodスキーマの実体は `packages/shared` が持ち、本書がその意味規定の正本である
 
 本書の取り決め。IDはすべてULID(時刻順序可能・大文字26桁)とする。時刻はAPI上ISO 8601(オフセット付き・保存はUTC)で表し、表示と集計の基準はJSTとする(01 §20のClock規律)。本章のテーブル定義は論理表記であり、Drizzleスキーマへの写像は実装が担う(カラム名はsnake_case)。
@@ -316,7 +317,7 @@ INDEX(anonymized)
 
 **正解データの作成と匿名化(F9実装確定・LAT-108・2026-10-26オーナー決定・01冒頭の決定記録(F9(正解データ)))。** 行は提示した(proposed_atのある)提案が閉じた後(matched・completed・rejected・expired・cancelled)に、毎分Cronの正解データの走査(06 §2の(j))が1LATCH1行を作る。予測はmatch_candidates(評価確定から30日で削除・§2.6)のJevの7軸を写すため、閉じた直後に作る(ペアごとに、提案を作った時点までの最新の評価の行・無ければその後の最初の評価の行)。作成済みの印はlatches.calibrated_at(datetime | null)に置き、行の挿入と印の書き込みを「印がまだ無い」を条件にした1つの取引で書く(再実行・並行した実行・匿名化でlatch_idが消えた後も二重に作らない)。未提示のまま閉じた提案(保留のまま閉じたもの)は人の回答が無いため行を作らず、印だけを付ける。行は観測の間だけLATCHに紐づけ、観測の終わり(成立しなかった提案は閉じた時点・つながりは成立から30日・機会は対象時刻から30日)・参加者の退会・参加Intentの削除のいずれかで、その時点までの行動でaction・surveyを確定し、同じ1文でlatch_idのnull化・時刻の丸め・anonymized=trueを書く(§2.5・08 §7)。観測の途中で確定した行は、その後の行動を含まない。各値の数え方は次のとおり。chat_started_7dは成立時の参加者全員(成立の後に離脱した人を含む)が成立から7日以内に1件以上送信したこと(09 §2のチャット開始と同じ)。exchangesは成立からの期間内のメッセージを送信順に並べ、発言者が入れ替わった回数(最初の発言は数えない)。blockedは参加者どうしのブロックが提案の作成から観測の終わりまでにあったこと、reportedはそのLATCHを対象にした通報があったこと(成立しなかった提案も数える)。attendedは参加の申告(latch_feedbackのattendance)に1件でもtrueがあればtrue、答えがfalseだけならfalse、答えが無ければnull。contextの時間帯は機会の対象時刻(proposal.time_window.start)のJSTの時を6時間ずつに分けたもの(0〜5時=night・6〜11時=morning・12〜17時=afternoon・18〜23時=evening。つながりはnull)、市区町村は基準Intent(最も先に預けた者・提案の地名と同じ)の中心から地名と同じ逆引きで引いたgeofeaturesのmunicipality(地域なし・Intentが残っていなければnull)。主題・地名・予算・IDは持たない。context列・latch_idのUNIQUE・anonymizedの索引・latches.calibrated_atとその索引はマイグレーション0010で追加し、戻す手順(migrations_rollback/0010)を対で持つ(12 §4・11 §3。戻すと匿名化した行の提案の条件と作成済みの印が失われ、作成の処理を動かすと二重に作るため、Workerを先に戻す)
 
-**usage_counters**(レート制限・Jev予算の3層保護の実体): `scope(intent_daily|intent_hourly|jev_intent|jev_user|jev_global_daily|jev_global_monthly|external_send) / key(user_id|intent_id|'-'|<送信先>:<系統>) / period(日付or時間のバケット文字列) / count — PK(scope, key, period)`。加算は `UPDATE … SET count=count+1 … RETURNING` の原子的1文で行い、Queues consumerはバッチ単位でまとめて加算する(並行消費での取りこぼし防止)。periodが90日より古い行はCronで削除する(API単位のスロットルはWorkers Rate Limitingバインディング(key=user_id)が担い、本表には置かない)。**作成・更新の上限(F9実装確定・LAT-93)。** scope=`intent_daily`はIntentの作成の回数(key=user_id・periodはJSTの日付・上限20)、`intent_hourly`は預けているIntentの意味フィールドの書き直しの回数(key=user_id・periodはJSTの時`YYYY-MM-DD-HH`・上限6)で、どちらも利用者単位とする。数える範囲と確保・戻しの方法は04 §5**外部送信の集計(LLM real接続で確定)。** scope=`external_send`は外部AI事業者へ送った回数の記録(08 §5・07 §8)で、keyは`anthropic:parser`・`anthropic:jev`・`typesafe:jev`、periodはJSTの日付とし、送るたびに成否を問わず1加える(`INSERT … ON CONFLICT DO UPDATE`の1文)。送った中身は持たない。記録の失敗は呼び出しを止めない(ログに残すだけ)。予算・レート制限の判定には使わない
+**usage_counters**(レート制限・Jev予算の3層保護の実体): `scope(intent_daily|intent_hourly|jev_intent|jev_user|jev_global_daily|jev_global_monthly|external_send|alert_mail) / key(user_id|intent_id|'-'|<送信先>:<系統>|<メールの種類>) / period(日付or時間のバケット文字列) / count — PK(scope, key, period)`。加算は `UPDATE … SET count=count+1 … RETURNING` の原子的1文で行い、Queues consumerはバッチ単位でまとめて加算する(並行消費での取りこぼし防止)。periodが90日より古い行はCronで削除する(API単位のスロットルはWorkers Rate Limitingバインディング(key=user_id)が担い、本表には置かない)。**作成・更新の上限(F9実装確定・LAT-93)。** scope=`intent_daily`はIntentの作成の回数(key=user_id・periodはJSTの日付・上限20)、`intent_hourly`は預けているIntentの意味フィールドの書き直しの回数(key=user_id・periodはJSTの時`YYYY-MM-DD-HH`・上限6)で、どちらも利用者単位とする。数える範囲と確保・戻しの方法は04 §5**外部送信の集計(LLM real接続で確定)。** scope=`external_send`は外部AI事業者へ送った回数の記録(08 §5・07 §8)で、keyは`anthropic:parser`・`anthropic:jev`・`typesafe:jev`、periodはJSTの日付とし、送るたびに成否を問わず1加える(`INSERT … ON CONFLICT DO UPDATE`の1文)。送った中身は持たない。記録の失敗は呼び出しを止めない(ログに残すだけ)。予算・レート制限の判定には使わない **オーナーへのメールの送る権利(LAT-124・04 §4)。** scope=`alert_mail`は、予算アラートと日次サマリを種類(key=`jev_global_daily`・`jev_global_monthly`・`daily_summary`)と期間(periodはJSTの日付か月)ごとに1通だけ送るための行で、送る前に1件だけ入れた実行が送る。countは正なら送信中か送信済みの試行番号、負なら失敗した回数(3回で諦める)。他のscopeと同じく90日で削除する
 
 **geofeatures**: `id / name / municipality / type(city|station) / lat / lng / grid_key(約1km=0.01度グリッドのキー・INDEX)`(ソースはISJ+駅データ。取り込みと変換の規定は04 §4)。grid_keyの書式は `${Math.floor(lat*100)}_${Math.floor(lng*100)}`(F4a実装確定)。逆引きは座標の属するセルの中心を基準点とし、そのセルと周囲を合わせた3×3セルの行からハバーシン距離の最近傍の地名を採る(同距離はid昇順・該当なしは地域名なし)。
 

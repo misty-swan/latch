@@ -32,6 +32,7 @@ interface Section {
 		namespace_id: string;
 		simple: { limit: number; period: number };
 	}[];
+	send_email?: { name: string }[];
 	vars?: Record<string, string>;
 	triggers?: { crons: string[] };
 	workers_dev?: boolean;
@@ -54,6 +55,7 @@ const bindingNames = (s: Section) => ({
 	ae: s.analytics_engine_datasets?.map((b) => b.binding).sort(),
 	do: s.durable_objects?.bindings.map((b) => b.name).sort(),
 	ratelimits: s.ratelimits?.map((b) => b.name).sort(),
+	sendEmail: s.send_email?.map((b) => b.name).sort(),
 });
 
 describe("wrangler.jsonc の env.staging", () => {
@@ -64,6 +66,8 @@ describe("wrangler.jsonc の env.staging", () => {
 	it("バインディング名の集合がトップレベルと一致し、aiも両方にある", () => {
 		expect(bindingNames(staging)).toEqual(bindingNames(top));
 		expect(top.ai?.binding).toBe("AI");
+		// オーナーへのメールの送信バインディング(docs/04 §9)。宛先と送り元はsecretに置く
+		expect(top.send_email).toEqual([{ name: "ALERT_MAIL" }]);
 		expect(staging.ai?.binding).toBe("AI");
 	});
 
@@ -73,6 +77,7 @@ describe("wrangler.jsonc の env.staging", () => {
 			LATCH_EMBEDDING_MODE: "real",
 			LATCH_LLM_MODE: "real",
 			LATCH_PUSH_MODE: "stub",
+			LATCH_MAIL_MODE: "stub",
 			LATCH_INLINE_PIPELINE: "on",
 			LATCH_RATE_LIMIT_RELAX_SUBJECT_PREFIX: "load-",
 		});
@@ -150,13 +155,15 @@ describe("wrangler.jsonc の env.production(F10・docs/04 §6)", () => {
 		expect(production.ai?.binding).toBe("AI");
 	});
 
-	it("varsは起動ガードの判定値(LATCH_ENV=production)・LLMとEmbeddingとPushがreal・応答の後の処理on・緩和なし", () => {
-		// LLMとEmbeddingは最初のデプロイからreal(2026-10-27オーナー決定・LAT-91)
+	it("varsは起動ガードの判定値(LATCH_ENV=production)・LLMとEmbeddingとPushとメールがreal・応答の後の処理on・緩和なし", () => {
+		// LLMとEmbeddingは最初のデプロイからreal(2026-10-27オーナー決定・LAT-91)。
+		// オーナーへのメールもreal(2026-10-27オーナー決定・docs/04 §9)
 		expect(production.vars).toEqual({
 			LATCH_ENV: "production",
 			LATCH_EMBEDDING_MODE: "real",
 			LATCH_LLM_MODE: "real",
 			LATCH_PUSH_MODE: "real",
+			LATCH_MAIL_MODE: "real",
 			LATCH_INLINE_PIPELINE: "on",
 		});
 	});

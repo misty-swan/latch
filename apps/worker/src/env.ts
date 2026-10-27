@@ -80,6 +80,17 @@ export interface Env {
 	 * workerの単体・統合試験(vitest.config.ts)はoffにしてキューを直接呼ぶ作法を保つ
 	 */
 	LATCH_INLINE_PIPELINE?: string;
+	/**
+	 * オーナーへのメール(予算アラート・日次サマリ)の送り手(既定stub・mail/sender.ts・04 §9)。
+	 * realのときだけALERT_MAILで実際に送る
+	 */
+	LATCH_MAIL_MODE?: string;
+	/** Cloudflare Email Serviceの送信バインディング(send_email・04 §9)。LATCH_MAIL_MODE=realのときだけ使う */
+	ALERT_MAIL?: SendEmail;
+	/** オーナーのメールの宛先(secret・Cloudflareで確認済みの宛先にする・04 §9) */
+	ALERT_MAIL_TO?: string;
+	/** メールの送り元(secret・Cloudflareに登録した独自ドメインのアドレス・04 §9) */
+	ALERT_MAIL_FROM?: string;
 	/** VAPID公開鍵(base64url・非圧縮P-256点)。stubでも公開鍵APIが返す */
 	VAPID_PUBLIC_KEY?: string;
 	/** VAPID秘密鍵(JWKのJSON文字列) */

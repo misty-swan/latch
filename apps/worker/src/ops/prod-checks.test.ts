@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import raw from "../../wrangler.jsonc?raw";
 import { assertEnvSafety, type Env } from "../env";
 import {
+	ALERT_MAIL_SECRETS,
 	checkProdConfig,
 	FORBIDDEN_PROD_NAMES,
 	REQUIRED_PROD_SECRETS,
@@ -121,8 +122,28 @@ describe("checkProdConfig(docs/11 §1・LAT-122)", () => {
 		);
 		expect(result.notes).toEqual([
 			"Parser/JevかEmbeddingがrealではない(公開の前提はreal固定・docs/11 §1・LAT-91)",
+			"シークレットにALERT_MAIL_TOが無い(コストアラートと日次サマリが届かない・docs/runbooks/prod.md・LAT-86)",
+			"シークレットにALERT_MAIL_FROMが無い(コストアラートと日次サマリが届かない・docs/runbooks/prod.md・LAT-86)",
 			"GOOGLE_CLIENT_IDが無い(本番IdPの接続・LAT-90)",
 			"APPLE_CLIENT_IDが無い(本番IdPの接続・LAT-90)",
+		]);
+	});
+
+	it("オーナーへのメールの宛先と送り元が揃い、LATCH_MAIL_MODE=realなら注意を出さない", () => {
+		const names = [
+			...Object.keys(PROD_SECRETS_WITH_LLM),
+			...ALERT_MAIL_SECRETS,
+			"GOOGLE_CLIENT_ID",
+			"APPLE_CLIENT_ID",
+		];
+		expect(checkProdConfig(prodVars, names)).toEqual({
+			problems: [],
+			notes: [],
+		});
+		expect(
+			checkProdConfig({ ...prodVars, LATCH_MAIL_MODE: "stub" }, names).notes,
+		).toEqual([
+			"varsのLATCH_MAIL_MODEがrealではない(コストアラートと日次サマリが届かない・docs/11 §1)",
 		]);
 	});
 });

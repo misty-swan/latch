@@ -103,6 +103,9 @@ export const COUNTER_SCOPES = [
 	"jev_global_monthly",
 	// 外部送信の日次集計(08 §5・key=宛先:用途・period=JST日付)
 	"external_send",
+	// オーナーへのメール(予算アラート・日次サマリ)の送る権利(04 §9・key=メールの種類・
+	// period=JST日付か月・count=正なら送信中か送信済み・負なら失敗した回数)
+	"alert_mail",
 ] as const;
 export type CounterScope = (typeof COUNTER_SCOPES)[number];
 

@@ -15,7 +15,8 @@
  *   usage_countersの90日削除(docs/05 §2.6)
  * - (i) 回答期限切れ(expired化・yesの無効化・参加者の保留解放)と保留の期限切れ・解放
  *   (F4a設計 §3.5・§4.2)
- * - (f) Jev予算アラート(全体1日・1か月の80%・docs/06 §6)
+ * - (f) Jev予算アラート(全体1日・1か月の80%・docs/06 §6)とオーナーへのメール(04 §9)
+ * - 日次サマリ: 日本時間9時以降の最初の実行で前日分をオーナーへメール(04 §9・mail/alert.ts)
  * - pending残留の掃査(10分経過のpendingイベントをfailedへ・docs/06 §4)
  * - (d) matchedのLATCHのcompleted判定(つながり=最終メッセージから90日・機会=対象時刻から
  *   3時間・F5設計 §2)
@@ -66,6 +67,12 @@ import { completeDueLatches } from "../latches/complete";
 import { proposeNextGroupAfterClose } from "../latches/next-group";
 import { expireHeld, releaseHeld } from "../latches/release";
 import { createLogger } from "../logging/logger";
+import {
+	budgetAlertMail,
+	runDailySummary,
+	sendAlertMailOnce,
+} from "../mail/alert";
+import { type MailSender, mailSenderOf } from "../mail/sender";
 import { flushPush } from "../push/dispatch";
 import { pushSenderOf } from "../push/sender";
 import { createVectorStore } from "../vectorstore";
@@ -916,14 +923,16 @@ const ALERT_TTL_SECONDS = {
 
 /**
  * (f) Jev予算アラート(docs/06 §6)。当日の全体1日・当月の全体1か月のカウンタが
- * 上限×BUDGET_ALERT_RATIO(80%)以上なら、期間ごとに1回だけwarnログと
- * Analytics Engineの1点を出す。送信済みの印はKV `jev:alert:<scope>:<period>` に置く。
+ * 上限×BUDGET_ALERT_RATIO(80%)以上なら、期間ごとに1回だけオーナーへメールを送り(04 §9・
+ * mail/alert.ts)、warnログとAnalytics Engineの1点を出す。ログとAnalytics Engineの
+ * 送信済みの印はKV `jev:alert:<scope>:<period>` に置く。
  * Analytics Engineには識別子を入れない(scopeと件数のみ・docs/08 §6)
  */
 const runBudgetAlert = async (
 	env: Env,
 	clock: Clock,
 	metricsBudget: MetricsBudget,
+	mailSender: MailSender,
 ): Promise<void> => {
 	const db = drizzle(env.DB);
 	const now = clock.now();
@@ -954,6 +963,14 @@ const runBudgetAlert = async (
 		if (count < target.limit * LATCH.BUDGET_ALERT_RATIO) {
 			continue;
 		}
+		// オーナーへのメール(04 §9)。送信済みかはD1の送る権利で決める(KVの印とは別・mail/alert.ts)
+		await sendAlertMailOnce(
+			env.DB,
+			mailSender,
+			target.scope,
+			target.period,
+			async () => budgetAlertMail(env, target, count),
+		);
 		const key = `jev:alert:${target.scope}:${target.period}`;
 		if ((await env.PIPELINE_KV.get(key)) !== null) {
 			continue;
@@ -1085,8 +1102,13 @@ export const runScheduledPipeline = async (
 			createdFrom: startedAt,
 		});
 	});
+	const mailSender = mailSenderOf(env);
 	await runIsolated("budget_alert", () =>
-		runBudgetAlert(env, clock, alertBudget),
+		runBudgetAlert(env, clock, alertBudget, mailSender),
+	);
+	// 前日分の日次サマリ(日本時間9時以降の最初の実行で1通・04 §9)
+	await runIsolated("daily_summary", () =>
+		runDailySummary(env, mailSender, clock),
 	);
 	await runIsolated("pending", () => runPendingSweep(env, clock));
 	await runIsolated("completion", async () => {
