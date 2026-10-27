@@ -7,7 +7,7 @@
 
 import type { AuthProvider } from "@latch/shared";
 import { exportJWK, generateKeyPair, type JSONWebKeySet, SignJWT } from "jose";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Env } from "../env";
 import {
 	IdpTokenError,
@@ -340,5 +340,94 @@ describe("provider引数の実行時検査(docs/05 §2.2: google/appleのみ)", 
 			caught = error;
 		}
 		expect(caught).toBeInstanceOf(IdpTokenError);
+	});
+});
+
+describe("本番モードのiss/aud(docs/04 §4: 公開鍵の取得はfetchを差し替え・本物のIdPには接続しない)", () => {
+	const GOOGLE_JWKS = "https://www.googleapis.com/oauth2/v3/certs";
+	const APPLE_JWKS = "https://appleid.apple.com/auth/keys";
+	let key: Awaited<ReturnType<typeof makeKey>>;
+	const env = makeEnv({
+		GOOGLE_CLIENT_ID: "google-client.apps.googleusercontent.com",
+		APPLE_CLIENT_ID: "jp.example.latch.web",
+	});
+
+	beforeAll(async () => {
+		key = await makeKey();
+	});
+
+	/** 公開鍵の取得だけを試験の鍵で応える(joseはURLごとにリゾルバを1回作るため鍵は全試験で共有する) */
+	const stubJwksFetch = (): void => {
+		vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+			const url = String(input instanceof Request ? input.url : input);
+			if (url === GOOGLE_JWKS || url === APPLE_JWKS) {
+				return new Response(JSON.stringify(key.jwks), {
+					headers: { "content-type": "application/json" },
+				});
+			}
+			throw new Error(`想定外の取得: ${url}`);
+		});
+	};
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("googleはiss=https://accounts.google.comを受け付ける", async () => {
+		stubJwksFetch();
+		const token = await signIdpToken(key.privateKey, {
+			issuer: "https://accounts.google.com",
+			audience: "google-client.apps.googleusercontent.com",
+		});
+		const verified = await verifyIdpToken(env, "google", token);
+		expect(verified).toMatchObject({
+			provider: "google",
+			subject: "idp-subject-123",
+		});
+	});
+
+	it("googleはiss=accounts.google.com(スキーム無し)も受け付ける", async () => {
+		stubJwksFetch();
+		const token = await signIdpToken(key.privateKey, {
+			issuer: "accounts.google.com",
+			audience: "google-client.apps.googleusercontent.com",
+		});
+		const verified = await verifyIdpToken(env, "google", token);
+		expect(verified.provider).toBe("google");
+	});
+
+	it("googleで別のissやaud → IdpTokenError", async () => {
+		stubJwksFetch();
+		const wrongIss = await signIdpToken(key.privateKey, {
+			issuer: "https://evil.example.com",
+			audience: "google-client.apps.googleusercontent.com",
+		});
+		await expect(
+			verifyIdpToken(env, "google", wrongIss),
+		).rejects.toBeInstanceOf(IdpTokenError);
+		const wrongAud = await signIdpToken(key.privateKey, {
+			issuer: "https://accounts.google.com",
+			audience: "other-client",
+		});
+		await expect(
+			verifyIdpToken(env, "google", wrongAud),
+		).rejects.toBeInstanceOf(IdpTokenError);
+	});
+
+	it("appleはiss=https://appleid.apple.com・aud=APPLE_CLIENT_ID(Services ID)を受け付け、googleのissは拒む", async () => {
+		stubJwksFetch();
+		const token = await signIdpToken(key.privateKey, {
+			issuer: "https://appleid.apple.com",
+			audience: "jp.example.latch.web",
+		});
+		const verified = await verifyIdpToken(env, "apple", token);
+		expect(verified.provider).toBe("apple");
+		const googleIss = await signIdpToken(key.privateKey, {
+			issuer: "https://accounts.google.com",
+			audience: "jp.example.latch.web",
+		});
+		await expect(
+			verifyIdpToken(env, "apple", googleIss),
+		).rejects.toBeInstanceOf(IdpTokenError);
 	});
 });
