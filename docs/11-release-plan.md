@@ -80,19 +80,19 @@
 4. Analytics Engine・Workers Logsに計測が出ていることを確認
 5. 初期ユーザー獲得施策(§5)を公開と同時に実行
 
-stagingのデプロイ(mainへのpushでのCIの自動デプロイ・手元からの代替・資源の作成・シークレット・APIトークンの登録)の手順は`docs/runbooks/staging.md`に置く(04 §6・F8b)。prodの手順(資源の作成・シークレット・GitHubの環境`production`の承認・手順1のデプロイ・テスト鍵の残存の確認・独自ドメイン・戻し方)は`docs/runbooks/prod.md`に置く(04 §6・F10)。手順1は`.github/workflows/ci.yml`の`deploy-prod`ジョブで、mainを選んだ手動の起動と承認者の承認の後に動く
+stagingのデプロイ(mainへのpushでのCIの自動デプロイ・手元からの代替・資源の作成・シークレット・APIトークンの登録)の手順は`docs/runbooks/staging.md`に置く(04 §6・F8b)。prodの手順(資源の作成・シークレット・GitHubの環境`production`の承認・手順1のデプロイ・テスト鍵の残存の確認・独自ドメイン・戻し方)は`docs/runbooks/prod.md`に置く(04 §6・F10)。手順1は`.github/workflows/ci.yml`の`deploy-prod`ジョブで、mainを選んだ手動の起動と承認者の承認の後に動く。公開当日の流れ・スモーク確認(手順3)・計測の確認(手順4)と合否の判断の台本は`docs/runbooks/launch-day.md` 1章〜5章に置く(LAT-123・当日の担当と時刻はオーナーの判断待ち)
 
 ## 3. ロールバック
 
 - **コード**: `wrangler rollback`(直前バージョンへ即時)。D1スキーマの後方互換性を保つため、マイグレーションは「元に戻すマイグレーション」を必ず対で作成する。戻す手順は`apps/worker/migrations_rollback/`に置き(自動適用の対象外・`wrangler d1 execute --file`で明示実行する)、新しい番号から順に戻す。マイグレーション0005(チャット・F6a: latch_members.hidden_at・messages.client_idとUNIQUE(latch_id, user_id, client_id))の戻す手順は0005_rollbackで、戻すとLATCHを表示から消した印と再送の重複防止が失われ、表示から消したLATCHが一覧に再び現れる(05 §2.2)
 - **データ**: D1のポイントインタイムリストア(7日)・VectorizeはD1から再構築(04 §7)
-- **stagingでの予行(F8b)**: stagingの戻し方(`wrangler rollback --env staging`で直前の版へ戻す・D1は戻す手順を新しい番号から`wrangler d1 execute --env staging --remote --file`で明示実行する)は`docs/runbooks/staging.md` §6に置く。2026-10-22にstagingで、Workerを前の版へ戻す→疎通確認→もう一度デプロイして最新へ戻す流れを1回試した。§1のリハーサル(本番を想定した一通り)はF10で行い、戻す手順を実行した後に同じ番号のマイグレーションを適用し直す手順(wranglerの適用記録が残るため)もそこで決める
+- **stagingでの予行(F8b)**: stagingの戻し方(`wrangler rollback --env staging`で直前の版へ戻す・D1は戻す手順を新しい番号から`wrangler d1 execute --env staging --remote --file`で明示実行する)は`docs/runbooks/staging.md` §6に置く。2026-10-22にstagingで、Workerを前の版へ戻す→疎通確認→もう一度デプロイして最新へ戻す流れを1回試した。§1のリハーサル(本番を想定した一通り)はF10で行い、台本を`docs/runbooks/rollback-rehearsal.md`に置く(LAT-88)。戻す手順を実行した後に同じ番号のマイグレーションを適用し直す手順(wranglerは`d1_migrations`表のファイル名の行だけで適用済みかを判断し、戻す手順はその行を消さないため、そのままでは適用し直されない)は、戻した番号の行を消してから`wrangler d1 migrations apply`で適用し直す案を同書 §4に置く(手元のD1で確認済み・オーナーの確認待ち)
 - **prodの戻し方**: Workerの版・D1の形・データの戻し方のコマンドは`docs/runbooks/prod.md` 8章に置く。§1のリハーサルで決める再適用の手順もそこへ書き足す
 - 判断基準: (a)登録・Intent作成の主要動線が全断、(b)データの欠損・不正表示、(c)プライバシーに関わる事故。軽微な不具合はホットフィックスで対応しロールバックしない
 
 ## 4. 公開後の監視
 
-- 最初の72時間: 09 §6の警報線を時間単位で点検
+- 最初の72時間: 09 §6の警報線を時間単位で点検。点検の時刻・警報線ごとの測り方・記録の書式は`docs/runbooks/launch-day.md` 6章に置く(LAT-123・時刻と連絡手段はオーナーの判断待ち)
 - 以降: 日次点検(MLR・YES率・通報・DLQ・コスト)
 - 週次: KPI4群(09 §2)の形式別集計を確認し、ベースライン期間(4週)の記録に充てる
 
