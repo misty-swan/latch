@@ -3,7 +3,7 @@
 公開の前に、prodで「新しい版を前の版へ戻す」手順を一度通して試すための台本である(11 §1 のチェックリスト「ロールバック手順(§3)を一度リハーサル済み」・11 §3・LAT-88)。stagingの戻し方(`docs/runbooks/staging.md` 6章・2026-10-22に1回予行済み)を土台にし、prodでの違いと、11 §3 で未決だった「戻す手順を実行した後に同じ番号のマイグレーションを適用し直す手順」を加える。
 
 - prodの資源の作成・シークレット・デプロイの手順は `docs/runbooks/prod.md`(LAT-119・LAT-120)に置く。本書はそこで作ったprodを前提にする
-- 本書では、prodのwranglerの環境の指定を `--env <prod>` と書く(環境の名前は LAT-119 で決まる。wrangler.jsoncのいちばん上の欄をprodにする場合は `--env` を付けない)。prodのURLは `<prodのURL>` と書き、文書・コミットに残さない
+- prodのwranglerの環境は `--env production`(wrangler.jsoncの`env.production`区画・LAT-119・`docs/runbooks/prod.md`)。prodのURLは `<prodのURL>` と書き、文書・コミットに残さない
 - コマンドはすべてリポジトリのいちばん上のフォルダ(`latch/`)で実行する
 - **未確定(オーナーの判断待ち)**: 実施日・担当・戻すかどうかを決める人(本書の最後の「決めること」)
 
@@ -25,16 +25,16 @@
 Worker(プログラムと画面)だけを前の版へ戻し、もう一度最新を載せ直す。stagingの6.1と同じ流れである。
 
 ```bash
-pnpm --filter worker exec wrangler deployments list --env <prod>
+pnpm --filter worker exec wrangler deployments list --env production
 ```
 
 (これまでの版が古い順に並ぶ。いちばん下が今の版。今の版と1つ前の版のIDを記録用のメモに写す)
 
 ```bash
-pnpm --filter worker exec wrangler rollback --env <prod> --message "リハーサル: 前の版へ戻す"
+pnpm --filter worker exec wrangler rollback --env production --message "リハーサル: 前の版へ戻す"
 ```
 
-(直前の版へ戻す。確認を聞かれたら `y`。特定の版へ戻すときは `rollback <版のID> --env <prod>`)
+(直前の版へ戻す。確認を聞かれたら `y`。特定の版へ戻すときは `rollback <版のID> --env production`)
 
 戻した後に、`docs/runbooks/launch-day.md` 3.1 のログイン無しの確認(5項目)を行う。続けて最新の版を載せ直す(`docs/runbooks/prod.md` のデプロイの手順)。載せ直した後も同じ確認を行う。
 
@@ -75,7 +75,7 @@ wranglerの `d1 migrations apply`(未適用のマイグレーションを適用�
 1. 今の状態を確かめる
 
    ```bash
-   pnpm --filter worker exec wrangler d1 migrations list DB --env <prod> --remote
+   pnpm --filter worker exec wrangler d1 migrations list DB --env production --remote
    ```
 
    (未適用のマイグレーションを並べる。`No migrations to apply!` と出れば全部適用済み)
@@ -83,7 +83,7 @@ wranglerの `d1 migrations apply`(未適用のマイグレーションを適用�
 2. 戻す前の時点の印を控える(万一のときにデータベース全体をこの時点へ戻すため。戻しはしない)
 
    ```bash
-   pnpm --filter worker exec wrangler d1 time-travel info DB --env <prod>
+   pnpm --filter worker exec wrangler d1 time-travel info DB --env production
    ```
 
    (今の時点を指す印=bookmarkが表示される。記録用のメモに写す)
@@ -93,7 +93,7 @@ wranglerの `d1 migrations apply`(未適用のマイグレーションを適用�
 4. 戻す手順を実行する
 
    ```bash
-   pnpm --filter worker exec wrangler d1 execute DB --env <prod> --remote --file migrations_rollback/0011_rollback.sql
+   pnpm --filter worker exec wrangler d1 execute DB --env production --remote --file migrations_rollback/0011_rollback.sql
    ```
 
    (0011で足した列と索引を取り除く。複数戻すときは新しい番号から1つずつ)
@@ -101,7 +101,7 @@ wranglerの `d1 migrations apply`(未適用のマイグレーションを適用�
 5. 戻した番号の適用記録の行を消す
 
    ```bash
-   pnpm --filter worker exec wrangler d1 execute DB --env <prod> --remote --command "DELETE FROM d1_migrations WHERE name = '0011_jev_held.sql'"
+   pnpm --filter worker exec wrangler d1 execute DB --env production --remote --command "DELETE FROM d1_migrations WHERE name = '0011_jev_held.sql'"
    ```
 
    (wranglerに「0011は未適用」と見せる。複数戻したときは `name IN ('0011_jev_held.sql', '0010_calibration_records.sql')` のように全部並べる)
@@ -111,7 +111,7 @@ wranglerの `d1 migrations apply`(未適用のマイグレーションを適用�
 7. 適用し直す
 
    ```bash
-   pnpm --filter worker exec wrangler d1 migrations apply DB --env <prod> --remote
+   pnpm --filter worker exec wrangler d1 migrations apply DB --env production --remote
    ```
 
    (未適用の番号を古い順に適用し、記録の行を書き直す。確認を聞かれたら `y`)
@@ -123,7 +123,7 @@ wranglerの `d1 migrations apply`(未適用のマイグレーションを適用�
 - **形を戻さずに記録だけ消した**: 7の適用が `duplicate column name`(同じ名前の列が既にある)で止まる。データは壊れず、記録の行も書かれない。次で記録を戻せば元どおりになる
 
   ```bash
-  pnpm --filter worker exec wrangler d1 execute DB --env <prod> --remote --command "INSERT INTO d1_migrations (name) VALUES ('0011_jev_held.sql')"
+  pnpm --filter worker exec wrangler d1 execute DB --env production --remote --command "INSERT INTO d1_migrations (name) VALUES ('0011_jev_held.sql')"
   ```
 
 - **形を戻したが記録を消し忘れた**: 7が `No migrations to apply!` になる。5から行う
@@ -139,7 +139,7 @@ wranglerの `d1 migrations apply`(未適用のマイグレーションを適用�
 
 ## 5. 手順C: データの戻し(D1の時点復元)は印の確認だけにする(案)
 
-11 §3 の「データ: D1のポイントインタイムリストア(7日)」は、`wrangler d1 time-travel restore DB --env <prod> --bookmark <印>` でデータベース全体をある時点へ戻す操作である。リハーサルでは4.3の2で印が取れることの確認だけにし、復元そのものは行わない案とする(公開前のprodで行っても失うデータは無いので、試すかはオーナーが決める)。
+11 §3 の「データ: D1のポイントインタイムリストア(7日)」は、`wrangler d1 time-travel restore DB --env production --bookmark <印>` でデータベース全体をある時点へ戻す操作である。リハーサルでは4.3の2で印が取れることの確認だけにし、復元そのものは行わない案とする(公開前のprodで行っても失うデータは無いので、試すかはオーナーが決める)。
 
 本番で使うときの注意(公開後の判断のため):
 

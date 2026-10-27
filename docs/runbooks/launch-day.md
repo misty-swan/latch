@@ -3,7 +3,7 @@
 公開の当日に行うスモーク確認(11 §2 の手順3・4)と、公開後72時間の監視(11 §4・09 §6 の警報線)の段取りである(LAT-123)。スモーク確認は、主な動線が本番で動くことを短時間で確かめる点検を指す。
 
 - prodの資源・シークレット・デプロイの手順は `docs/runbooks/prod.md`(LAT-119・LAT-120)、戻し方は `docs/runbooks/rollback-rehearsal.md` に置く
-- 本書では、prodのwranglerの環境の指定を `--env <prod>`、prodのURLを `<prodのURL>` と書く(環境の名前は LAT-119 で決まる。URLは文書・コミットに残さない)
+- prodのwranglerの環境は `--env production`(wrangler.jsoncの`env.production`区画・LAT-119)。prodのURLは `<prodのURL>` と書く(URLは文書・コミットに残さない)
 - コマンドはすべてリポジトリのいちばん上のフォルダ(`latch/`)で実行する。prodのデータベースへは**読み取り(SELECT)だけ**を送る
 - **未確定(オーナーの判断待ち)**: 当日の担当・点検の時刻・連絡手段・ロールバックを決める人(9章)。下の時刻と分担は案である
 
@@ -88,7 +88,7 @@ AとBの2つのアカウントで、登録から成立後のチャットまで�
 | D1の外部送信の数え | 下のコマンドで、今日の `anthropic:parser` と `jev`(`anthropic:jev` か `typesafe:jev`)が1以上 |
 
 ```bash
-pnpm --filter worker exec wrangler d1 execute DB --env <prod> --remote --command "SELECT key, count FROM usage_counters WHERE scope = 'external_send' AND period = strftime('%Y-%m-%d', 'now', '+9 hours')"
+pnpm --filter worker exec wrangler d1 execute DB --env production --remote --command "SELECT key, count FROM usage_counters WHERE scope = 'external_send' AND period = strftime('%Y-%m-%d', 'now', '+9 hours')"
 ```
 
 (今日(日本時間)に本物のAIへ送った回数を、送り先と用途ごとに出す。読み取りだけで、データは変えない)
@@ -128,16 +128,16 @@ pnpm --filter worker exec wrangler d1 execute DB --env <prod> --remote --command
 
 ```bash
 # (1) DLQで諦めたイベントの件数(0が正常)
-pnpm --filter worker exec wrangler d1 execute DB --env <prod> --remote --command "SELECT COUNT(*) AS dead FROM match_events WHERE status = 'dead'"
+pnpm --filter worker exec wrangler d1 execute DB --env production --remote --command "SELECT COUNT(*) AS dead FROM match_events WHERE status = 'dead'"
 
 # (2) 今日(日本時間)の本物のAIへの送信回数(送り先と用途ごと)
-pnpm --filter worker exec wrangler d1 execute DB --env <prod> --remote --command "SELECT period, key, count FROM usage_counters WHERE scope = 'external_send' AND period >= strftime('%Y-%m-%d', 'now', '+9 hours', '-1 day') ORDER BY period, key"
+pnpm --filter worker exec wrangler d1 execute DB --env production --remote --command "SELECT period, key, count FROM usage_counters WHERE scope = 'external_send' AND period >= strftime('%Y-%m-%d', 'now', '+9 hours', '-1 day') ORDER BY period, key"
 
 # (3) 直近24時間の通報の件数と、未対応(open)の件数
-pnpm --filter worker exec wrangler d1 execute DB --env <prod> --remote --command "SELECT COUNT(CASE WHEN created_at >= (strftime('%s','now') - 86400) * 1000 THEN 1 END) AS last_24h, COUNT(CASE WHEN status = 'open' THEN 1 END) AS open FROM reports"
+pnpm --filter worker exec wrangler d1 execute DB --env production --remote --command "SELECT COUNT(CASE WHEN created_at >= (strftime('%s','now') - 86400) * 1000 THEN 1 END) AS last_24h, COUNT(CASE WHEN status = 'open' THEN 1 END) AS open FROM reports"
 
 # (4) 15分より前に作られて、まだ処理されていないイベントの件数(0が正常)
-pnpm --filter worker exec wrangler d1 execute DB --env <prod> --remote --command "SELECT status, COUNT(*) AS n FROM match_events WHERE status IN ('pending', 'failed') AND created_at < (strftime('%s','now') - 900) * 1000 GROUP BY status"
+pnpm --filter worker exec wrangler d1 execute DB --env production --remote --command "SELECT status, COUNT(*) AS n FROM match_events WHERE status IN ('pending', 'failed') AND created_at < (strftime('%s','now') - 900) * 1000 GROUP BY status"
 ```
 
 (どれも読み取りだけで、データは変えない。1行ずつ実行し、結果の数を6.4の記録に写す)
@@ -175,7 +175,7 @@ stagingの通し試験(`apps/worker/scripts/staging-e2e.mjs` と `apps/worker/st
 結論として、当日のスモークは3章の手作業を勧める。自動にしたい場合の案は次のとおり。
 
 - **案A(勧める)**: ログイン無しの確認(3.1)だけを小さな道具にする(例: `apps/worker/scripts/prod-smoke.mjs`。`/healthz`・画面・規約・`/v1/dev/idp-token` の404・`/v1/users/me` の401を確かめ、URLを伏せて出す)。dev専用APIを使わず、利用者を作らないので、本番のデータに触れない
-- **案B**: `apps/worker/scripts/analytics-report.mjs` に `--prod`(`--env <prod> --remote` への読み取り)を足し、6.2 の(1)〜(4)の問い合わせもまとめて出す。点検を1コマンドにできる
+- **案B**: `apps/worker/scripts/analytics-report.mjs` に `--prod`(`--env production --remote` への読み取り)を足し、6.2 の(1)〜(4)の問い合わせもまとめて出す。点検を1コマンドにできる
 - **案C(勧めない)**: 通し試験をprodで流すには、prodにだけ試験用のサインインを開ける必要がある。10 §2 の二重防御を崩すため行わない
 
 ## 8. 72時間の後

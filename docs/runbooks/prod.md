@@ -89,7 +89,7 @@ pnpm --filter worker exec wrangler secret put TYPESAFE_API_KEY --env production
 
 ### 3.3 本番IdP(LAT-90)
 
-本番のGoogle/Appleのサインインの接続はLAT-90で行う。識別子(GOOGLE_CLIENT_ID・APPLE_CLIENT_ID)の登録のしかたもそこで決める。6章の点検は、無いあいだ「注意」として表示する(起動は妨げない)。
+本番のGoogle/Appleのサインインの接続のしかた(Google CloudのOAuthクライアント・Apple DeveloperのServices ID・戻り先の登録)は`docs/runbooks/idp.md`に置く(LAT-90)。識別子は2か所に同じ値を入れる: Workerの`GOOGLE_CLIENT_ID`・`APPLE_CLIENT_ID`(`wrangler secret put … --env production`)と、画面のビルドの`VITE_GOOGLE_CLIENT_ID`・`VITE_APPLE_CLIENT_ID`(GitHubの環境`production`の変数(vars)。手元から`deploy:prod`で載せるときはシェルの環境変数)。画面は値の無いIdPのボタンを出さない。6章の点検は、Worker側の値が無いあいだ「注意」として表示する(起動は妨げない)。
 
 ## 4. APIトークンとGitHubの登録
 

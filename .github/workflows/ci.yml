@@ -97,6 +97,7 @@ jobs:
   # 名前を分ける(CLOUDFLARE_API_TOKEN_PROD。環境のシークレットが無いときにリポジトリの
   # stagingのトークンへ倒れないため)。使うstepだけに渡すのはdeploy-stagingと同じ。
   # webはVITE_DEV_AUTHを付けずにビルドする(テスト用サインインの画面を出さない)。
+  # 本番IdPのclient idは公開してよい識別子なので、環境productionの変数(vars)から渡す(docs/runbooks/idp.md)。
   # 載せる前に、varsとシークレットの名前を点検し、テスト鍵の残存や必須の欠落があれば止まる
   deploy-prod:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
@@ -120,6 +121,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_PROD }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - run: pnpm --filter web build
+        env:
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          VITE_APPLE_CLIENT_ID: ${{ vars.VITE_APPLE_CLIENT_ID }}
       - run: node apps/worker/scripts/run-redacted.mjs pnpm --filter worker exec wrangler d1 migrations apply DB --env production --remote
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_PROD }}
