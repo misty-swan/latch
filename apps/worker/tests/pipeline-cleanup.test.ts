@@ -342,7 +342,7 @@ describe("DELETE /v1/intents/{id}の後始末(docs/05 §2.5)", () => {
 		expect(keptVector?.metadata.status).toBe("active");
 	});
 
-	it("ベクトル削除の失敗は500で削除全体を中止する(D1もベクトルも未削除の再試行可能状態)", async () => {
+	it("ベクトル削除の失敗はやり直しの後も続けば500で削除全体を中止する(D1もベクトルも未削除の再試行可能状態)", async () => {
 		const accessToken = await registerUser("cleanup-del-vecfail");
 		const created = await createActiveConnection(
 			accessToken,
@@ -377,16 +377,18 @@ describe("DELETE /v1/intents/{id}の後始末(docs/05 §2.5)", () => {
 			}),
 		]);
 
-		// deleteByIdsだけを1回失敗させる(Vectorize障害の模擬)
+		// deleteByIdsだけを毎回失敗させる(Vectorize障害の模擬)。やり直し(試験では待ち0)も失敗する
 		const deleteSpy = vi
 			.spyOn(memoryVectorStore(), "deleteByIds")
-			.mockRejectedValueOnce(new Error("vectorize down"));
+			.mockRejectedValue(new Error("vectorize down"));
 		const res = await SELF.fetch(`https://localhost/v1/intents/${created.id}`, {
 			method: "DELETE",
 			headers: { Authorization: `Bearer ${accessToken}` },
 		});
 		expect(res.status).toBe(500);
 		expect(((await res.json()) as ErrorResponse).error.code).toBe("INTERNAL");
+		// 最初の1回と、0.5秒・1秒の待ちのやり直し2回(LAT-126)
+		expect(deleteSpy).toHaveBeenCalledTimes(3);
 		deleteSpy.mockRestore();
 
 		// D1は一切削除されていない(再試行可能)
@@ -400,6 +402,70 @@ describe("DELETE /v1/intents/{id}の後始末(docs/05 §2.5)", () => {
 		// ベクトルも残る(削除は未遂行)
 		const [vector] = await memoryVectorStore().getByIds([created.id]);
 		expect(vector).not.toBeNull();
+	});
+
+	it("ベクトル削除の一時的な失敗は短いやり直しで吸収し、削除を続ける(LAT-126)", async () => {
+		const accessToken = await registerUser("cleanup-del-vecretry");
+		const created = await createActiveConnection(
+			accessToken,
+			"一度だけ削除が失敗する学習仲間",
+		);
+		const deleteSpy = vi
+			.spyOn(memoryVectorStore(), "deleteByIds")
+			.mockRejectedValueOnce(
+				new Error("VECTOR_DELETE_ERROR (code = 40041): Too Many Requests"),
+			);
+		const res = await SELF.fetch(`https://localhost/v1/intents/${created.id}`, {
+			method: "DELETE",
+			headers: { Authorization: `Bearer ${accessToken}` },
+		});
+		expect(res.status).toBe(204);
+		expect(deleteSpy).toHaveBeenCalledTimes(2);
+		deleteSpy.mockRestore();
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, created.id));
+		expect(row).toBeUndefined();
+	});
+
+	it("書き込みの頻度の上限(VECTOR_DELETE_40041)が続けば503と「少し待って」の文言で中止する(LAT-126)", async () => {
+		const accessToken = await registerUser("cleanup-del-vec40041");
+		const created = await createActiveConnection(
+			accessToken,
+			"上限で削除が失敗する学習仲間",
+		);
+		const deleteSpy = vi
+			.spyOn(memoryVectorStore(), "deleteByIds")
+			.mockRejectedValue(
+				new Error("VECTOR_DELETE_ERROR (code = 40041): Too Many Requests"),
+			);
+		const res = await SELF.fetch(`https://localhost/v1/intents/${created.id}`, {
+			method: "DELETE",
+			headers: { Authorization: `Bearer ${accessToken}` },
+		});
+		expect(res.status).toBe(503);
+		const body = (await res.json()) as ErrorResponse;
+		expect(body.error.code).toBe("TEMPORARILY_UNAVAILABLE");
+		expect(body.error.message).toBe(
+			"削除できませんでした。少し待ってからもう一度お試しください",
+		);
+		expect(deleteSpy).toHaveBeenCalledTimes(3);
+		deleteSpy.mockRestore();
+		// D1は未削除(上限が解けた後の再試行で完了する)
+		const [row] = await db
+			.select()
+			.from(intents)
+			.where(eq(intents.id, created.id));
+		expect(row).toBeDefined();
+		const retry = await SELF.fetch(
+			`https://localhost/v1/intents/${created.id}`,
+			{
+				method: "DELETE",
+				headers: { Authorization: `Bearer ${accessToken}` },
+			},
+		);
+		expect(retry.status).toBe(204);
 	});
 });
 

@@ -165,6 +165,30 @@ describe("Withdraw", () => {
 		).toHaveProperty("disabled", false);
 	});
 
+	it("ベクトルの削除が上限に当たったら(503)、サーバーの「少し待って」の文言を出してセッションは残す(LAT-126)", async () => {
+		withdrawResponse = () =>
+			json(
+				{
+					error: {
+						code: "TEMPORARILY_UNAVAILABLE",
+						message:
+							"退会できませんでした。少し待ってからもう一度お試しください",
+						details: {},
+					},
+				},
+				503,
+			);
+		const router = setup();
+
+		confirmAs("別の名前");
+
+		expect((await screen.findByRole("alert")).textContent).toBe(
+			"退会できませんでした。少し待ってからもう一度お試しください",
+		);
+		expect(router.state.location.pathname).toBe(PATHS.withdraw);
+		expect(authSession.accessToken).toBe("access-1");
+	});
+
 	describe("本番相当(DEV=false)", () => {
 		beforeEach(() => {
 			vi.stubEnv("DEV", false);

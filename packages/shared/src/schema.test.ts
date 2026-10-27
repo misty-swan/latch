@@ -504,7 +504,7 @@ describe("ERROR_HTTP_STATUS", () => {
 		expect(ERROR_HTTP_STATUS.INTERNAL).toBe(500);
 	});
 
-	it("14種のエラーコード全てを過不足なく網羅する", () => {
+	it("15種のエラーコード全てを過不足なく網羅する", () => {
 		expect(Object.keys(ERROR_HTTP_STATUS).sort()).toEqual(
 			[...ERROR_CODES].sort(),
 		);

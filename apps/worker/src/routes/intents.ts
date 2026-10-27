@@ -16,7 +16,8 @@
  *   notification_levelのみ(他フィールドは400 field_not_allowed)。
  *   paused/matched/expired/cancelled行は400 invalid_status
  * - DELETE /v1/intents/{id}: 削除(所有者のみ・他人は404)。後始末(docs/05 §2.5)として
- *   まずVectorizeのベクトルを即時削除(失敗時は500で削除全体を中断・D1未削除)し、
+ *   まずVectorizeのベクトルを即時削除(0.5秒・1秒の待ちで最大2回やり直し、尽きたら削除全体を
+ *   中断・D1未削除。書き込みの頻度の上限(VECTOR_DELETE_40041)なら503・それ以外は500)し、
  *   次に1対1候補・グループ候補・イベント投入記録の子行を削除してから本体を削除する
  * - POST /v1/intents/{id}/pause: 一時停止。activeのみ可(他は400 invalid_status)。
  *   status=paused・version+1。期限は変更しない。Vectorize metadataのstatusを
@@ -59,7 +60,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { type AppEnv, requireRegistered } from "../auth/middleware";
 import { anonymizeLatches, latchIdsWithIntent } from "../calibration/records";
-import { systemClock } from "../clock/clock";
+import { systemClock, systemSleep } from "../clock/clock";
 import {
 	groupCandidates,
 	intents,
@@ -97,6 +98,10 @@ import { flushPush } from "../push/dispatch";
 import { pushFlushAfterWrite } from "../push/flush-middleware";
 import { pushSenderOf } from "../push/sender";
 import { createVectorStore } from "../vectorstore";
+import {
+	deleteVectorsWithRetry,
+	isVectorDeleteRateLimited,
+} from "../vectorstore/delete-retry";
 import { syncVectorStatus } from "../vectorstore/sync-status";
 
 /** 構造化ロガー(docs/08 §6: 許可フィールドのみ)。raw_text・topic・座標は決して出力しない */
@@ -1282,9 +1287,10 @@ const logDeleteTiming = (
 /**
  * DELETE /v1/intents/{id}(削除・docs/05 §3.2)。所有者のみ・他人は404(存在を隠す)。
  * 削除の後始末(docs/05 §2.5の無条件削除): まずVectorizeのベクトルを即時削除する
- * (期限+7日の遅延ではない)。ここが失敗した場合は削除全体を中断して500 INTERNAL
- * (D1は未削除のため再試行可能)。この順序により「Intent行が消えたならベクトルも
- * 消えている」が保証され、検索可能な孤立埋め込みが残らない。逆にベクトル削除の
+ * (期限+7日の遅延ではない)。失敗したら0.5秒・1秒の待ちで最大2回やり直し(LAT-126)、尽きたら
+ * 削除全体を中断する(D1は未削除のため再試行可能)。書き込みの頻度の上限(VECTOR_DELETE_40041)は
+ * 503 TEMPORARILY_UNAVAILABLE(少し待てば通る)、それ以外は500 INTERNAL。
+ * この順序により「Intent行が消えたならベクトルも消えている」が保証され、検索可能な孤立埋め込みが残らない。逆にベクトル削除の
  * 後の子・本体削除が失敗した場合はIntent行が残るため再埋め込みで回収できる。
  * 次にmatch_candidates(intent_a/bに含む行)・group_candidates(intent_idsに含む行)・
  * match_events(当該Intentの行)を先に削除してから本体を削除する
@@ -1311,22 +1317,31 @@ intentRoutes.delete("/:id", requireRegistered, async (c) => {
 		const r = notFound();
 		return c.json(r.body, r.status);
 	}
-	// ベクトルを先に削除する(docs/05 §2.5の無条件削除)。失敗時はD1に触れず
-	// 500 INTERNALで中止する(クライアントが再試行できる)。pause/resumeの
+	// ベクトルを先に削除する(docs/05 §2.5の無条件削除)。短いやり直しの後も失敗したらD1に触れず
+	// 503(上限)か500で中止する(クライアントが再試行できる)。pause/resumeの
 	// metadata同期と違い、削除はベストエフォートにしない(孤立ベクトルは
 	// 他の評価のhitに現れたときにしか消えないため・#20の自己修復は安全網)
 	const vectorStartedAt = systemClock.now().getTime();
 	try {
-		await createVectorStore(c.env).deleteByIds([target.id]);
+		await deleteVectorsWithRetry(
+			createVectorStore(c.env),
+			[target.id],
+			systemSleep,
+		);
 	} catch (error) {
 		logger.error("intents.delete.vector_failed", {
 			intent_id: target.id,
 			error_code: errorCodeOf(error),
 		});
-		const r = errorJson(
-			"INTERNAL",
-			"削除に失敗しました。時間を置いて再度お試しください",
-		);
+		const r = isVectorDeleteRateLimited(error)
+			? errorJson(
+					"TEMPORARILY_UNAVAILABLE",
+					"削除できませんでした。少し待ってからもう一度お試しください",
+				)
+			: errorJson(
+					"INTERNAL",
+					"削除に失敗しました。時間を置いて再度お試しください",
+				);
 		return c.json(r.body, r.status);
 	} finally {
 		logDeleteTiming(target.id, "vector", vectorStartedAt);

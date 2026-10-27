@@ -2,7 +2,8 @@
  * 退会(DELETE /v1/users/me・docs/05 §2.5の「ユーザー退会時」の列・01 §21)。
  * 実行順序はIntent削除(docs/05 §2.5)と同じ考え方で、取り消せない外部の削除を先に行う:
  * (1) 本人の全Intentのベクトル(Vectorize)と(2) R2のアイコンを消す。どちらかが失敗したらD1に
- *     触れずに中断する(利用者は再試行できる。users行はactiveのまま残る)
+ *     触れずに中断する(利用者は再試行できる。users行はactiveのまま残る)。ベクトルの削除は
+ *     Intent削除と同じく0.5秒・1秒の待ちで最大2回やり直す(LAT-126)
  * (3) 本人が参加する進行中の提案(candidate・proposed・partial_accept)をcancelledで閉じる
  *     (システムの都合の取り消しとして提案履歴を消費しない・他のペアの履歴を戻すため(5)より前に行う)
  * (4) 本人が参加を続けるmatchedのLATCHから、参加取り消し(leave)と同じ処理で抜ける
@@ -19,6 +20,7 @@
 import { and, eq, inArray, isNull, like, or } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { anonymizeLatches } from "../calibration/records";
+import type { Sleep } from "../clock/clock";
 import {
 	groupCandidates,
 	intents,
@@ -44,6 +46,7 @@ import { leave } from "../latches/respond";
 import { createLogger } from "../logging/logger";
 import { errorCodeOf } from "../pipeline/errors";
 import { createVectorStore } from "../vectorstore";
+import { deleteVectorsWithRetry } from "../vectorstore/delete-retry";
 
 const logger = createLogger();
 
@@ -126,13 +129,15 @@ const mergeCancel = (a: CancelResult, b: CancelResult): CancelResult => ({
 
 /**
  * 退会の削除処理を行う。users行がactiveであることの確認と本人確認は呼び出し側(ルート)が行う。
- * 外部の削除に失敗したらWithdrawAbortedErrorを投げる(D1は未変更)
+ * 外部の削除に失敗したらWithdrawAbortedErrorを投げる(D1は未変更)。sleepはベクトルの削除の
+ * やり直しの待ち(ルートが実時間のsystemSleepを渡す)
  */
 export const withdrawUser = async (
 	env: Env,
 	db: DrizzleD1Database,
 	user: typeof users.$inferSelect,
 	now: Date,
+	sleep: Sleep,
 ): Promise<WithdrawResult> => {
 	const userId = user.id;
 	const intentIds = (
@@ -142,11 +147,11 @@ export const withdrawUser = async (
 			.where(eq(intents.userId, userId))
 	).map((r) => r.id);
 
-	// (1) ベクトルを先に消す(docs/05 §2.5の無条件削除・Intent削除と同じ)
+	// (1) ベクトルを先に消す(docs/05 §2.5の無条件削除・Intent削除と同じ)。束ごとに短くやり直す
 	try {
 		const store = createVectorStore(env);
 		for (const chunk of chunksOf(intentIds, ID_CHUNK)) {
-			await store.deleteByIds(chunk);
+			await deleteVectorsWithRetry(store, chunk, sleep);
 		}
 	} catch (error) {
 		throw new WithdrawAbortedError("vector", error);

@@ -15,6 +15,16 @@ export const systemClock: Clock = {
 	now: () => new Date(),
 };
 
+/**
+ * 指定のミリ秒だけ待つ関数(やり直しの待ち・LAT-126)。製品コードはsetTimeoutを直接呼ばず、
+ * これを受け取って待つ。単体試験は待たずに待ちの長さを記録する偽物を渡す
+ */
+export type Sleep = (ms: number) => Promise<void>;
+
+/** 実時間で待つsleep(この実装内部でのみタイマーを直接使ってよい) */
+export const systemSleep: Sleep = (ms) =>
+	new Promise((resolve) => setTimeout(resolve, ms));
+
 /** テスト用の固定時刻clock。渡された時刻をエポックミリ秒で固定し、以後常に同一時刻を返す */
 export const fixedClock = (at: Date): Clock => {
 	const fixedMs = at.getTime();

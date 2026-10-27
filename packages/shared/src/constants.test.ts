@@ -40,7 +40,7 @@ describe("CATEGORIES", () => {
 });
 
 describe("ERROR_CODES", () => {
-	it("docs/05 §3.1の14種と順不同で等しい", () => {
+	it("docs/05 §3.1の15種と順不同で等しい", () => {
 		expect([...ERROR_CODES].sort()).toEqual(
 			[
 				"UNAUTHORIZED",
@@ -57,6 +57,7 @@ describe("ERROR_CODES", () => {
 				"EMBEDDING_PENDING",
 				"INTERNAL",
 				"UPGRADE_REQUIRED",
+				"TEMPORARILY_UNAVAILABLE",
 			].sort(),
 		);
 	});
@@ -125,6 +126,7 @@ describe("PIPELINE", () => {
 			REPAIR_GRACE_MS: 600_000,
 			STAGE1_RETRY_DELAYS_S: [10, 30, 60],
 			STAGE1_UPSERT_RETRY_DELAYS_MS: [1_000, 2_000, 4_000],
+			VECTOR_DELETE_RETRY_DELAYS_MS: [500, 1_000],
 			INLINE_FALLBACK_DELAY_S: 60,
 			ORPHAN_DELETE_MAX: 10,
 			CRON_BATCH_LIMIT: 500,
@@ -206,6 +208,9 @@ describe("DEFER_REASONS", () => {
 describe("チャットの定数(F6a設計)", () => {
 	it("UPGRADE_REQUIREDは426", () => {
 		expect(ERROR_HTTP_STATUS.UPGRADE_REQUIRED).toBe(426);
+	});
+	it("TEMPORARILY_UNAVAILABLEは503(ベクトルの削除の上限・LAT-126)", () => {
+		expect(ERROR_HTTP_STATUS.TEMPORARILY_UNAVAILABLE).toBe(503);
 	});
 	it("本文上限・頁サイズ・チケット有効期間・client_id上限", () => {
 		expect(LIMITS.MESSAGE_BODY_MAX_LENGTH).toBe(2000);
